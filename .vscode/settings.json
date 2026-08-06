@@ -1,0 +1,11 @@
+{
+  // AutoHotkey v2 Language Support (thqby.vscode-autohotkey2-lsp)
+  "AutoHotkey2.InterpreterPath": "C:\\Program Files\\AutoHotkey\\v2\\AutoHotkey64.exe",
+
+  // AutoHotkey Plus Plus (mark-wiemer.vscode-autohotkey-plus-plus) — nếu dùng extension này
+  "AHK++.v2.file.interpreterPath": "C:\\Program Files\\AutoHotkey\\v2\\AutoHotkey64.exe",
+
+  "files.associations": {
+    "*.ahk": "ahk2"
+  }
+}

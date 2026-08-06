@@ -1,0 +1,6 @@
+group_name,type,enabled,note
+Nhóm Cho Thuê Quận 1,source,1,Nhóm nguồn - tin phòng Q1
+Nhóm Cho Thuê Quận 3,source,1,Nhóm nguồn - tin phòng Q3
+Nhóm Phòng Trọ Bình Thạnh,source,1,Nhóm nguồn - Bình Thạnh
+Nhóm Sale Nội Bộ,main,1,Nhóm chính - nhân viên sale
+Nhóm Test,source,0,Tắt tạm thời

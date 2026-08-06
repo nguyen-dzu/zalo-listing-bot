@@ -1,0 +1,23 @@
+# Runtime data (sensitive: owner phone numbers, audit trail)
+windows/data/listings.json
+windows/data/access_log.json
+windows/data/harvest_state.json
+
+# Runtime config (contains real group names)
+windows/config/config.ini
+windows/config/groups.csv
+windows/config/blocklist.csv
+windows/config/*.xlsx
+!windows/config/*.example.*
+
+# Compiled
+windows/dist/
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Logs
+*.log
+windows/tests/*.log

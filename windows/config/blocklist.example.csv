@@ -1,0 +1,7 @@
+keyword,match_type,enabled,note
+LOCK,contains,1,Tin đã khóa
+Chốt,contains,1,Đã chốt khách
+Đã chốt,contains,1,Đã chốt khách
+Đã cho thuê,contains,1,Hết phòng
+Hết phòng,contains,1,Hết phòng
+Ngưng,contains,1,Ngưng đăng
