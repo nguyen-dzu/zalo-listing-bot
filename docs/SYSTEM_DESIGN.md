@@ -1,23 +1,23 @@
 # System Design — Zalo Listing Bot
 
-## 1. Mục tiêu
+## 1. Goals
 
-Bot gom tin phòng từ **nhiều nhóm nguồn** trên Zalo PC, lọc bỏ tin đã chốt, lưu từng tin thành object dưới máy, rồi gộp gửi vào **nhóm chính** của mình.
+The bot collects room listings from **multiple source groups** on Zalo PC, filters out closed/deal posts, stores each post as a local JSON object, then aggregates and sends them to the **main group**.
 
-| Vế | Nội dung |
-|----|----------|
-| **Input** | Các nhóm nguồn (không phải nhóm chính), tên nhóm lấy từ file Excel/CSV. Tin gồm hình ảnh, địa chỉ, SĐT, số phòng, giá, giá điện/nước, giá dịch vụ và thông tin phòng. |
-| **Output** | Gửi vào nhóm chính: **ảnh trước**, sau đó cụm message text các tin sale. |
-| **Lưu trữ** | Mỗi tin lấy được → 1 object JSON dưới `windows/data/listings.json`. |
-| **Ngăn cách** | Mỗi nhóm nguồn ngăn nhau bằng `------------Tên Nhóm------------`. |
-| **Lọc** | Bỏ tin chứa từ khoá cấm (`LOCK`, `Chốt`, `Đã chốt`, …) đọc từ Excel/CSV. |
-| **Chỉ tin mới** | Dedupe bằng hash nội dung, lưu trong `harvest_state.json`. |
+| Aspect | Description |
+|--------|-------------|
+| **Input** | Source groups (not the main group). Group names come from Excel/CSV. Each post may include images, address, phone, room code, price, electric/water/service fees, and room details. |
+| **Output** | Main group receives **images first**, then a text message cluster of sale listings. |
+| **Storage** | Each harvested post → one JSON object under `windows/data/listings.json`. |
+| **Separation** | Each source group is separated by `------------Group Name------------`. |
+| **Filtering** | Drop posts containing banned keywords (`LOCK`, `Chốt`, `Đã chốt`, …) from Excel/CSV. |
+| **New posts only** | Dedupe by content hash, stored in `harvest_state.json`. |
 
-## 2. Phạm vi
+## 2. Scope
 
-Chỉ Windows. Toàn bộ dự án là AutoHotkey v2 điều khiển Zalo PC — không có runtime nào khác, không có thành phần server.
+Windows only. The entire project is AutoHotkey v2 controlling Zalo PC — no other runtime, no server component.
 
-## 3. Kiến trúc
+## 3. Architecture
 
 ```
                     ┌──────────────────────────┐
@@ -26,69 +26,69 @@ Chỉ Windows. Toàn bộ dự án là AutoHotkey v2 điều khiển Zalo PC —
                     └────────────┬─────────────┘
                                  │
 ┌────────────────────────────────▼────────────────────────────────┐
-│                        PC Windows (runtime)                      │
+│                        Windows PC (runtime)                      │
 │                                                                  │
-│  Nhóm nguồn 1 ┐                                                 │
-│  Nhóm nguồn 2 ├─► ZaloUIAdapter.CaptureConversationText()       │
-│  Nhóm nguồn N ┘            │                                    │
+│  Source group 1 ┐                                               │
+│  Source group 2 ├─► ZaloUIAdapter.CaptureConversationText()     │
+│  Source group N ┘            │                                  │
 │                            ▼                                    │
 │                   ListingParser.SplitBlocks()                   │
 │                            │                                    │
 │                            ▼                                    │
-│              BlockList.Match()  ──► bỏ tin cấm                  │
+│              BlockList.Match()  ──► drop blocked posts            │
 │                            │                                    │
 │                            ▼                                    │
-│              HarvestStateStore  ──► bỏ tin trùng                │
+│              HarvestStateStore  ──► drop duplicates             │
 │                            │                                    │
 │                            ▼                                    │
 │              ListingRepository.SaveListing()                    │
-│                     listings.json (object local)                │
+│                     listings.json (local objects)               │
 │                            │                                    │
 │                            ▼                                    │
 │              MessageComposer.Compose()                          │
 │                            │                                    │
 │                            ▼                                    │
-│         Nhóm chính: [ảnh] → [message có separator]              │
+│         Main group: [images] → [message with separators]        │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## 4. Luồng nghiệp vụ
+## 4. Business flows
 
-### Flow H — Thu thập (`Ctrl+Shift+H`)
+### Flow H — Harvest (`Ctrl+Shift+H`)
 
 ```
-Với mỗi nhóm type=source trong Excel:
-  OpenGroup(tên nhóm)
+For each group with type=source in Excel/CSV:
+  OpenGroup(group name)
   CaptureConversationText()          Method=manual | selectall
-  SplitBlocks()                      cắt theo dòng "Địa chỉ:", gom ảnh đứng trước
-  ├─ hash trùng      → bỏ (duplicate)
-  ├─ dính từ cấm     → bỏ (blocked), vẫn đánh dấu đã xem
-  ├─ thiếu field bắt buộc → bỏ (invalid)
-  └─ hợp lệ → SaveListing() + MarkSeen()
+  SplitBlocks()                      split on "Địa chỉ:" lines, attach preceding images
+  ├─ duplicate hash  → skip
+  ├─ blocked keyword → skip (blocked), still MarkSeen
+  ├─ missing required fields → skip (invalid)
+  └─ valid → SaveListing() + MarkSeen()
 TouchHarvest() + Save state
 ```
 
-### Flow P — Gửi nhóm chính (`Ctrl+Shift+G`)
+### Flow P — Publish to main (`Ctrl+Shift+G`)
 
 ```
-Pending() = các listing chưa published
-Compose() → chunks, mỗi chunk < MaxMessageChars
-Với mỗi nhóm type=main:
+Pending() = listings not yet published
+Compose() → chunks, each chunk < MaxMessageChars
+For each group with type=main:
   SendTextChunks()
 MarkPublished()
 ```
 
-### Flow I — Chuyển ảnh (`Ctrl+Shift+I`)
+### Flow I — Relay images (`Ctrl+Shift+I`)
 
-Ảnh phải tới nhóm chính **trước** phần text. Chọn tin ảnh trong nhóm nguồn rồi bấm hotkey; bot dùng hộp thoại **Chuyển tiếp** của Zalo (hoặc dán ảnh từ clipboard) sang mọi nhóm chính.
+Images must reach the main group **before** text. Select an image post in a source group and press the hotkey; the bot uses Zalo's **Forward** dialog (or pastes from clipboard) to every main group.
 
-Lý do tách riêng: AutoHotkey không đọc được nội dung ảnh trong Zalo, nên ảnh được **relay nguyên bản** thay vì tải về rồi gửi lại.
+Why separate: AutoHotkey cannot read image content inside Zalo, so images are **relayed as-is** rather than downloaded and re-uploaded.
 
-### Flow R — Cấp SĐT (`Ctrl+Shift+P`)
+### Flow R — Release phone (`Ctrl+Shift+P`)
 
-Bôi đen `SĐT P001` → tra `listings.json` → dán SĐT vào chat đang mở → ghi `access_log.json`.
+Select `SĐT P001` → look up `listings.json` → paste phone into active chat → write `access_log.json`.
 
-## 5. Định dạng output
+## 5. Output format
 
 ```
 ------------Nhóm Cho Thuê Quận 1------------
@@ -109,31 +109,31 @@ Bôi đen `SĐT P001` → tra `listings.json` → dán SĐT vào chat đang mở
 ...
 ```
 
-Khi vượt `MaxMessageChars`, bot cắt thành nhiều message và **in lại separator** ở đầu message tiếp theo.
+When output exceeds `MaxMessageChars`, the bot splits into multiple messages and **reprints the separator** at the start of each continuation.
 
-## 6. File Excel / CSV
+## 6. Excel / CSV files
 
-Excel được thử trước (qua COM, cần cài Excel); nếu lỗi thì fallback sang CSV.
+Excel is tried first (via COM, requires MS Excel); on failure, CSV is used as fallback.
 
 **Sheet `Groups`** — `windows/config/groups.csv`
 
 | group_name | type | enabled | note |
 |------------|------|---------|------|
-| Nhóm Cho Thuê Quận 1 | source | 1 | Nhóm nguồn |
-| Nhóm Sale Nội Bộ | main | 1 | Nhóm chính |
-| Nhóm Test | source | 0 | Tắt |
+| Nhóm Cho Thuê Quận 1 | source | 1 | Source group |
+| Nhóm Sale Nội Bộ | main | 1 | Main group |
+| Nhóm Test | source | 0 | Disabled |
 
 **Sheet `Blocklist`** — `windows/config/blocklist.csv`
 
 | keyword | match_type | enabled | note |
 |---------|------------|---------|------|
-| LOCK | contains | 1 | Tin đã khoá |
-| Đã chốt | contains | 1 | Đã chốt khách |
-| ^Ngưng | regex | 1 | Ngưng đăng |
+| LOCK | contains | 1 | Locked listing |
+| Đã chốt | contains | 1 | Deal closed |
+| ^Ngưng | regex | 1 | Stopped posting |
 
-`match_type`: `contains` (mặc định), `exact`, `word`, `regex`.
+`match_type`: `contains` (default), `exact`, `word`, `regex`.
 
-## 7. Schema object lưu local
+## 7. Local object schema
 
 `windows/data/listings.json`
 
@@ -159,11 +159,11 @@ Excel được thử trước (qua COM, cần cài Excel); nếu lỗi thì fall
 }
 ```
 
-`published: 0` nghĩa là chưa gửi vào nhóm chính; `PublishToMain()` chỉ lấy các bản ghi này.
+`published: 0` means not yet sent to the main group; `PublishToMain()` only picks up these records.
 
-`windows/data/harvest_state.json` giữ `last_harvest_at` và tối đa `MaxSeenHashes` hash mỗi nhóm.
+`windows/data/harvest_state.json` stores `last_harvest_at` and up to `MaxSeenHashes` hashes per group.
 
-## 8. Cấu trúc thư mục
+## 8. Folder structure
 
 ```
 zalo-listing-bot/
@@ -176,16 +176,16 @@ zalo-listing-bot/
     └── tests/                     # RunTests.ahk, Simulate.ahk, samples/
 ```
 
-## 9. Giới hạn đã biết
+## 9. Known limitations
 
-| Giới hạn | Cách xử lý |
-|----------|------------|
-| AHK không đọc được nội dung ảnh | Relay ảnh bằng Chuyển tiếp / clipboard |
-| Zalo không có "select all messages" chuẩn | `Method=manual`: người vận hành bôi đen tin rồi bấm hotkey |
-| Tin không theo format (thiếu "Địa chỉ:") | Bị bỏ qua; chỉnh `ListingStartPattern` cho khớp nhóm |
-| UI Zalo đổi | Chỉnh `[Timing]` trước, sau đó sửa `ZaloUI.ahk` |
-| Đọc Excel cần cài MS Excel | Dùng CSV fallback |
+| Limitation | Mitigation |
+|------------|------------|
+| AHK cannot read image content in Zalo | Relay images via Forward / clipboard |
+| Zalo has no standard "select all messages" | `Method=manual`: operator selects posts, then presses hotkey |
+| Posts not matching format (missing "Địa chỉ:") | Skipped; adjust `ListingStartPattern` for your groups |
+| Zalo UI changes | Tune `[Timing]` first, then edit `ZaloUI.ahk` |
+| Excel requires MS Excel installed | Use CSV fallback |
 
-## 10. Test
+## 10. Testing
 
-Xem [TESTING.md](TESTING.md). `windows\tests\RunTests.ahk` chạy unit test không cần Zalo; `Simulate.ahk` in ra chính xác message bot sẽ gửi từ file mẫu.
+See [TESTING.md](TESTING.md). `windows\tests\RunTests.ahk` runs unit tests without Zalo; `Simulate.ahk` prints the exact message the bot would send from sample files.

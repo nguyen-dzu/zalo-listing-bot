@@ -5,8 +5,8 @@
 - Windows 10/11
 - AutoHotkey v2 (64-bit)
 - Zalo PC
-- Tài khoản Zalo riêng cho bot, đã tham gia **mọi nhóm nguồn và nhóm chính**
-- MS Excel (tuỳ chọn — không có thì dùng CSV)
+- Dedicated Zalo account for the bot, joined in **every source and main group**
+- MS Excel (optional — use CSV if Excel is not installed)
 
 ## First run
 
@@ -15,25 +15,25 @@ cd zalo-listing-bot
 "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe" windows\src\Bot.ahk
 ```
 
-Lần chạy đầu bot tự tạo từ file example:
+On first run the bot creates from example files:
 
 - `windows\config\config.ini`
 - `windows\config\groups.csv`
 - `windows\config\blocklist.csv`
 
-Sửa `groups.csv` cho khớp tên nhóm thật rồi bấm `Ctrl+Shift+R` để nạp lại.
+Edit `groups.csv` to match real group names, then press `Ctrl+Shift+R` to reload.
 
 ## Daily operation
 
 ```
-1. Mở Zalo PC, mở nhóm nguồn
-2. Bôi đen các tin mới          (Capture Method=manual)
-3. Ctrl+Shift+H                 thu thập + lưu object
-4. Chọn tin có ảnh → Ctrl+Shift+I   chuyển ảnh sang nhóm chính
-5. Ctrl+Shift+G                 gửi cụm message text
+1. Open Zalo PC, open a source group
+2. Select new posts              (Capture Method=manual)
+3. Ctrl+Shift+H                  harvest + save objects
+4. Select posts with images → Ctrl+Shift+I   relay images to main group
+5. Ctrl+Shift+G                  send text message cluster
 ```
 
-Muốn ít thao tác hơn: đặt `[Capture] Method=selectall` rồi dùng `Ctrl+Shift+J` (thu thập + gửi trong một lần).
+For fewer steps: set `[Capture] Method=selectall` and use `Ctrl+Shift+J` (harvest + publish in one action).
 
 ## Compile to EXE
 
@@ -42,21 +42,21 @@ mkdir windows\dist
 Ahk2Exe /in windows\src\Bot.ahk /out windows\dist\ZaloListingBot.exe
 ```
 
-`Bot.ahk` dùng `#Include` tương đối nên Ahk2Exe gói toàn bộ module vào một file.
+`Bot.ahk` uses relative `#Include` paths, so Ahk2Exe bundles all modules into one file.
 
 ## Auto-start
 
 1. Win+R → `shell:startup`
-2. Tạo shortcut tới `ZaloListingBot.exe`
-3. Đảm bảo Zalo PC cũng khởi động cùng Windows
+2. Create a shortcut to `ZaloListingBot.exe`
+3. Ensure Zalo PC also starts with Windows
 
 ## UI automation notes
 
-`ZaloUIAdapter` chỉ dùng:
+`ZaloUIAdapter` only uses:
 
-1. `WinActivate` theo `ahk_exe Zalo.exe`
-2. `Ctrl+F` → gõ tên nhóm → `Enter`
-3. `Ctrl+C` để copy hội thoại, `Ctrl+V` + `Enter` để gửi
-4. `[Images] ForwardHotkey` (mặc định `^q`) để mở hộp thoại Chuyển tiếp
+1. `WinActivate` on `ahk_exe Zalo.exe`
+2. `Ctrl+F` → type group name → `Enter`
+3. `Ctrl+C` to copy conversation, `Ctrl+V` + `Enter` to send
+4. `[Images] ForwardHotkey` (default `^q`) to open the Forward dialog
 
-Khi Zalo cập nhật giao diện: chỉnh `[Timing]` trước, sau đó mới sửa `ZaloUI.ahk`. Riêng `ForwardHotkey` phải khớp phím tắt Chuyển tiếp của phiên bản Zalo đang dùng.
+When Zalo updates its UI: tune `[Timing]` first, then edit `ZaloUI.ahk`. The `ForwardHotkey` must match the Forward shortcut in your Zalo version.

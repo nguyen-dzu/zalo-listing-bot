@@ -38,27 +38,27 @@ Task Progress:
 
 | Hotkey | Method | Flow |
 |--------|--------|------|
-| `Ctrl+Shift+H` | `HarvestAll()` | Duyệt mọi nhóm `type=source`, lọc, lưu object local |
-| `Ctrl+Shift+G` | `PublishToMain()` | Gộp tin chưa gửi → gửi mọi nhóm `type=main` |
-| `Ctrl+Shift+J` | `HarvestAndPublish()` | Chạy cả hai |
-| `Ctrl+Shift+I` | `RelayImages()` | Chuyển ảnh đang chọn sang nhóm chính (**gửi trước text**) |
-| `Ctrl+Shift+B` | `ForwardListingFromClipboard()` | Chuyển thủ công 1 tin đang bôi đen |
-| `Ctrl+Shift+P` | `ReleasePhoneFromClipboard()` | Trả SĐT theo mã phòng + ghi audit |
-| `Ctrl+Shift+R` | `Reload()` | Nạp lại config + Excel, không restart |
+| `Ctrl+Shift+H` | `HarvestAll()` | Iterate all `type=source` groups, filter, save local objects |
+| `Ctrl+Shift+G` | `PublishToMain()` | Merge unpublished posts → send to all `type=main` groups |
+| `Ctrl+Shift+J` | `HarvestAndPublish()` | Run both |
+| `Ctrl+Shift+I` | `RelayImages()` | Relay selected images to main group (**send before text**) |
+| `Ctrl+Shift+B` | `ForwardListingFromClipboard()` | Manually forward one selected listing |
+| `Ctrl+Shift+P` | `ReleasePhoneFromClipboard()` | Release phone by room code + audit log |
+| `Ctrl+Shift+R` | `Reload()` | Reload config + Excel/CSV, no restart |
 
 ### Harvest pipeline (Flow H)
 
 ```
 OpenGroup → CaptureConversationText → SplitBlocks
-  → hash trùng?        bỏ (duplicate)
-  → BlockList.Match?   bỏ (blocked) nhưng vẫn MarkSeen
-  → Validate thiếu?    bỏ (invalid)
+  → duplicate hash?   skip
+  → BlockList.Match?  skip (blocked) but still MarkSeen
+  → Validate fail?    skip (invalid)
   → SaveListing + MarkSeen
 ```
 
-`SplitBlocks` cắt theo dòng `Địa chỉ:` và **gom các marker ảnh đứng ngay trước** vào tin phía sau, vì Zalo hiển thị ảnh trước text của cùng một bài. Dòng tên người gửi kèm giờ (`Minh Anh 18:05`) bị cắt khỏi hai đầu block.
+`SplitBlocks` splits on `Địa chỉ:` lines and **attaches image markers immediately before** each post, because Zalo shows images before the text of the same message. Sender/time header lines (`Minh Anh 18:05`) are stripped from both ends of each block.
 
-Ảnh được relay nguyên bản qua hộp thoại Chuyển tiếp hoặc clipboard — AutoHotkey không đọc được nội dung ảnh trong Zalo, nên không tải về rồi gửi lại.
+Images are relayed as-is via the Forward dialog or clipboard — AutoHotkey cannot read image content inside Zalo, so download-and-reupload is not supported.
 
 ### Output format
 
@@ -74,17 +74,17 @@ OpenGroup → CaptureConversationText → SplitBlocks
 📞 Số chủ: Nhắn bot "SĐT P001" để lấy số
 ```
 
-Vượt `MaxMessageChars` → cắt chunk và in lại separator ở message mới.
+Exceeds `MaxMessageChars` → split into chunks and reprint separator on each new message.
 
 ## Parsed fields
 
-`address`, `room_code`, `price`, `electric_price`, `water_price`, `utility_price` (gộp "Điện nước"), `service_price`, `owner_phone`, `info`, `extra_info`, `image_count`.
+`address`, `room_code`, `price`, `electric_price`, `water_price`, `utility_price` (merged "Điện nước"), `service_price`, `owner_phone`, `info`, `extra_info`, `image_count`.
 
-**Thứ tự `ListingParser.RULES` là bắt buộc:** nhãn cụ thể trước nhãn chung — `Giá điện` phải đứng trước `Giá`, nếu không dòng giá điện sẽ bị hiểu thành giá phòng.
+**`ListingParser.RULES` order is mandatory:** specific labels before generic ones — `Giá điện` must come before `Giá`, otherwise electric price lines are parsed as room price.
 
 ## Excel / CSV schema
 
-Excel thử trước qua COM; lỗi hoặc máy không có Excel thì fallback CSV. Header được lowercase.
+Excel is tried first via COM; on failure or missing Excel, CSV is used. Headers are lowercased.
 
 **Groups:** `group_name`, `type` (`source`|`main`), `enabled`, `note`
 **Blocklist:** `keyword`, `match_type` (`contains`|`exact`|`word`|`regex`), `enabled`, `note`
@@ -94,21 +94,21 @@ Excel thử trước qua COM; lỗi hoặc máy không có Excel thì fallback C
 | Section | Key | Default | Purpose |
 |---------|-----|---------|---------|
 | Zalo | ExeName | Zalo.exe | Process name |
-| Groups | GroupsXlsx / GroupsCsv | config\… | Bảng nhóm |
-| Groups | BlocklistXlsx / BlocklistCsv | config\… | Bảng từ khoá cấm |
+| Groups | GroupsXlsx / GroupsCsv | config\… | Group table |
+| Groups | BlocklistXlsx / BlocklistCsv | config\… | Blocklist table |
 | Capture | Method | manual | `manual` \| `selectall` |
-| Capture | ListingStartPattern | (mặc định "Địa chỉ:") | Regex mở đầu 1 tin |
-| Capture | ImageMarkerPattern | (mặc định `[Hình ảnh]`) | Nhận diện ảnh |
-| Capture | MaxMessagesPerGroup | 50 | Trần mỗi lần thu thập |
-| Capture | RequiredFields | address,price,owner_phone | Field bắt buộc |
-| Output | Separator | `------------{group}------------` | Ngăn cách nhóm |
-| Output | MaxMessageChars | 1800 | Ngưỡng cắt chunk |
-| Output | MaskPhone | 1 | Che SĐT trong nhóm chính |
+| Capture | ListingStartPattern | (default "Địa chỉ:") | Regex starting one listing |
+| Capture | ImageMarkerPattern | (default `[Hình ảnh]`) | Image marker detection |
+| Capture | MaxMessagesPerGroup | 50 | Cap per harvest run |
+| Capture | RequiredFields | address,price,owner_phone | Required fields |
+| Output | Separator | `------------{group}------------` | Group separator |
+| Output | MaxMessageChars | 1800 | Chunk split threshold |
+| Output | MaskPhone | 1 | Mask phone in main group |
 | Images | Strategy | forward | `forward` \| `clipboard` \| `off` |
-| Timing | SearchDelayMs … | 400… | Hiệu chỉnh khi Zalo chậm |
-| State | MaxSeenHashes | 500 | Số hash nhớ mỗi nhóm |
+| Timing | SearchDelayMs … | 400… | Tune when Zalo is slow |
+| State | MaxSeenHashes | 500 | Hashes remembered per group |
 
-**Rule:** không hardcode tên nhóm, delay, từ khoá trong code — luôn qua `AppConfig.Instance()`.
+**Rule:** do not hardcode group names, delays, or keywords in code — always use `AppConfig.Instance()`.
 
 ## Folder structure
 
@@ -120,15 +120,15 @@ windows/
 │   ├── Util.ahk         # StrJoin, FnvHash, file IO
 │   ├── JSON.ahk         # Encode/decode
 │   ├── TableLoader.ahk  # Excel COM + CSV (Strategy)
-│   ├── GroupRegistry.ahk# Nhóm source/main (Repository)
-│   ├── BlockList.ahk    # Từ khoá cấm (Specification)
+│   ├── GroupRegistry.ahk# Source/main groups (Repository)
+│   ├── BlockList.ahk    # Blocklist (Specification)
 │   ├── Parser.ahk       # Text ↔ object (Strategy)
 │   ├── Storage.ahk      # listings.json (Repository)
 │   ├── StateStore.ahk   # harvest_state.json (Repository)
-│   ├── Composer.ahk     # Cụm message (Builder)
-│   ├── Harvester.ahk    # Vòng thu thập (Service)
-│   └── ZaloUI.ahk       # Thao tác Zalo PC (Adapter)
-├── config/              # .ini + .csv (bản .example.* được commit)
+│   ├── Composer.ahk     # Message cluster (Builder)
+│   ├── Harvester.ahk    # Harvest loop (Service)
+│   └── ZaloUI.ahk       # Zalo PC operations (Adapter)
+├── config/              # .ini + .csv (.example.* committed)
 ├── data/                # JSON runtime (gitignored)
 └── tests/               # RunTests.ahk, Simulate.ahk, run-tests.cmd, samples/
 ```
@@ -148,7 +148,7 @@ windows/
 windows\tests\run-tests.cmd
 ```
 
-Sample dumps live in `windows\tests\samples\<Tên Nhóm>.txt`, named exactly as in `groups.csv`.
+Sample dumps live in `windows\tests\samples\<Group Name>.txt`, named exactly as in `groups.csv`.
 `RunTests.ahk` exits with code 1 on failure; `Simulate.ahk` prints the exact message the bot would send.
 
 ## Extension guidelines

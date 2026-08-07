@@ -55,9 +55,9 @@ code    := ListingParser.ParsePhoneRequest("SĐT P001")
 ```autohotkey
 repo := ListingRepository(cfg)
 repo.SaveListing(listing, sourceGroup, hash)
-repo.Pending()                    ; chưa published
+repo.Pending()                    ; not yet published
 repo.MarkPublished([id1, id2])
-repo.GetByRoomCode("P001")        ; bản ghi mới nhất
+repo.GetByRoomCode("P001")        ; latest record
 repo.LogPhoneAccess("P001", requestText)
 ```
 
@@ -155,13 +155,13 @@ JSON.Parse(text)
 
 | Symptom | Fix |
 |---------|-----|
-| Bot không tìm nhóm | `group_name` phải khớp tên hiển thị khi search trong Zalo |
-| Không tách được tin | Nhóm dùng nhãn khác — chỉnh `[Capture] ListingStartPattern` |
-| Ảnh gán nhầm tin | Chỉnh `[Capture] ImageMarkerPattern` cho khớp text Zalo copy ra |
-| Gửi tin sai chỗ | Tăng `OpenChatDelayMs`, `BetweenMessagesMs` |
-| Tất cả tin thành "Trùng" | Xoá `windows\data\harvest_state.json` để reset con trỏ |
-| Excel không đọc được | Máy chưa cài MS Excel → dùng CSV |
-| Tin hợp lệ bị chặn oan | Kiểm tra `blocklist.csv`, đổi `match_type` sang `word` |
+| Bot cannot find group | `group_name` must match the name shown when searching in Zalo |
+| Posts not splitting | Group uses different labels — adjust `[Capture] ListingStartPattern` |
+| Images assigned to wrong post | Adjust `[Capture] ImageMarkerPattern` to match Zalo copy text |
+| Messages sent to wrong chat | Increase `OpenChatDelayMs`, `BetweenMessagesMs` |
+| All posts marked Duplicate | Delete `windows\data\harvest_state.json` to reset cursor |
+| Excel not loading | MS Excel not installed → use CSV |
+| Valid posts blocked incorrectly | Check `blocklist.csv`, change `match_type` to `word` |
 
 ## Tests
 
@@ -169,4 +169,4 @@ JSON.Parse(text)
 windows\tests\run-tests.cmd
 ```
 
-`RunTests.ahk` dùng class `TestConfig` giả lập — chỉ khai báo các property mà lớp đang test thực sự đọc, nên không cần `config.ini`. Thêm test mới thì gọi `Check(name, condition, detail)`.
+`RunTests.ahk` uses a `TestConfig` stub — only properties actually read by the class under test, so no `config.ini` is required. Add new tests by calling `Check(name, condition, detail)`.
