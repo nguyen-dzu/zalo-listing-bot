@@ -10,33 +10,27 @@
 #Include ../src/BlockList.ahk
 #Include ../src/Parser.ahk
 #Include ../src/Composer.ahk
+#Include TestLog.ahk
+
+InitTestLog("RunTests.log")
 
 TestsFailed := []
 TestsRun := 0
-; AHK là app GUI-subsystem nên stdout có thể không hiện trên console — ghi kèm log file.
-LogPath := A_ScriptDir "\RunTests.log"
-try FileDelete LogPath
-
-Out(text := "") {
-    global LogPath
-    try FileAppend text "`n", "*"
-    FileAppend text "`n", LogPath, "UTF-8-RAW"
-}
 
 Check(name, condition, detail := "") {
     global TestsRun, TestsFailed
     TestsRun++
     if condition {
-        Out("PASS  " name)
+        TestLog("PASS  " name)
     } else {
-        Out("FAIL  " name (detail != "" ? " — " detail : ""))
+        TestLog("FAIL  " name (detail != "" ? " — " detail : ""))
         TestsFailed.Push(name)
     }
 }
 
 Section(name) {
-    Out("")
-    Out("[" name "]")
+    TestLog("")
+    TestLog("[" name "]")
 }
 
 ; Cấu hình giả lập, chỉ chứa những property các class dưới test thực sự dùng.
@@ -213,10 +207,10 @@ Check("giữ nguyên số", decoded["image_count"] = 2)
 Check("giữ nguyên mảng", decoded["tags"].Length = 2)
 
 ; ── Kết quả ───────────────────────────────────────────────
-Out("")
+TestLog("")
 if TestsFailed.Length {
-    Out(TestsFailed.Length "/" TestsRun " test THẤT BẠI: " StrJoin(TestsFailed, ", "))
+    TestLog(TestsFailed.Length "/" TestsRun " test THẤT BẠI: " StrJoin(TestsFailed, ", "))
     ExitApp 1
 }
-Out("Tất cả " TestsRun " test đã pass.")
+TestLog("Tất cả " TestsRun " test đã pass.")
 ExitApp 0

@@ -1,84 +1,83 @@
 # Testing — Zalo Listing Bot (Windows)
 
-Toàn bộ test chạy trên Windows bằng AutoHotkey v2. Hai tầng: test logic (không cần Zalo) và test end-to-end (cần Zalo PC).
+All tests run on Windows with AutoHotkey v2. Two tiers: logic tests (no Zalo) and end-to-end tests (requires Zalo PC).
 
-## Tầng 1 — Test logic, không cần Zalo
+## Tier 1 — Logic tests, no Zalo required
 
 ```cmd
 windows\tests\run-tests.cmd
 ```
 
-Hoặc chạy riêng:
+Or run individually:
 
 ```cmd
 "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe" windows\tests\RunTests.ahk
 type windows\tests\RunTests.log
 ```
 
-AutoHotkey là app GUI-subsystem nên output ra console có thể không hiện. Vì vậy cả hai script
-ghi kết quả ra `RunTests.log` / `Simulate.log` cạnh script; `run-tests.cmd` tự `type` các file này.
+AutoHotkey is a GUI-subsystem app, so console output may not appear. Both scripts write results to `RunTests.log` / `Simulate.log` next to the script; `run-tests.cmd` automatically `type`s those files.
 
 ### RunTests.ahk
 
-Kiểm tra: parse 9 trường, ưu tiên `Giá điện` trước `Giá`, gộp `Điện nước`, dò SĐT trong text tự do, che SĐT ở output, tách tin và gán ảnh đúng tin, marker ảnh không lọt vào text, blocklist, group registry, separator, cắt chunk, hash dedupe, nhận mã phòng `Q3-15`, JSON round-trip.
+Covers: parsing 9 fields, `Giá điện` before `Giá` priority, merging `Điện nước`, phone detection in free text, phone masking in output, block splitting and image assignment, image markers excluded from text, blocklist, group registry, separators, chunk splitting, hash dedupe, room code `Q3-15`, JSON round-trip.
 
-Exit code `1` nếu có test fail.
+Exit code `1` if any test fails.
 
 ### Simulate.ahk
 
-Chạy thử chu trình harvest → publish bằng file mẫu, in ra **chính xác** message bot sẽ gửi. Không đụng Zalo, không lưu gì.
+Runs harvest → publish using sample files and prints the **exact** message the bot would send. Does not touch Zalo or persist data.
 
-Mỗi tin được đánh dấu `[LƯU]`, `[CẤM]`, `[TRÙNG]` hoặc `[THIẾU]`.
+Each post is tagged `[SAVED]`, `[BLOCKED]`, `[DUPLICATE]`, or `[INVALID]`.
 
-### Tạo dữ liệu test từ Zalo thật
+### Creating test data from real Zalo
 
-1. Mở nhóm nguồn trên Zalo, bôi đen các tin gần nhất, copy
-2. Tạo file `windows\tests\samples\<Tên nhóm đúng như trong groups.csv>.txt`, dán vào
-3. Chạy lại `Simulate.ahk`
+1. Open a source group in Zalo, select recent posts, copy
+2. Create `windows\tests\samples\<Group name exactly as in groups.csv>.txt` and paste
+3. Re-run `Simulate.ahk`
 
-Script đọc `windows\config\groups.csv` để biết nhóm nào `source`, nhóm nào `main`, và `blocklist.csv` để biết từ khoá cấm. Chưa có file runtime thì nó dùng bản `.example.`.
+The script reads `windows\config\groups.csv` for `source` / `main` groups and `blocklist.csv` for banned keywords. If runtime config files are missing, it falls back to `.example.*` files.
 
 ---
 
-## Tầng 2 — End-to-end với Zalo PC
+## Tier 2 — End-to-end with Zalo PC
 
-### Chuẩn bị
+### Setup
 
-1. Cài [AutoHotkey v2](https://www.autohotkey.com/)
-2. Cài Zalo PC, đăng nhập **tài khoản bot**
-3. Thêm tài khoản bot vào tất cả nhóm nguồn + nhóm chính
-4. Chạy `windows\src\Bot.ahk` một lần — bot tự tạo `config.ini`, `groups.csv`, `blocklist.csv`
-5. Sửa `windows\config\groups.csv`: tên nhóm phải **khớp chính xác** tên hiển thị trên Zalo
-6. Bấm `Ctrl+Shift+R` để nạp lại
+1. Install [AutoHotkey v2](https://www.autohotkey.com/)
+2. Install Zalo PC, log in with the **bot account**
+3. Add the bot account to all source and main groups
+4. Run `windows\src\Bot.ahk` once — the bot creates `config.ini`, `groups.csv`, `blocklist.csv`
+5. Edit `windows\config\groups.csv`: group names must **exactly match** names shown in Zalo search
+6. Press `Ctrl+Shift+R` to reload
 
-### Test case
+### Test cases
 
-| # | Bước | Kỳ vọng |
-|---|------|---------|
-| 1 | Chạy `Bot.ahk` | TrayTip hiện đúng số nhóm nguồn / nhóm chính |
-| 2 | Sửa `groups.csv` → `Ctrl+Shift+R` | TrayTip báo số nhóm mới, không cần restart |
-| 3 | Mở nhóm nguồn, bôi đen vài tin → `Ctrl+Shift+H` | TrayTip: `Mới: n \| Cấm: n \| Trùng: n` |
-| 4 | Xem `windows\data\listings.json` | Object đủ trường, `published: 0` |
-| 5 | Bấm `Ctrl+Shift+H` lần nữa cùng tin đó | Tất cả vào `Trùng`, không lưu thêm |
-| 6 | Chọn tin có ảnh → `Ctrl+Shift+I` | Ảnh xuất hiện ở nhóm chính |
-| 7 | `Ctrl+Shift+G` | Nhóm chính nhận message có separator `------------Tên Nhóm------------` |
-| 8 | Xem lại `listings.json` | `published: 1`, có `published_at` |
-| 9 | Gõ `SĐT P001`, bôi đen → `Ctrl+Shift+P` | Bot dán SĐT, ghi `access_log.json` |
+| # | Step | Expected |
+|---|------|----------|
+| 1 | Run `Bot.ahk` | TrayTip shows correct source / main group counts |
+| 2 | Edit `groups.csv` → `Ctrl+Shift+R` | TrayTip shows new counts, no restart needed |
+| 3 | Open source group, select posts → `Ctrl+Shift+H` | TrayTip: `New: n \| Blocked: n \| Duplicate: n` |
+| 4 | Check `windows\data\listings.json` | Objects have all fields, `published: 0` |
+| 5 | Press `Ctrl+Shift+H` again on same posts | All counted as Duplicate, nothing new saved |
+| 6 | Select post with images → `Ctrl+Shift+I` | Images appear in main group |
+| 7 | `Ctrl+Shift+G` | Main group receives message with `------------Group Name------------` separators |
+| 8 | Check `listings.json` again | `published: 1`, has `published_at` |
+| 9 | Type `SĐT P001`, select → `Ctrl+Shift+P` | Bot pastes phone, writes `access_log.json` |
 
-### Test case lỗi
+### Error test cases
 
-| Tình huống | Kỳ vọng |
-|------------|---------|
-| Tin chứa `Đã chốt` | Đếm vào `Cấm`, không vào nhóm chính |
-| Tin thiếu `Địa chỉ:` | Không tách thành tin, bỏ qua |
-| Tin thiếu SĐT | Đếm vào `Thiếu field` |
-| `groups.csv` không có dòng `type=main` | TrayTip "Thiếu nhóm chính" |
-| Zalo chưa mở | TrayTip lỗi, bot không treo |
-| Không có tin mới → `Ctrl+Shift+G` | TrayTip "Không có tin mới" |
+| Scenario | Expected |
+|----------|----------|
+| Post contains `Đã chốt` | Counted as Blocked, not sent to main group |
+| Post missing `Địa chỉ:` | Not split into a listing, skipped |
+| Post missing phone | Counted as Invalid (missing fields) |
+| `groups.csv` has no `type=main` row | TrayTip "Missing main group" |
+| Zalo not running | TrayTip error, bot does not hang |
+| No new posts → `Ctrl+Shift+G` | TrayTip "No new posts" |
 
-### Hiệu chỉnh khi Zalo chạy chậm
+### Tuning when Zalo is slow
 
-Tăng dần trong `windows\config\config.ini`:
+Increase gradually in `windows\config\config.ini`:
 
 ```ini
 [Timing]
@@ -89,17 +88,17 @@ BetweenMessagesMs=1500
 
 ---
 
-## Workflow dev
+## Dev workflow
 
 ```
-1. Sửa code trong windows\src\
-2. windows\tests\run-tests.cmd          → unit test phải xanh
-3. Xem output của Simulate.ahk          → đúng format mong muốn chưa
-4. Chạy Bot.ahk, test case tầng 2
-5. Chỉnh [Timing] nếu Zalo phản hồi chậm
+1. Edit code in windows\src\
+2. windows\tests\run-tests.cmd          → unit tests must pass
+3. Review Simulate.ahk output           → verify expected format
+4. Run Bot.ahk, tier-2 test cases
+5. Adjust [Timing] if Zalo responds slowly
 ```
 
-Thêm trường mới hoặc đổi format output thì **phải bổ sung test tương ứng** trong `RunTests.ahk`.
+When adding a field or changing output format, **add corresponding tests** in `RunTests.ahk`.
 
 ---
 

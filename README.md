@@ -1,15 +1,15 @@
 # Zalo Listing Bot
 
-Bot gom tin phòng từ **nhiều nhóm nguồn** trên Zalo PC (Windows + AutoHotkey v2), lọc bỏ tin đã chốt, lưu từng tin thành object dưới máy, rồi gửi **ảnh trước, cụm message sau** vào nhóm chính.
+Bot that collects room listings from **multiple source groups** on Zalo PC (Windows + AutoHotkey v2), filters out closed/deal posts, stores each post as a local JSON object, then sends **images first, message cluster second** to the main group.
 
 ```
-Nhóm nguồn 1 ┐
-Nhóm nguồn 2 ├─► lọc từ khoá cấm ─► lưu object local ─► Nhóm chính
-Nhóm nguồn N ┘                                          [ảnh] + [message]
+Source group 1 ┐
+Source group 2 ├─► blocklist filter ─► save local object ─► Main group
+Source group N ┘                                          [images] + [message]
 ```
 
-Tên nhóm và từ khoá cấm đọc từ file **Excel/CSV**; mỗi nhóm trong message ngăn nhau bằng
-`------------Tên Nhóm------------`.
+Group names and banned keywords are read from **Excel/CSV** files; each source group in the output is separated by
+`------------Group Name------------`.
 
 ## Quick start (Windows)
 
@@ -17,27 +17,26 @@ Tên nhóm và từ khoá cấm đọc từ file **Excel/CSV**; mỗi nhóm tron
 "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe" windows\src\Bot.ahk
 ```
 
-Lần đầu chạy bot tự tạo `config.ini`, `groups.csv`, `blocklist.csv`. Sửa `groups.csv` cho khớp
-tên nhóm thật rồi bấm `Ctrl+Shift+R`.
+On first run the bot creates `config.ini`, `groups.csv`, and `blocklist.csv`. Edit `groups.csv` to match your real Zalo group names, then press `Ctrl+Shift+R`.
 
-| Hotkey | Chức năng |
-|--------|-----------|
-| `Ctrl+Shift+H` | Thu thập tin mới từ mọi nhóm nguồn |
-| `Ctrl+Shift+I` | Chuyển ảnh đang chọn sang nhóm chính (gửi trước text) |
-| `Ctrl+Shift+G` | Gửi cụm message vào nhóm chính |
-| `Ctrl+Shift+J` | Thu thập + gửi |
-| `Ctrl+Shift+B` | Chuyển thủ công 1 tin đang bôi đen |
-| `Ctrl+Shift+P` | Cấp SĐT theo mã phòng |
-| `Ctrl+Shift+R` | Nạp lại config + Excel |
+| Hotkey | Action |
+|--------|--------|
+| `Ctrl+Shift+H` | Harvest new posts from all source groups |
+| `Ctrl+Shift+I` | Relay selected images to main group (send before text) |
+| `Ctrl+Shift+G` | Publish composed message cluster to main group |
+| `Ctrl+Shift+J` | Harvest + publish |
+| `Ctrl+Shift+B` | Manually forward one selected listing |
+| `Ctrl+Shift+P` | Release phone number by room code |
+| `Ctrl+Shift+R` | Reload config + Excel/CSV |
 
-## Cấu hình
+## Configuration
 
 `windows/config/groups.csv`
 
 | group_name | type | enabled | note |
 |------------|------|---------|------|
-| Nhóm Cho Thuê Quận 1 | source | 1 | Nhóm nguồn |
-| Nhóm Sale Nội Bộ | main | 1 | Nhóm chính |
+| Nhóm Cho Thuê Quận 1 | source | 1 | Source group |
+| Nhóm Sale Nội Bộ | main | 1 | Main group |
 
 `windows/config/blocklist.csv`
 
@@ -46,50 +45,50 @@ tên nhóm thật rồi bấm `Ctrl+Shift+R`.
 | LOCK | contains | 1 |
 | Đã chốt | contains | 1 |
 
-Có thể thay bằng `zalo-groups.xlsx` với 2 sheet `Groups` / `Blocklist`.
+You can use `zalo-groups.xlsx` instead, with sheets `Groups` and `Blocklist`.
 
-## Test (không cần Zalo)
+## Test (no Zalo required)
 
 ```cmd
 windows\tests\run-tests.cmd
 ```
 
-`RunTests.ahk` chạy unit test cho Parser / BlockList / Composer / JSON.
-`Simulate.ahk` in ra **chính xác** message bot sẽ gửi, dựa trên file mẫu trong
+`RunTests.ahk` runs unit tests for Parser / BlockList / Composer / JSON.
+`Simulate.ahk` prints the **exact** message the bot would send, based on sample files in
 `windows\tests\samples\`.
 
-Chi tiết: [docs/TESTING.md](docs/TESTING.md)
+Details: [docs/TESTING.md](docs/TESTING.md)
 
-## Yêu cầu
+## Requirements
 
 - Windows 10/11
-- [AutoHotkey v2](https://www.autohotkey.com/) — cài bản **v2**, không phải v1
-- Zalo PC, đăng nhập tài khoản bot đã ở trong mọi nhóm nguồn và nhóm chính
-- MS Excel (tuỳ chọn — không có thì dùng CSV)
+- [AutoHotkey v2](https://www.autohotkey.com/) — install **v2**, not v1
+- Zalo PC, logged in with a bot account that is already in every source and main group
+- MS Excel (optional — use CSV if Excel is not installed)
 
-### Cấu hình Cursor / VS Code (Windows)
+### Cursor / VS Code setup (Windows)
 
-Sau khi cài AutoHotkey v2, mở **Settings** (`Ctrl+,`) → tìm `AutoHotkey2: Interpreter Path` và đặt:
+After installing AutoHotkey v2, open **Settings** (`Ctrl+,`) → search `AutoHotkey2: Interpreter Path` and set:
 
 ```
 C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe
 ```
 
-Project đã có sẵn trong `.vscode/settings.json`. Nếu AHK cài chỗ khác, sửa đường dẫn cho khớp.
+The project already includes this in `.vscode/settings.json`. If AHK is installed elsewhere, update the path accordingly.
 
-Kiểm tra nhanh trong PowerShell:
+Quick check in PowerShell:
 
 ```powershell
 Test-Path "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
 ```
 
-Trả về `True` là đúng. Nếu `False`, tìm file thật:
+Returns `True` if correct. If `False`, locate the actual executable:
 
 ```powershell
 Get-ChildItem "C:\Program Files\AutoHotkey" -Recurse -Filter "AutoHotkey*.exe"
 ```
 
-**Lưu ý:** AutoHotkey **không chạy trên macOS**. Mở project trên Mac vẫn sửa code được, nhưng Run/Debug `.ahk` phải làm trên máy Windows.
+**Note:** AutoHotkey **does not run on macOS**. You can edit code on a Mac, but Run/Debug for `.ahk` files must be done on Windows.
 
 ## Docs
 

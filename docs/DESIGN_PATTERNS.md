@@ -1,22 +1,22 @@
 # Design Patterns — Zalo Listing Bot
 
-Mỗi class giữ đúng một trách nhiệm. Khi thêm tính năng, tìm đúng lớp thay vì nhét vào `Bot.ahk`.
+Each class has a single responsibility. When adding features, find the right layer instead of stuffing logic into `Bot.ahk`.
 
-| Pattern | Class | File | Trách nhiệm |
-|---------|-------|------|-------------|
-| Singleton | `AppConfig` | Config.ahk | Đọc mọi biến từ `config.ini` |
-| Strategy | `TableLoader` | TableLoader.ahk | Đọc bảng từ Excel COM, fallback CSV |
-| Repository | `GroupRegistry` | GroupRegistry.ahk | Danh sách nhóm nguồn / nhóm chính |
-| Specification | `BlockList` | BlockList.ahk | Quyết định tin có bị cấm không |
+| Pattern | Class | File | Responsibility |
+|---------|-------|------|----------------|
+| Singleton | `AppConfig` | Config.ahk | Read all variables from `config.ini` |
+| Strategy | `TableLoader` | TableLoader.ahk | Load tables from Excel COM, fallback to CSV |
+| Repository | `GroupRegistry` | GroupRegistry.ahk | Source / main group lists |
+| Specification | `BlockList` | BlockList.ahk | Decide whether a post is blocked |
 | Strategy | `ListingParser` | Parser.ahk | Text → object, object → text |
-| Repository | `ListingRepository` | Storage.ahk | Lưu/đọc object + audit log |
-| Repository | `HarvestStateStore` | StateStore.ahk | Con trỏ thu thập, hash đã xem |
-| Builder | `MessageComposer` | Composer.ahk | Gộp object thành cụm message |
-| Adapter | `ZaloUIAdapter` | ZaloUI.ahk | Toàn bộ thao tác Zalo PC |
-| Service | `MessageHarvester` | Harvester.ahk | Điều phối vòng thu thập |
-| Facade | `ListingBotService` | Bot.ahk | Một method cho mỗi hotkey |
+| Repository | `ListingRepository` | Storage.ahk | Save/read objects + audit log |
+| Repository | `HarvestStateStore` | StateStore.ahk | Harvest cursor, seen hashes |
+| Builder | `MessageComposer` | Composer.ahk | Merge objects into message clusters |
+| Adapter | `ZaloUIAdapter` | ZaloUI.ahk | All Zalo PC UI operations |
+| Service | `MessageHarvester` | Harvester.ahk | Orchestrate harvest loop |
+| Facade | `ListingBotService` | Bot.ahk | One method per hotkey |
 
-Test cho các lớp thuần logic (`Parser`, `BlockList`, `GroupRegistry`, `Composer`, `JSON`) nằm ở `windows/tests/RunTests.ahk` và chạy được mà không cần Zalo.
+Tests for pure logic classes (`Parser`, `BlockList`, `GroupRegistry`, `Composer`, `JSON`) live in `windows/tests/RunTests.ahk` and run without Zalo.
 
 ---
 
@@ -24,90 +24,90 @@ Test cho các lớp thuần logic (`Parser`, `BlockList`, `GroupRegistry`, `Comp
 
 ```autohotkey
 cfg := AppConfig.Instance()
-cfg.Reload()   ; Ctrl+Shift+R nạp lại config + Excel mà không restart bot
+cfg.Reload()   ; Ctrl+Shift+R reloads config + Excel without restarting the bot
 ```
 
-Tự copy `config.example.ini`, `groups.example.csv`, `blocklist.example.csv` sang bản runtime ở lần chạy đầu.
+Automatically copies `config.example.ini`, `groups.example.csv`, `blocklist.example.csv` to runtime files on first run.
 
-**Quy tắc:** không hardcode tên nhóm, delay hay từ khoá trong code — tất cả qua `AppConfig`.
+**Rule:** do not hardcode group names, delays, or keywords in code — everything goes through `AppConfig`.
 
 ---
 
 ## 2. Strategy — `TableLoader`
 
-Một interface, hai nguồn dữ liệu:
+One interface, two data sources:
 
 ```autohotkey
 rows := TableLoader.Load(xlsxPath, sheetName, csvPath)
 ```
 
-Thử Excel qua COM trước; nếu máy không có Excel hoặc file lỗi thì đọc CSV. Header được lowercase để code không phụ thuộc cách gõ hoa/thường trong file.
+Tries Excel via COM first; if Excel is missing or the file fails, reads CSV. Headers are lowercased so code does not depend on casing in the file.
 
 ---
 
 ## 3. Specification — `BlockList`
 
 ```autohotkey
-keyword := blockList.Match(text)   ; "" nghĩa là cho phép
+keyword := blockList.Match(text)   ; "" means allowed
 ```
 
-Bốn kiểu so khớp: `contains`, `exact`, `word`, `regex`. Tin bị cấm vẫn được `MarkSeen()` để lần thu thập sau không xét lại.
+Four match types: `contains`, `exact`, `word`, `regex`. Blocked posts are still `MarkSeen()` so they are not re-evaluated on the next harvest.
 
 ---
 
 ## 4. Strategy — `ListingParser`
 
-| Method | Vai trò |
-|--------|---------|
-| `SplitBlocks(text, start, marker)` | Cắt hội thoại thành từng tin; ảnh đứng trước được gom vào tin phía sau |
-| `Parse(text, marker)` | Text → object 9 trường + `extra_info` + `image_count` |
-| `Validate(listing, required)` | Trả mảng lỗi thiếu field |
-| `FormatBlock(listing, mask, hint)` | Object → text gửi đi |
+| Method | Role |
+|--------|------|
+| `SplitBlocks(text, start, marker)` | Split conversation into posts; image markers immediately before a post are attached to that post |
+| `Parse(text, marker)` | Text → object with 9 fields + `extra_info` + `image_count` |
+| `Validate(listing, required)` | Return array of missing-field errors |
+| `FormatBlock(listing, mask, hint)` | Object → outbound text |
 | `ParsePhoneRequest(text)` | `"SĐT P001"` → `"P001"` |
 
-**Thứ tự `RULES` quan trọng:** `Giá điện` phải đứng trước `Giá`, nếu không dòng giá điện sẽ bị hiểu là giá phòng.
+**`RULES` order matters:** `Giá điện` must come before `Giá`, otherwise electric price lines are parsed as room price.
 
-**Bắt buộc:** mọi thay đổi ở đây phải có test tương ứng trong `windows/tests/RunTests.ahk`.
+**Required:** every change here must have a corresponding test in `windows/tests/RunTests.ahk`.
 
 ---
 
 ## 5. Repository — `HarvestStateStore`
 
 ```autohotkey
-state.IsSeen(group, hash)      ; đã lấy chưa
-state.MarkSeen(group, hash)    ; ghi nhận, giữ tối đa MaxSeenHashes
-state.TouchHarvest(group)      ; cập nhật last_harvest_at
+state.IsSeen(group, hash)      ; already harvested?
+state.MarkSeen(group, hash)    ; record hash, keep at most MaxSeenHashes
+state.TouchHarvest(group)      ; update last_harvest_at
 state.Save()
 ```
 
-Hash là FNV-1a trên text đã bỏ khoảng trắng, nên tin gửi lại với format hơi khác vẫn coi là trùng.
+Hash is FNV-1a on whitespace-stripped text, so reposts with slightly different formatting still count as duplicates.
 
 ---
 
 ## 6. Builder — `MessageComposer`
 
-Gộp các object chưa gửi thành chuỗi message, chèn `------------{group}------------` khi đổi nhóm nguồn và cắt chunk khi vượt `MaxMessageChars`. Message mới luôn in lại separator để người đọc không mất ngữ cảnh.
+Merges unpublished objects into message strings, inserts `------------{group}------------` when the source group changes, and splits chunks when exceeding `MaxMessageChars`. Each new chunk reprints the separator so readers do not lose context.
 
 ---
 
 ## 7. Adapter — `ZaloUIAdapter`
 
-Mọi `Send`, `Click`, `WinActivate` chỉ nằm ở đây. Khi Zalo đổi giao diện, chỉ sửa file này (và `[Timing]` trong config).
+All `Send`, `Click`, and `WinActivate` calls live here only. When Zalo changes UI, edit this file (and `[Timing]` in config).
 
-| Method | Vai trò |
-|--------|---------|
-| `OpenGroup(name)` | Ctrl+F → gõ tên → Enter |
-| `CaptureConversationText(method)` | Copy hội thoại (`manual` / `selectall`) |
-| `SendTextChunks(group, chunks)` | Gửi nhiều message liên tiếp |
-| `RelayClipboardImage(group)` | Dán ảnh trong clipboard |
-| `ForwardSelection(group)` | Hộp thoại Chuyển tiếp của Zalo |
-| `PasteToActiveChat(text)` | Dán vào chat đang mở |
+| Method | Role |
+|--------|------|
+| `OpenGroup(name)` | Ctrl+F → type name → Enter |
+| `CaptureConversationText(method)` | Copy conversation (`manual` / `selectall`) |
+| `SendTextChunks(group, chunks)` | Send multiple messages in sequence |
+| `RelayClipboardImage(group)` | Paste image from clipboard |
+| `ForwardSelection(group)` | Zalo Forward dialog |
+| `PasteToActiveChat(text)` | Paste into active chat |
 
 ---
 
 ## 8. Facade — `ListingBotService`
 
-Mỗi hotkey gọi đúng một method, không có logic nghiệp vụ nào nằm trong handler:
+Each hotkey calls exactly one method; no business logic in handlers:
 
 ```autohotkey
 Hotkey cfg.HotkeyHarvest, (*) => bot.HarvestAll()
@@ -116,17 +116,17 @@ Hotkey cfg.HotkeyPublish, (*) => bot.PublishToMain()
 
 ---
 
-## 9. Dependency Injection thủ công
+## 9. Manual dependency injection
 
-`ListingBotService._Build()` dựng toàn bộ đồ thị phụ thuộc từ `AppConfig`. `Reload()` dựng lại tất cả, nhờ đó sửa Excel xong chỉ cần bấm `Ctrl+Shift+R`.
+`ListingBotService._Build()` constructs the full dependency graph from `AppConfig`. `Reload()` rebuilds everything, so after editing Excel/CSV you only need `Ctrl+Shift+R`.
 
 ---
 
-## 10. Quy ước mở rộng
+## 10. Extension conventions
 
-| Thay đổi | File cần sửa |
-|----------|--------------|
-| Thêm trường phòng mới | `Parser.ahk` (RULES + `FormatBlock`), `Storage.ahk`, test + sample dump |
-| Đổi format output | `Parser.FormatBlock`, `Composer.ahk`, test |
-| Thêm nguồn dữ liệu (Google Sheet…) | Lớp mới cùng interface `TableLoader.Load` |
-| Tự động phát hiện tin mới | Class mới `NotificationWatcher.ahk`, gọi `harvester.HarvestGroup()` |
+| Change | Files to edit |
+|--------|---------------|
+| New listing field | `Parser.ahk` (RULES + `FormatBlock`), `Storage.ahk`, tests + sample dump |
+| Output format change | `Parser.FormatBlock`, `Composer.ahk`, tests |
+| New data source (Google Sheet, …) | New loader with the same `TableLoader.Load` interface |
+| Auto-detect new messages | New `NotificationWatcher.ahk` calling `harvester.HarvestGroup()` |

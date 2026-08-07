@@ -1,12 +1,12 @@
 @echo off
-REM Chay unit test + mo phong. Khong can Zalo.
+REM Run unit tests + simulation. No Zalo required.
 setlocal
 chcp 65001 >nul
 
 set AHK="C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
 if not exist %AHK% set AHK="C:\Program Files\AutoHotkey\v2\AutoHotkey32.exe"
 if not exist %AHK% (
-  echo Khong tim thay AutoHotkey v2. Sua duong dan AHK trong file nay.
+  echo AutoHotkey v2 not found. Update the AHK path in this file.
   exit /b 1
 )
 
@@ -22,8 +22,8 @@ if exist "%~dp0Simulate.log" type "%~dp0Simulate.log"
 
 echo.
 if %RESULT% NEQ 0 (
-  echo KET QUA: CO TEST THAT BAI
+  echo RESULT: SOME TESTS FAILED
 ) else (
-  echo KET QUA: TAT CA TEST PASS
+  echo RESULT: ALL TESTS PASSED
 )
 exit /b %RESULT%
