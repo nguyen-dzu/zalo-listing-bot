@@ -1,169 +1,189 @@
 ---
 name: zalo-bot-ahk
 description: >-
-  Build and maintain the Zalo Listing Bot, a Windows-only AutoHotkey v2 project that
-  harvests room listings from multiple source groups named in an Excel/CSV file, drops
-  posts containing banned keywords (LOCK, Chốt, Đã chốt), stores each post as a local
-  JSON object, then relays images plus a separator-delimited message cluster into the
-  main group. Use when working on zalo-listing-bot, AutoHotkey v2, Zalo PC automation,
-  listing parser, blocklist, groups.csv, or config.ini.
+  Build and maintain the Zalo Listing Bot (Windows, AutoHotkey v2): harvest flexible
+  rental listings from Zalo PC source groups, block banned keywords, save JSON locally,
+  publish to main groups. Read BACKLOG.md for known bugs (1 room = 1 message, phone/images
+  copy, room code format, new blocklist keywords). Use for zalo-listing-bot, Parser,
+  Harvester, Composer, ZaloUI, groups.csv, blocklist.csv, config.ini.
 ---
 
-# Zalo Listing Bot (AutoHotkey v2, Windows only)
+# Zalo Listing Bot — Agent Skill
 
-## Quick reference
+## Bắt buộc đọc trước khi code
 
-| Item | Value |
-|------|-------|
-| **Platform** | Windows only — AutoHotkey v2 + Zalo PC. No server, no other OS. |
-| **Entry script** | `windows/src/Bot.ahk` |
-| **Runtime config** | `windows/config/config.ini` |
-| **Group + blocklist** | `windows/config/groups.csv`, `blocklist.csv` (or `zalo-groups.xlsx`) |
-| **Local objects** | `windows/data/listings.json`, `harvest_state.json`, `access_log.json` |
-| **Tests** | `windows/tests/RunTests.ahk`, `Simulate.ahk` |
+1. **[BACKLOG.md](BACKLOG.md)** — lỗi đã biết và thứ tự ưu tiên P0
+2. **[README.md](../../../README.md)** — setup máy mới, hotkeys, trạng thái hiện tại
+3. **docs/DESIGN_PATTERNS.md** — không phá layer (UI vs parse vs storage)
 
-## Agent workflow checklist
+---
 
-```
-Task Progress:
-- [ ] Read docs/SYSTEM_DESIGN.md for flows
-- [ ] Read docs/DESIGN_PATTERNS.md before adding a class
-- [ ] Edit only the layer matching the change (see pattern table)
-- [ ] Add or update a case in windows/tests/RunTests.ahk
-- [ ] Check windows/tests/Simulate.ahk output still renders correctly
-- [ ] Update docs/TESTING.md if the manual test steps changed
-```
+## Quy định cho agent (bắt buộc tuân thủ)
 
-## Hotkeys and flows
+### A. Phạm vi platform
 
-| Hotkey | Method | Flow |
-|--------|--------|------|
-| `Ctrl+Shift+H` | `HarvestAll()` | Iterate all `type=source` groups, filter, save local objects |
-| `Ctrl+Shift+G` | `PublishToMain()` | Merge unpublished posts → send to all `type=main` groups |
-| `Ctrl+Shift+J` | `HarvestAndPublish()` | Run both |
-| `Ctrl+Shift+I` | `RelayImages()` | Relay selected images to main group (**send before text**) |
-| `Ctrl+Shift+B` | `ForwardListingFromClipboard()` | Manually forward one selected listing |
-| `Ctrl+Shift+P` | `ReleasePhoneFromClipboard()` | Release phone by room code + audit log |
-| `Ctrl+Shift+R` | `Reload()` | Reload config + Excel/CSV, no restart |
+- **Chỉ Windows** — AutoHotkey v2 + Zalo PC. Không server, không macOS runtime.
+- Entry: `windows/src/Bot.ahk`
+- Config runtime: `windows/config/config.ini` (không commit secret; dùng `*.example.*`)
 
-### Harvest pipeline (Flow H)
+### B. Layer — không vi phạm
 
-```
-OpenGroup → CaptureConversationText → SplitBlocks
-  → duplicate hash?   skip
-  → BlockList.Match?  skip (blocked) but still MarkSeen
-  → Validate fail?    skip (invalid)
-  → SaveListing + MarkSeen
-```
+| Layer | File | Được phép |
+|-------|------|-----------|
+| UI automation | `ZaloUI.ahk` | Send, Click, WinActivate, clipboard |
+| Parse | `Parser.ahk` | Regex, heuristic, FormatBlock |
+| Harvest | `Harvester.ahk` | Loop nhóm, gọi UI + Parser |
+| Publish | `Composer.ahk`, `Bot.ahk` | Gộp/gửi message |
+| Config | `Config.ahk` | Đọc ini, không hardcode nhóm/từ khóa |
 
-`SplitBlocks` splits on `Địa chỉ:` lines and **attaches image markers immediately before** each post, because Zalo shows images before the text of the same message. Sender/time header lines (`Minh Anh 18:05`) are stripped from both ends of each block.
+**Cấm:** regex parse trong `ZaloUI.ahk`; `Send`/`Click` trong `Parser.ahk`.
 
-Images are relayed as-is via the Forward dialog or clipboard — AutoHotkey cannot read image content inside Zalo, so download-and-reupload is not supported.
+### C. Config — không hardcode
 
-### Output format
+Mọi delay, hotkey, separator, `RequiredFields`, batch size lấy từ `AppConfig.Instance()`.
 
-```
-------------Nhóm Cho Thuê Quận 1------------
-📍 Địa chỉ: ...
-🔑 Số phòng: ...
-💰 Giá: ...
-⚡ Điện: ...
-💧 Nước: ...
-🧾 Dịch vụ: ...
-ℹ️ Thông tin: ...
-📞 Số chủ: Nhắn bot "SĐT P001" để lấy số
-```
+`RequiredFields` để **trống** = chỉ dùng `LooksLikeListing()` (trạng thái hiện tại).
 
-Exceeds `MaxMessageChars` → split into chunks and reprint separator on each new message.
-
-## Parsed fields
-
-`address`, `room_code`, `price`, `electric_price`, `water_price`, `utility_price` (merged "Điện nước"), `service_price`, `owner_phone`, `info`, `extra_info`, `image_count`.
-
-**`ListingParser.RULES` order is mandatory:** specific labels before generic ones — `Giá điện` must come before `Giá`, otherwise electric price lines are parsed as room price.
-
-## Excel / CSV schema
-
-Excel is tried first via COM; on failure or missing Excel, CSV is used. Headers are lowercased.
-
-**Groups:** `group_name`, `type` (`source`|`main`), `enabled`, `note`
-**Blocklist:** `keyword`, `match_type` (`contains`|`exact`|`word`|`regex`), `enabled`, `note`
-
-## Config variables (config.ini)
-
-| Section | Key | Default | Purpose |
-|---------|-----|---------|---------|
-| Zalo | ExeName | Zalo.exe | Process name |
-| Groups | GroupsXlsx / GroupsCsv | config\… | Group table |
-| Groups | BlocklistXlsx / BlocklistCsv | config\… | Blocklist table |
-| Capture | Method | manual | `manual` \| `selectall` |
-| Capture | ListingStartPattern | (default "Địa chỉ:") | Regex starting one listing |
-| Capture | ImageMarkerPattern | (default `[Hình ảnh]`) | Image marker detection |
-| Capture | MaxMessagesPerGroup | 50 | Cap per harvest run |
-| Capture | RequiredFields | address,price,owner_phone | Required fields |
-| Output | Separator | `------------{group}------------` | Group separator |
-| Output | MaxMessageChars | 1800 | Chunk split threshold |
-| Output | MaskPhone | 1 | Mask phone in main group |
-| Images | Strategy | forward | `forward` \| `clipboard` \| `off` |
-| Timing | SearchDelayMs … | 400… | Tune when Zalo is slow |
-| State | MaxSeenHashes | 500 | Hashes remembered per group |
-
-**Rule:** do not hardcode group names, delays, or keywords in code — always use `AppConfig.Instance()`.
-
-## Folder structure
-
-```
-windows/
-├── src/
-│   ├── Bot.ahk          # Entry + ListingBotService (Facade)
-│   ├── Config.ahk       # AppConfig (Singleton)
-│   ├── Util.ahk         # StrJoin, FnvHash, file IO
-│   ├── JSON.ahk         # Encode/decode
-│   ├── TableLoader.ahk  # Excel COM + CSV (Strategy)
-│   ├── GroupRegistry.ahk# Source/main groups (Repository)
-│   ├── BlockList.ahk    # Blocklist (Specification)
-│   ├── Parser.ahk       # Text ↔ object (Strategy)
-│   ├── Storage.ahk      # listings.json (Repository)
-│   ├── StateStore.ahk   # harvest_state.json (Repository)
-│   ├── Composer.ahk     # Message cluster (Builder)
-│   ├── Harvester.ahk    # Harvest loop (Service)
-│   └── ZaloUI.ahk       # Zalo PC operations (Adapter)
-├── config/              # .ini + .csv (.example.* committed)
-├── data/                # JSON runtime (gitignored)
-└── tests/               # RunTests.ahk, Simulate.ahk, run-tests.cmd, samples/
-```
-
-**Do not** put `Send`/`Click` outside `ZaloUI.ahk`. **Do not** put regex in `ZaloUI.ahk` or `Storage.ahk`.
-
-## AHK v2 gotchas in this codebase
-
-- Array has **no** `.Join()` — use `StrJoin(arr, sep)` from `Util.ahk`
-- Write JSON with `"UTF-8-RAW"` to avoid a BOM; `ReadTextFile()` strips a BOM on read
-- Class static tables (`RULES`) are ordered arrays, not Maps, because order matters
-- `FileAppend text, "*"` writes to stdout — that is how the test scripts report
-
-## Running tests
+### D. Test — bắt buộc khi sửa logic
 
 ```cmd
 windows\tests\run-tests.cmd
 ```
 
-Sample dumps live in `windows\tests\samples\<Group Name>.txt`, named exactly as in `groups.csv`.
-`RunTests.ahk` exits with code 1 on failure; `Simulate.ahk` prints the exact message the bot would send.
+- Sửa `Parser.ahk` → thêm case vào `RunTests.ahk` (có mẫu UNIHOMES / MyHouse / Sang CHDV)
+- Sửa output → chạy `Simulate.ahk`
+- Sửa blocklist → test section `blocklist` + case keyword mới
 
-## Extension guidelines
+### E. Commit
 
-| Change | Files to touch |
-|--------|----------------|
-| New listing field | Parser.ahk (RULES + FormatBlock), Storage.ahk, RunTests.ahk, sample dump |
-| Output format | Parser.FormatBlock, Composer.ahk, RunTests.ahk |
-| New table source | New loader with the same `TableLoader.Load` signature |
-| Auto-detect new messages | New `NotificationWatcher.ahk` calling `harvester.HarvestGroup()` |
+Chỉ commit khi user yêu cầu. Không commit `config.ini`, `groups.csv` runtime nếu chứa tên nhóm private.
 
-## Additional resources
+---
 
-- System design: [docs/SYSTEM_DESIGN.md](../../../docs/SYSTEM_DESIGN.md)
-- Patterns detail: [docs/DESIGN_PATTERNS.md](../../../docs/DESIGN_PATTERNS.md)
-- Testing: [docs/TESTING.md](../../../docs/TESTING.md)
-- Windows setup: [platforms/windows.md](platforms/windows.md)
-- Class API: [reference.md](reference.md)
+## Backlog P0 (tóm tắt — chi tiết trong BACKLOG.md)
+
+| # | Vấn đề | Hướng sửa |
+|---|--------|-----------|
+| 1 | **1 phòng = 1 message** output | Refactor `Composer` + `Bot._PublishRecords` — không gộp chunk |
+| 2 | **SĐT chưa copy** được trên Zalo thật | Fix `ZaloUI` focus/paste; chuẩn hóa `room_code` lookup |
+| 3 | **Ảnh chưa copy/chuyển** theo phòng | Publish flow: text rồi forward ảnh theo block/`image_count` |
+| 4 | **Mã phòng format sai** | `NormalizeRoomCode()` trước save + FormatBlock |
+| 5 | **Blocklist keyword mới** | Thêm CSV + test; tách tin *Sang CHDV* vs *cho thuê phòng* |
+
+Agent **ưu tiên P0.1** (1 phòng 1 message) trước khi tối ưu parser thêm.
+
+---
+
+## Trạng thái kỹ thuật hiện tại (Aug 2026)
+
+### Harvest pipeline
+
+```text
+OpenGroup(read) → CaptureConversationText → SplitBlocks
+  → duplicate hash → skip
+  → BlockList.Match → skip (blocked)
+  → Validate (LooksLikeListing + optional RequiredFields) → skip (invalid)
+  → SaveListing
+```
+
+### SplitBlocks (3 bước)
+
+1. Anchor `Địa chỉ:` / `Đ/c`
+2. Anchor *Cho thuê*, *CHDV*, *Studio*, *trống mã*, …
+3. Header Zalo `Tên HH:MM`
+4. Lọc `LooksLikeListing()`
+
+### Parser — field & heuristic
+
+Fields: `address`, `room_code`, `price`, `electric_price`, `water_price`, `utility_price`, `service_price`, `owner_phone`, `info`, `extra_info`, `image_count`.
+
+- `RULES` order: **Giá điện trước Giá**
+- `_InferFields`: giá `5tr7`, SĐT, địa chỉ ngoặc, `Nc`/`Dv`/`PDV`
+- `ExtractPhone`: ưu tiên dòng ☎/Liên hệ; hỗ trợ `0377.785.784`
+
+### Batch publish
+
+`HarvestAllBatched()` — `BatchSize` nhóm → harvest → `publishFn(records)` → recheck snapshot → revisit queue.
+
+**Lưu ý:** publish hiện gộp nhiều record (xem backlog P0.1).
+
+---
+
+## Hotkeys
+
+| Hotkey | Method |
+|--------|--------|
+| `Ctrl+Shift+H` | `HarvestAll()` |
+| `Ctrl+Shift+J` | `HarvestAllBatched()` + publish |
+| `Ctrl+Shift+G` | `PublishToMain()` |
+| `Ctrl+Shift+I` | `RelayImages()` — thủ công, chọn ảnh trước |
+| `Ctrl+Shift+B` | Forward 1 tin từ selection |
+| `Ctrl+Shift+P` | `ReleasePhoneFromClipboard()` |
+| `Ctrl+Shift+R` | `Reload()` |
+
+---
+
+## Setup máy mới (checklist agent)
+
+```
+[ ] Cài AutoHotkey v2 (64-bit)
+[ ] Cài Zalo PC, account bot vào đủ nhóm
+[ ] Copy config.example.ini → config.ini
+[ ] Điền groups.csv (dump-groups.ahk verify)
+[ ] Cursor: AutoHotkey2 interpreter path → AutoHotkey64.exe
+[ ] run-tests.cmd → all pass
+[ ] Chạy Bot.ahk, Ctrl+Shift+R
+[ ] diag-harvest.ahk trên 1 nhóm test
+```
+
+Path AHK thường gặp:
+
+- `%LocalAppData%\Programs\AutoHotkey\v2\AutoHotkey64.exe`
+- `C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe`
+
+---
+
+## Output format hiện tại (sẽ đổi khi P0.1)
+
+```text
+------------{source_group}------------
+📍 Địa chỉ: ...
+🔑 Số phòng: ...
+💰 Giá: ...
+...
+📞 Số chủ: Nhắn bot "SĐT {room_code}" để lấy số
+```
+
+Sau P0.1: **mỗi block trên = 1 message Zalo**, separator có thể gắn đầu mỗi tin hoặc bỏ gộp nhóm.
+
+---
+
+## AHK v2 gotchas
+
+- Array không có `.Join()` — dùng `StrJoin()` từ `Util.ahk`
+- JSON ghi `"UTF-8-RAW"`; đọc strip BOM
+- `FileAppend text, "*"` = stdout (tests)
+
+---
+
+## File tham chiếu
+
+| File | Nội dung |
+|------|----------|
+| [BACKLOG.md](BACKLOG.md) | P0/P1, keyword blocklist đề xuất |
+| [reference.md](reference.md) | API class tóm tắt |
+| [platforms/windows.md](platforms/windows.md) | Vận hành hàng ngày |
+| [docs/SYSTEM_DESIGN.md](../../../docs/SYSTEM_DESIGN.md) | Flow tổng (có thể lỗi thời) |
+| [docs/TESTING.md](../../../docs/TESTING.md) | Test manual |
+
+---
+
+## Workflow agent khi nhận task
+
+```
+1. Đọc BACKLOG.md → xác định P0/P1
+2. Đọc file layer liên quan (không sửa lan man)
+3. Implement diff nhỏ nhất
+4. RunTests + Simulate
+5. Cập nhật BACKLOG.md (đánh dấu xong) + README nếu đổi hành vi vận hành
+```

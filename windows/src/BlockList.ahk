@@ -48,7 +48,7 @@ class BlockList {
                     if RegExMatch(haystack, "i)(?<![\p{L}\d])" RegExEscape(keyword) "(?![\p{L}\d])")
                         return keyword
                 default:
-                    if InStr(haystack, keyword, false)
+                    if InStr(StrLower(haystack), StrLower(keyword))
                         return keyword
             }
         }

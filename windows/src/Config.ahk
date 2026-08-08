@@ -81,6 +81,13 @@ class AppConfig {
         this.BetweenGroupsMs := this._Int(ini, "Timing", "BetweenGroupsMs", 1200)
         this.ForwardDialogMs := this._Int(ini, "Timing", "ForwardDialogMs", 900)
         this.ClipWaitSeconds := this._Int(ini, "Timing", "ClipWaitSeconds", 2)
+        this.CaptureSettleMs := this._Int(ini, "Timing", "CaptureSettleMs", 600)
+        this.AfterPublishRecheckMs := this._Int(ini, "Timing", "AfterPublishRecheckMs", 800)
+
+        ; ── Batch harvest/publish ──
+        this.BatchSize := Max(1, this._Int(ini, "Batch", "Size", 5))
+        this.RecheckAfterPublish := this._Bool(ini, "Batch", "RecheckAfterPublish", true)
+        this.BetweenBatchesMs := this._Int(ini, "Batch", "BetweenBatchesMs", 2000)
 
         ; ── State ──
         this.MaxSeenHashes := this._Int(ini, "State", "MaxSeenHashes", 500)

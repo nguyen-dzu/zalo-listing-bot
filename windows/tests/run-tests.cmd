@@ -3,10 +3,11 @@ REM Run unit tests + simulation. No Zalo required.
 setlocal
 chcp 65001 >nul
 
-set AHK="C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
+set AHK="%LocalAppData%\Programs\AutoHotkey\v2\AutoHotkey64.exe"
+if not exist %AHK% set AHK="C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
 if not exist %AHK% set AHK="C:\Program Files\AutoHotkey\v2\AutoHotkey32.exe"
 if not exist %AHK% (
-  echo AutoHotkey v2 not found. Update the AHK path in this file.
+  echo AutoHotkey v2 not found. Install AHK v2 or update the AHK path in this file.
   exit /b 1
 )
 

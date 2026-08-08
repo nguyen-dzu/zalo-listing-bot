@@ -31,6 +31,8 @@ class HarvestStateStore {
             this.state[entry["group_name"]] := Map(
                 "group_name", entry["group_name"],
                 "last_harvest_at", entry.Has("last_harvest_at") ? entry["last_harvest_at"] : "",
+                "last_capture_hash", entry.Has("last_capture_hash") ? entry["last_capture_hash"] : "",
+                "needs_revisit", entry.Has("needs_revisit") && entry["needs_revisit"],
                 "seen", seen
             )
         }
@@ -48,6 +50,8 @@ class HarvestStateStore {
             this.state[groupName] := Map(
                 "group_name", groupName,
                 "last_harvest_at", "",
+                "last_capture_hash", "",
+                "needs_revisit", false,
                 "seen", []
             )
         }
@@ -78,5 +82,32 @@ class HarvestStateStore {
 
     LastHarvestAt(groupName) {
         return this._Entry(groupName)["last_harvest_at"]
+    }
+
+    ; Snapshot of the whole conversation at harvest time — detect new posts after publish.
+    SetCaptureHash(groupName, hash) {
+        this._Entry(groupName)["last_capture_hash"] := hash
+    }
+
+    GetCaptureHash(groupName) {
+        return this._Entry(groupName)["last_capture_hash"]
+    }
+
+    HasCaptureChanged(groupName, newHash) {
+        old := this.GetCaptureHash(groupName)
+        return old != "" && newHash != "" && old != newHash
+    }
+
+    MarkNeedsRevisit(groupName, needs := true) {
+        this._Entry(groupName)["needs_revisit"] := needs
+    }
+
+    ListRevisitGroups() {
+        result := []
+        for name, entry in this.state {
+            if entry["needs_revisit"]
+                result.Push(name)
+        }
+        return result
     }
 }

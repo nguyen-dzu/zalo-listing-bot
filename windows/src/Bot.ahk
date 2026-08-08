@@ -63,33 +63,59 @@ class ListingBotService {
 
     ; Gộp các tin chưa gửi thành cụm message và bắn vào mọi nhóm chính.
     PublishToMain() {
+        return this._PublishRecords(this.repo.Pending())
+    }
+
+    _PublishRecords(records) {
+        if !records.Length
+            return 0
+
+        chunks := this.composer.Compose(records)
+        mainGroups := this.registry.MainGroups()
+        if !mainGroups.Length
+            throw Error("Chưa khai báo nhóm type=main trong file Excel/CSV.")
+
+        sent := 0
+        for group in mainGroups {
+            sent += this.ui.SendTextChunks(group["group_name"], chunks)
+        }
+
+        this.repo.MarkPublished(this.composer.CollectIds(records))
+        return sent
+    }
+
+    PublishToMainNotify() {
         pending := this.repo.Pending()
         if !pending.Length
             return this._Notify("Không có tin mới", "Chưa có listing nào chờ gửi.", 2)
 
-        chunks := this.composer.Compose(pending)
-        mainGroups := this.registry.MainGroups()
-        if !mainGroups.Length
-            return this._Notify("Thiếu nhóm chính", "Chưa khai báo nhóm type=main trong file Excel/CSV.", 3)
-
-        sent := 0
-        for group in mainGroups {
-            try {
-                sent += this.ui.SendTextChunks(group["group_name"], chunks)
-            } catch as err {
-                return this._Notify("Lỗi gửi", group["group_name"] ": " err.Message, 3)
-            }
+        try {
+            sent := this._PublishRecords(pending)
+        } catch as err {
+            return this._Notify("Lỗi gửi", err.Message, 3)
         }
 
-        this.repo.MarkPublished(this.composer.CollectIds(pending))
         this._Notify("Đã gửi", Format("{1} tin → {2} nhóm chính ({3} message)",
-            pending.Length, mainGroups.Length, sent), 1)
+            pending.Length, this.registry.MainGroups().Length, sent), 1)
     }
 
     HarvestAndPublish() {
-        summary := this.HarvestAll()
-        if summary && summary["saved"]
-            this.PublishToMain()
+        try {
+            summary := this.harvester.HarvestAllBatched((records) => this._PublishRecords(records))
+        } catch as err {
+            return this._Notify("Lỗi batch", err.Message, 3)
+        }
+
+        message := Format(
+            "Batch: {1} | Nhóm: {2} | Mới: {3} | Gửi: {4} | Cấm: {5} | Trùng: {6} | Revisit: {7}",
+            summary["batches"], summary["groups"], summary["saved"], summary["published"],
+            summary["blocked"], summary["duplicate"], summary["revisit"])
+        if summary["errors"].Length
+            message .= "`nLỗi: " StrJoin(summary["errors"], "; ")
+
+        icon := summary["errors"].Length ? 2 : (summary["saved"] ? 1 : 2)
+        this._Notify("Batch xong", message, icon)
+        return summary
     }
 
     ; Ảnh phải tới nhóm chính trước phần text: chọn tin ảnh trong nhóm nguồn rồi bấm hotkey này.
@@ -190,7 +216,7 @@ cfg := AppConfig.Instance()
 bot := ListingBotService(cfg)
 
 Hotkey cfg.HotkeyHarvest, (*) => bot.HarvestAll()
-Hotkey cfg.HotkeyPublish, (*) => bot.PublishToMain()
+Hotkey cfg.HotkeyPublish, (*) => bot.PublishToMainNotify()
 Hotkey cfg.HotkeyCycle, (*) => bot.HarvestAndPublish()
 Hotkey cfg.HotkeyRelayImages, (*) => bot.RelayImages()
 Hotkey cfg.HotkeyForward, (*) => bot.ForwardListingFromClipboard()
@@ -198,8 +224,9 @@ Hotkey cfg.HotkeyRelease, (*) => bot.ReleasePhoneFromClipboard()
 Hotkey cfg.HotkeyReload, (*) => bot.Reload()
 
 TrayTip "Zalo Listing Bot",
-    Format("Sẵn sàng — {1} nhóm nguồn, {2} nhóm chính`n{3} thu thập | {4} gửi nhóm chính | {5} chuyển ảnh",
+    Format("Sẵn sàng — {1} nhóm nguồn, {2} nhóm chính (batch {3})`n{4} thu thập | {5} batch+gửi | {6} chuyển ảnh",
         bot.registry.SourceGroups().Length,
         bot.registry.MainGroups().Length,
-        cfg.HotkeyHarvest, cfg.HotkeyPublish, cfg.HotkeyRelayImages),
+        cfg.BatchSize,
+        cfg.HotkeyHarvest, cfg.HotkeyCycle, cfg.HotkeyRelayImages),
     1

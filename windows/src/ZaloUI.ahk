@@ -19,14 +19,23 @@ class ZaloUIAdapter {
         Sleep 300
     }
 
-    OpenGroup(groupName) {
+    ; focus: "read" = message pane for copy; "send" = compose box for paste
+    OpenGroup(groupName, focus := "read") {
         this.Activate()
+        Send "{Esc}"
+        Sleep 150
         Send "^f"
         Sleep this.config.SearchDelayMs
         SendText groupName
-        Sleep this.config.SearchDelayMs + 200
+        Sleep this.config.SearchDelayMs + 300
         Send "{Enter}"
         Sleep this.config.OpenChatDelayMs
+        Send "{Esc}"
+        Sleep 150
+        if focus = "send"
+            this._FocusComposeBox()
+        else
+            this._ClickMessagePane()
         return true
     }
 
@@ -58,10 +67,18 @@ class ZaloUIAdapter {
         Sleep this.config.PasteDelayMs
     }
 
+    ; Zalo PC: after search/open chat, focus must be in the compose box before Ctrl+V.
+    _FocusComposeBox() {
+        this.Activate()
+        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
+        Click(x + Round(w * 0.65), y + h - 90)
+        Sleep this.config.PasteDelayMs + 100
+    }
+
     SendTextChunks(groupName, chunks) {
         if !chunks.Length
             return 0
-        this.OpenGroup(groupName)
+        this.OpenGroup(groupName, "send")
         sent := 0
         for chunk in chunks {
             this._PasteAndSend(chunk)
@@ -72,7 +89,7 @@ class ZaloUIAdapter {
     }
 
     SendToGroup(groupName, message) {
-        this.OpenGroup(groupName)
+        this.OpenGroup(groupName, "send")
         this._PasteAndSend(message)
         return true
     }
@@ -85,7 +102,8 @@ class ZaloUIAdapter {
 
     ; Relay whatever image is on the clipboard into the target group.
     RelayClipboardImage(groupName) {
-        this.OpenGroup(groupName)
+        this.OpenGroup(groupName, "send")
+        this._FocusComposeBox()
         Send "^v"
         Sleep this.config.PasteDelayMs + 300
         Send "{Enter}"
@@ -115,8 +133,9 @@ class ZaloUIAdapter {
             A_Clipboard := old
             throw Error("Không đặt được nội dung vào clipboard.")
         }
+        this._FocusComposeBox()
         Send "^v"
-        Sleep this.config.PasteDelayMs
+        Sleep this.config.PasteDelayMs + 150
         Send "{Enter}"
         Sleep this.config.SendDelayMs
         A_Clipboard := old

@@ -10,6 +10,7 @@
 #Include ../src/BlockList.ahk
 #Include ../src/Parser.ahk
 #Include ../src/Composer.ahk
+#Include ../src/StateStore.ahk
 #Include TestLog.ahk
 
 InitTestLog("RunTests.log")
@@ -82,6 +83,95 @@ Check("water_price", listing["water_price"] = "100k/người", listing["water_pr
 Check("service_price", listing["service_price"] = "150k/tháng", listing["service_price"])
 Check("owner_phone", listing["owner_phone"] = "0901234567", listing["owner_phone"])
 Check("không thiếu field", ListingParser.Validate(listing, ["address", "price", "owner_phone"]).Length = 0)
+
+; ── Tin tự do (cho thuê, giá, phòng không có label) ─────
+Section("tin tự do")
+freeform := "
+(
+Cho thuê phòng Q1 giá 5 triệu/tháng
+38 Nguyễn Văn A, Quận 1
+Full nội thất, có gác
+Lh 0901234567
+)"
+Check("LooksLikeListing tin tự do", ListingParser.LooksLikeListing(freeform))
+listing := ListingParser.Parse(freeform)
+Check("suy luận giá", listing["price"] != "", listing["price"])
+Check("suy luận SĐT", listing["owner_phone"] = "0901234567", listing["owner_phone"])
+Check("validate heuristic", ListingParser.Validate(listing, []).Length = 0)
+
+conversation := "
+(
+Minh Anh 18:05
+Cho thuê studio Bình Thạnh 4.5tr/tháng
+123 Xô Viết Nghệ Tĩnh Q.Bình Thạnh
+0909888777
+
+Lan 18:10
+Ok em cảm ơn
+)"
+blocks := ListingParser.SplitBlocks(conversation)
+Check("tách tin từ header Zalo", blocks.Length = 1, "got " blocks.Length)
+if blocks.Length {
+    listing := ListingParser.Parse(blocks[1])
+    Check("tin tự do có giá", listing["price"] != "", listing["price"])
+    Check("tin tự do validate", ListingParser.Validate(listing, []).Length = 0)
+}
+Check("bỏ tin chat thường", ListingParser.LooksLikeListing("Ok em cảm ơn") = false)
+
+; ── Mẫu thực tế từ Zalo (UNIHOMES / MyHouse / Sang CHDV) ─
+Section("mẫu Zalo thực tế")
+unihomes := "
+(
+👇Hình ảnh 👇phòng 102 trống ngày 1.9
+====================
+💎 Studio - Cửa Sổ trời
+🚥 Giá 7tr7
+📍 Tầng 1 - P102
+====================
+📍414/1/17 ĐBP Q10 (góc ngã tư cao thắng và đbp)
+https://maps.app.goo.gl/GiesW39jeYrqZLqy5?g_st=ic
+• Điện 4k/ Kwh
+• Nước 100k/ Người
+• PDV 200k/ Phòng
+☎️ 0772988525 Ms. Phương
+)"
+Check("UNIHOMES LooksLikeListing", ListingParser.LooksLikeListing(unihomes))
+u := ListingParser.Parse(unihomes)
+Check("UNIHOMES giá 7tr7", u["price"] = "7tr7", u["price"])
+Check("UNIHOMES địa chỉ", InStr(u["address"], "414/1/17") > 0, u["address"])
+Check("UNIHOMES SĐT", u["owner_phone"] = "0772988525", u["owner_phone"])
+Check("UNIHOMES PDV", u["service_price"] != "", u["service_price"])
+
+myhouse := "
+(
+🌈Giữa tháng Vi trống mã 202 ( Quang Trung 417/69/19/15)
+Duplex , diện tích sử dụng 50m2 , full nội thất...
+👉Giá: 5tr7
+👉Điện: 4k
+👉Nc: 100k/ ng
+👉Dv: 200k
+)"
+Check("MyHouse LooksLikeListing", ListingParser.LooksLikeListing(myhouse))
+m := ListingParser.Parse(myhouse)
+Check("MyHouse giá 5tr7", m["price"] = "5tr7", m["price"])
+Check("MyHouse mã phòng", m["room_code"] = "202", m["room_code"])
+Check("MyHouse địa chỉ ngoặc", InStr(m["address"], "Quang Trung") > 0, m["address"])
+Check("MyHouse Nc", m["water_price"] != "", m["water_price"])
+Check("MyHouse Dv", m["service_price"] != "", m["service_price"])
+
+sang := "
+(
+🚩Sang CHDV: Phường 10, Gò Vấp
+- Số phòng: 20 phòng
+- Giá thuê: 58tr
+- Lợi nhuận Full: 30tr
+An camel 0377.785.784
+)"
+Check("Sang CHDV LooksLikeListing", ListingParser.LooksLikeListing(sang))
+s := ListingParser.Parse(sang)
+Check("Sang CHDV giá", s["price"] = "58tr", s["price"])
+Check("Sang CHDV SĐT chấm", s["owner_phone"] = "0377785784", s["owner_phone"])
+Check("Sang CHDV validate", ListingParser.Validate(s, []).Length = 0)
 
 ; ── "Giá điện" không được nuốt "Giá" ─────────────────────
 Section("thứ tự luật parse")
@@ -187,6 +277,31 @@ b := FnvHash("Địa chỉ: X`n Giá:  5 triệu ")
 c := FnvHash("Địa chỉ: Y`nGiá: 5 triệu")
 Check("hash bỏ qua khoảng trắng", a = b, a " vs " b)
 Check("hash khác nội dung thì khác", a != c)
+
+; ── Harvest state (capture snapshot + revisit) ────────────
+Section("harvest state")
+class TinyStateCfg {
+    HarvestStateFile := ""
+    MaxSeenHashes := 3
+    __New(path) {
+        this.HarvestStateFile := path
+    }
+}
+statePath := A_Temp "\zalo-bot-state-test.json"
+if FileExist(statePath)
+    FileDelete statePath
+stateStore := HarvestStateStore(TinyStateCfg(statePath))
+stateStore.SetCaptureHash("Nhóm A", "hash-v1")
+Check("lưu capture hash", stateStore.GetCaptureHash("Nhóm A") = "hash-v1")
+Check("phát hiện capture đổi", stateStore.HasCaptureChanged("Nhóm A", "hash-v2"))
+Check("capture không đổi", !stateStore.HasCaptureChanged("Nhóm A", "hash-v1"))
+stateStore.MarkNeedsRevisit("Nhóm A", true)
+Check("revisit queue", stateStore.ListRevisitGroups().Length = 1)
+stateStore.Save()
+stateStore2 := HarvestStateStore(TinyStateCfg(statePath))
+Check("revisit persist sau save", stateStore2.ListRevisitGroups().Length = 1)
+if FileExist(statePath)
+    FileDelete statePath
 
 ; ── Yêu cầu SĐT ───────────────────────────────────────────
 Section("yêu cầu SĐT")

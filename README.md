@@ -1,98 +1,256 @@
 # Zalo Listing Bot
 
-Bot that collects room listings from **multiple source groups** on Zalo PC (Windows + AutoHotkey v2), filters out closed/deal posts, stores each post as a local JSON object, then sends **images first, message cluster second** to the main group.
+Bot Windows (AutoHotkey v2) thu thập tin **phòng cho thuê** từ nhiều nhóm Zalo PC nguồn, lọc tin cấm, lưu JSON local, rồi đăng lại sang các nhóm output (main).
 
 ```
-Source group 1 ┐
-Source group 2 ├─► blocklist filter ─► save local object ─► Main group
-Source group N ┘                                          [images] + [message]
+Nhóm nguồn 1 ┐
+Nhóm nguồn 2 ├─► lọc blocklist ─► parse heuristic ─► listings.json ─► nhóm main
+Nhóm nguồn N ┘                                              (text + ảnh)
 ```
 
-Group names and banned keywords are read from **Excel/CSV** files; each source group in the output is separated by
-`------------Group Name------------`.
+Tên nhóm và từ khóa cấm đọc từ **CSV/Excel** (`groups.csv`, `blocklist.csv`).
 
-## Quick start (Windows)
+---
 
-```cmd
-"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe" windows\src\Bot.ahk
+## Trạng thái hiện tại (Aug 2026)
+
+### Đã làm
+
+| Tính năng | Mô tả |
+|-----------|--------|
+| Harvest batch | `Ctrl+Shift+J`: thu 5 nhóm/lượt → publish → recheck snapshot |
+| Parser linh hoạt | Nhận tin không có label chuẩn: *cho thuê*, *giá 5tr7*, *Nc/Dv/PDV*, link Google Maps, SĐT dạng `0377.785.784` |
+| Heuristic | `LooksLikeListing()` — không bắt buộc `Địa chỉ:` / `Giá:` / `SĐT:` nếu `RequiredFields` để trống |
+| Blocklist | `LOCK`, `Chốt`, `Đã chốt`, … — so khớp không phân biệt hoa thường |
+| State | `harvest_state.json`: hash trùng, capture snapshot, hàng đợi revisit |
+| ZaloUI | Tách `OpenGroup(focus)` `"read"` vs `"send"`; delay có thể chỉnh trong `config.ini` |
+| Test | `RunTests.ahk` — **75 test**, gồm mẫu UNIHOMES / MyHouse / Sang CHDV |
+
+### Chưa làm / lỗi đã biết
+
+> Chi tiết triển khai và quy tắc sửa: [`.cursor/skills/zalo-bot-ahk/SKILL.md`](.cursor/skills/zalo-bot-ahk/SKILL.md) và [`BACKLOG.md`](.cursor/skills/zalo-bot-ahk/BACKLOG.md).
+
+1. **Một phòng = một tin nhắn output** — Hiện `MessageComposer` gộp nhiều listing vào một cụm (chunk) theo `MaxMessageChars`. Cần đổi publish: **mỗi phòng gửi 1 message riêng** tới nhóm main.
+2. **SĐT chưa copy được** — Flow `ReleasePhone` (`Ctrl+Shift+P`) và mask SĐT khi publish chưa hoạt động ổn trên Zalo thật; cần kiểm tra paste/focus compose box.
+3. **Ảnh chưa copy/chuyển được** — `RelayImages` / `ForwardSelection` phụ thuộc UI Zalo; chưa tự động gắn ảnh theo từng listing khi harvest.
+4. **Mã phòng chưa format đúng** — Parser suy luận `202`, `P102`, `7tr7` nhưng output `FormatBlock` chưa chuẩn hóa mã (prefix, padding, tách khỏi giá).
+5. **Blocklist keyword mới** — Cần bổ sung và lọc tin có keyword mới (xem `BACKLOG.md`).
+
+---
+
+## Cài đặt trên máy mới
+
+### 1. Phần mềm
+
+| Thành phần | Ghi chú |
+|------------|---------|
+| Windows 10/11 | Bắt buộc |
+| [AutoHotkey v2](https://www.autohotkey.com/) | **v2**, không dùng v1. Có thể cài user-level: `%LocalAppData%\Programs\AutoHotkey\v2\AutoHotkey64.exe` |
+| Zalo PC | Đăng nhập tài khoản bot, đã vào **tất cả** nhóm source + main |
+| MS Excel | Tùy chọn — không có Excel thì dùng CSV |
+
+### 2. Clone repo & config
+
+```powershell
+git clone <repo-url> zalo-listing-bot
+cd zalo-listing-bot
 ```
 
-On first run the bot creates `config.ini`, `groups.csv`, and `blocklist.csv`. Edit `groups.csv` to match your real Zalo group names, then press `Ctrl+Shift+R`.
+Copy hoặc chỉnh các file runtime (không commit secret):
 
-| Hotkey | Action |
-|--------|--------|
-| `Ctrl+Shift+H` | Harvest new posts from all source groups |
-| `Ctrl+Shift+I` | Relay selected images to main group (send before text) |
-| `Ctrl+Shift+G` | Publish composed message cluster to main group |
-| `Ctrl+Shift+J` | Harvest + publish |
-| `Ctrl+Shift+B` | Manually forward one selected listing |
-| `Ctrl+Shift+P` | Release phone number by room code |
-| `Ctrl+Shift+R` | Reload config + Excel/CSV |
+```text
+windows/config/config.ini      ← từ config.example.ini
+windows/config/groups.csv      ← tên nhóm Zalo thật, cột type=source|main
+windows/config/blocklist.csv   ← từ blocklist.example.csv
+```
 
-## Configuration
+Kiểm tra danh sách nhóm đã load:
 
-`windows/config/groups.csv`
+```powershell
+& "$env:LOCALAPPDATA\Programs\AutoHotkey\v2\AutoHotkey64.exe" windows\src\dump-groups.ahk
+```
 
-| group_name | type | enabled | note |
-|------------|------|---------|------|
-| Nhóm Cho Thuê Quận 1 | source | 1 | Source group |
-| Nhóm Sale Nội Bộ | main | 1 | Main group |
+### 3. Cursor / VS Code
 
-`windows/config/blocklist.csv`
+Cài extension **AutoHotkey v2 Language Support** (`thqby.vscode-autohotkey2-lsp`).
 
-| keyword | match_type | enabled |
-|---------|------------|---------|
-| LOCK | contains | 1 |
-| Đã chốt | contains | 1 |
+Trong Settings → `AutoHotkey2: Interpreter Path`:
 
-You can use `zalo-groups.xlsx` instead, with sheets `Groups` and `Blocklist`.
+```text
+%LocalAppData%\Programs\AutoHotkey\v2\AutoHotkey64.exe
+```
 
-## Test (no Zalo required)
+Hoặc nếu cài Program Files:
+
+```text
+C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe
+```
+
+Project đã có `.vscode/settings.json` — cập nhật path nếu khác máy.
+
+### 4. Chạy bot
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\AutoHotkey\v2\AutoHotkey64.exe" windows\src\Bot.ahk
+```
+
+Lần đầu: mở Zalo PC → sửa `groups.csv` cho đúng tên nhóm → **`Ctrl+Shift+R`** reload.
+
+### 5. Test (không cần Zalo)
 
 ```cmd
 windows\tests\run-tests.cmd
 ```
 
-`RunTests.ahk` runs unit tests for Parser / BlockList / Composer / JSON.
-`Simulate.ahk` prints the **exact** message the bot would send, based on sample files in
-`windows\tests\samples\`.
-
-Details: [docs/TESTING.md](docs/TESTING.md)
-
-## Requirements
-
-- Windows 10/11
-- [AutoHotkey v2](https://www.autohotkey.com/) — install **v2**, not v1
-- Zalo PC, logged in with a bot account that is already in every source and main group
-- MS Excel (optional — use CSV if Excel is not installed)
-
-### Cursor / VS Code setup (Windows)
-
-After installing AutoHotkey v2, open **Settings** (`Ctrl+,`) → search `AutoHotkey2: Interpreter Path` and set:
-
-```
-C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe
-```
-
-The project already includes this in `.vscode/settings.json`. If AHK is installed elsewhere, update the path accordingly.
-
-Quick check in PowerShell:
+Diagnostic harvest một nhóm (cần Zalo mở):
 
 ```powershell
-Test-Path "C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
+& "$env:LOCALAPPDATA\Programs\AutoHotkey\v2\AutoHotkey64.exe" windows\src\diag-harvest.ahk
 ```
 
-Returns `True` if correct. If `False`, locate the actual executable:
+---
 
-```powershell
-Get-ChildItem "C:\Program Files\AutoHotkey" -Recurse -Filter "AutoHotkey*.exe"
+## Hotkeys
+
+| Phím | Hành động |
+|------|-----------|
+| `Ctrl+Shift+H` | Harvest tất cả nhóm nguồn |
+| `Ctrl+Shift+J` | **Batch harvest + publish** (5 nhóm/lượt, recheck) |
+| `Ctrl+Shift+G` | Publish các tin pending trong `listings.json` |
+| `Ctrl+Shift+I` | Chuyển ảnh đang chọn sang nhóm main |
+| `Ctrl+Shift+B` | Forward thủ công 1 tin đang bôi đen |
+| `Ctrl+Shift+P` | Cấp SĐT theo mã phòng (từ clipboard) |
+| `Ctrl+Shift+R` | Reload config + CSV |
+
+---
+
+## Cấu hình
+
+### `windows/config/groups.csv`
+
+| Cột | Giá trị |
+|-----|---------|
+| `group_name` | Tên nhóm **trùng khớp** trên Zalo PC |
+| `type` | `source` (đọc) hoặc `main` (gửi) |
+| `enabled` | `1` / `0` |
+
+### `windows/config/blocklist.csv`
+
+| Cột | Giá trị |
+|-----|---------|
+| `keyword` | Từ khóa cấm |
+| `match_type` | `contains` \| `exact` \| `word` \| `regex` |
+| `enabled` | `1` / `0` |
+
+### `windows/config/config.ini` (quan trọng)
+
+```ini
+[Capture]
+Method=selectall          ; selectall | manual
+RequiredFields=             ; để trống = heuristic LooksLikeListing
+
+[Batch]
+Size=5
+RecheckAfterPublish=1
+
+[Output]
+MaxMessageChars=1800        ; TODO: sẽ đổi khi 1 phòng = 1 message
+MaskPhone=1
 ```
 
-**Note:** AutoHotkey **does not run on macOS**. You can edit code on a Mac, but Run/Debug for `.ahk` files must be done on Windows.
+Đầy đủ: `windows/config/config.example.ini`.
 
-## Docs
+---
+
+## Luồng harvest (Flow H)
+
+```text
+OpenGroup(read) → CaptureConversationText → SplitBlocks
+  → hash trùng?     skip (duplicate)
+  → BlockList?      skip (blocked), vẫn MarkSeen
+  → Validate fail?  skip (invalid)
+  → SaveListing + MarkSeen
+```
+
+**SplitBlocks** thử lần lượt:
+
+1. Dòng `Địa chỉ:` / `Đ/c`
+2. Dòng bắt đầu *Cho thuê*, *CHDV*, *Studio*, *trống mã*, …
+3. Header Zalo (`Tên 18:05`)
+
+Chỉ giữ block pass `LooksLikeListing()`.
+
+---
+
+## Cấu trúc thư mục
+
+```text
+windows/
+├── src/
+│   ├── Bot.ahk           # Entry + hotkeys
+│   ├── Parser.ahk        # Parse / heuristic / FormatBlock
+│   ├── Harvester.ahk     # Harvest + batch
+│   ├── Composer.ahk      # Gộp message (cần refactor → 1 phòng/ message)
+│   ├── ZaloUI.ahk        # UI automation Zalo
+│   ├── BlockList.ahk
+│   ├── Config.ahk
+│   └── ...
+├── config/               # ini + csv
+├── data/                 # listings.json, harvest_state.json (runtime)
+└── tests/                # RunTests.ahk, samples/
+```
+
+**Quy tắc layer:** không đặt `Send`/`Click` ngoài `ZaloUI.ahk`; không đặt regex parse trong `ZaloUI.ahk`.
+
+---
+
+## Dữ liệu runtime
+
+| File | Nội dung |
+|------|----------|
+| `windows/data/listings.json` | Listing đã harvest |
+| `windows/data/harvest_state.json` | Hash đã thấy, capture snapshot, revisit queue |
+| `windows/data/access_log.json` | Log cấp SĐT |
+
+Reset harvest (cẩn thận):
+
+```json
+[]
+```
+
+cho `harvest_state.json` nếu muốn quét lại từ đầu.
+
+---
+
+## Lỗi thường gặp khi setup máy khác
+
+| Triệu chứng | Cách xử lý |
+|-------------|------------|
+| `saved=0` mãi | Kiểm tra tên nhóm trong `groups.csv`; chạy `diag-harvest.ahk`; xem `invalid` vs `blocked` |
+| Paste không vào nhóm main | Tăng `[Timing]`; kiểm tra `OpenGroup(..., "send")` + focus compose |
+| Extension AHK không resolve exe | Sửa interpreter path; **không** mở `.exe` như file text |
+| Test fail "Đã chốt" | Đã fix case-insensitive trong `BlockList.ahk` — pull code mới |
+| Bot không thấy nhóm | Tên phải khớp 100% (kể cả emoji, dấu ngoặc kép trong tên) |
+
+---
+
+## Tài liệu thêm
 
 - [System Design](docs/SYSTEM_DESIGN.md)
 - [Design Patterns](docs/DESIGN_PATTERNS.md)
 - [Testing](docs/TESTING.md)
-- [Cursor Skill](.cursor/skills/zalo-bot-ahk/SKILL.md)
+- [Agent Skill + Backlog](.cursor/skills/zalo-bot-ahk/SKILL.md)
+- [Windows setup chi tiết](.cursor/skills/zalo-bot-ahk/platforms/windows.md)
+
+---
+
+## Agent / Cursor
+
+Khi tiếp tục code trên máy khác, bảo agent đọc skill:
+
+```text
+.cursor/skills/zalo-bot-ahk/SKILL.md
+.cursor/skills/zalo-bot-ahk/BACKLOG.md
+```
+
+Skill chứa backlog ưu tiên, quy tắc sửa code, và checklist trước khi merge.

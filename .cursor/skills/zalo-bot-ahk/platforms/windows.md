@@ -1,5 +1,7 @@
 # Windows Platform
 
+> **Backlog & setup máy mới:** [README.md](../../../README.md) · [BACKLOG.md](../BACKLOG.md)
+
 ## Requirements
 
 - Windows 10/11
