@@ -198,6 +198,8 @@ class AppConfig {
         this.WatchIntervalMs := Max(60000,
             this._Int(ini, "Watch", "IntervalMs", 300000))
         this.WatchDrainQueueEachCycle := this._Bool(ini, "Watch", "DrainQueueEachCycle", true)
+        this.WatchOnlyUnreadAfterFirstCycle := this._Bool(
+            ini, "Watch", "OnlyUnreadAfterFirstCycle", true)
         this.WatchBypassSessionCooldown := this._Bool(
             ini, "Watch", "BypassSessionCooldown", true)
         this.WatchStopOnUncertain := this._Bool(ini, "Watch", "StopOnUncertain", true)

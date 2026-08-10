@@ -74,15 +74,21 @@ TouchHarvest() + Save state
 ### Flow W — Ordered file watch
 
 ```
-Every cycle:
+Cycle 1:
   reload selected CSV/XLSX
   process each group sequentially in row order
   search → copy → parse/filter → queue
   save state after each group
+
+Cycle 2+:
+  capture unread conversation labels from Zalo
+  intersect unread names with the selected CSV/XLSX
+  process only matching groups, preserving file order
+
+Every cycle:
   after each 5 groups, attempt one publish batch
   stop at MaxBatchesPerWatchCycle
   sleep Watch.IntervalMs
-  restart at the first file row
 ```
 
 Conversation and listing hashes prevent duplicate queue entries when the same

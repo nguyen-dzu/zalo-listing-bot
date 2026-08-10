@@ -534,6 +534,12 @@ sameLineUnread := GroupActivityDetector.DetectUnread(
     "i)(?:tin nhắn mới|tin chưa đọc|chưa đọc)")
 Check("detect unread accessibility cùng dòng",
     sameLineUnread.Length = 1 && sameLineUnread[1] = "Nhóm B")
+orderedUnread := GroupActivityDetector.SelectUnreadGroups(
+    schedulerGroups, ["Nhóm C", "Nhóm A"])
+Check("chon unread nhung van giu thu tu trong file",
+    orderedUnread.Length = 2
+    && orderedUnread[1]["group_name"] = "Nhóm A"
+    && orderedUnread[2]["group_name"] = "Nhóm C")
 
 ; ── Composer ──────────────────────────────────────────────
 Section("composer")

@@ -193,9 +193,9 @@ Khi `EnableHotkeys=1`:
 ### Danh sách nhóm Zalo
 
 Bot lấy nhóm input từ file CSV/XLSX được chọn khi khởi động. Có thể kéo-thả
-file vào popup hoặc bấm **Chọn file**. Bot xử lý tuần tự từ dòng đầu đến cuối,
-nghỉ theo `[Watch] IntervalMs`, rồi quay lại dòng đầu. State/hash hiện tại chỉ
-lưu các listing mới nên việc quét lại không gửi trùng.
+file vào popup hoặc bấm **Chọn file**. Vòng đầu bot xử lý tuần tự toàn bộ file;
+từ vòng thứ hai chỉ xử lý các tên trong file đang có dấu hiệu tin chưa đọc trên
+Zalo. State/hash hiện tại tiếp tục ngăn listing trùng.
 
 ```ini
 [Groups]
@@ -205,6 +205,9 @@ SourceSheet=
 SourceColumn=group_name
 ReloadSourceFileEachCycle=1
 OutputGroups=Giỏ hàng cao thiên ⏏️ 6tr Phú Nhuận Bình Thạnh|Giỏ hàng cao thiên ⬇️ 5tr9 Phú Nhuận Bình Thạnh|Giỏ Hàng "Quận Ngoại Thành" Cao Thiên|Giỏ hàng Quận số Cao Thiên|Giỏ hàng NNC Cao Thiên.
+
+[Watch]
+OnlyUnreadAfterFirstCycle=1
 ```
 
 Tên trong `OutputGroups` được phân cách bằng `|` và tự động bị loại nếu xuất

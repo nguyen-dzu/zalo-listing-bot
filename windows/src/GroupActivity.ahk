@@ -59,6 +59,20 @@ class GroupActivityDetector {
         }
         return result
     }
+
+    ; Keep the source-file order while selecting only names marked unread.
+    static SelectUnreadGroups(groups, unreadNames) {
+        unreadKeys := Map()
+        for name in unreadNames
+            unreadKeys[GroupRegistry._Key(name)] := true
+        result := []
+        for group in groups {
+            key := GroupRegistry._Key(group["group_name"])
+            if unreadKeys.Has(key)
+                result.Push(group)
+        }
+        return result
+    }
 }
 
 class HarvestScheduler {

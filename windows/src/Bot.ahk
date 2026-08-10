@@ -469,6 +469,7 @@ class ListingBotService {
         this.watchRunning := true
         this.watchStopRequested := false
         cycles := 0
+        fullScanCompleted := false
         this._Notify("Watch bật",
             "Harvest → publish → nghỉ "
             . Round(this.config.WatchIntervalMs / 60000) " phút."
@@ -487,21 +488,40 @@ class ListingBotService {
 
                 cycles++
                 try {
-                    ; Preserve spreadsheet order. Every completed cycle starts
-                    ; again at row 1; state/hash dedupe keeps only new listings.
+                    ; Cycle 1 scans the complete spreadsheet in row order.
+                    ; Cycle 2+ selects only spreadsheet groups marked unread.
                     if this.config.SourceGroupReloadEachCycle
                         || !this.groupsDiscovered
                         this._LoadSourceGroups()
                     sources := this.registry.SourceGroups()
-                    plan := Map(
-                        "mode", "source_file",
-                        "groups", sources,
-                        "unread", 0,
-                        "audit", 0)
+                    if !fullScanCompleted
+                        || !this.config.WatchOnlyUnreadAfterFirstCycle {
+                        plan := Map(
+                            "mode", "source_file_full",
+                            "groups", sources,
+                            "unread", 0,
+                            "audit", 0)
+                    } else {
+                        unreadRaw := this.ui.CaptureUnreadConversationText()
+                        unreadNames := GroupActivityDetector.DetectUnread(
+                            unreadRaw, sources,
+                            this.config.GroupUnreadMarkerPattern)
+                        unreadGroups := GroupActivityDetector.SelectUnreadGroups(
+                            sources, unreadNames)
+                        plan := Map(
+                            "mode", "source_file_unread",
+                            "groups", unreadGroups,
+                            "unread", unreadGroups.Length,
+                            "audit", 0)
+                    }
                     this.watchPublishBatchesRemaining :=
                         this.config.PublishBatchesPerWatchCycle
                     harvest := this.harvester.HarvestGroups(
                         plan["groups"], ObjBindMethod(this, "_AfterWatchGroup"))
+                    if plan["mode"] = "source_file_full"
+                        && harvest["groups"] = plan["groups"].Length
+                        && !this.watchStopRequested
+                        fullScanCompleted := true
                     mediaRepair := this.mediaCapturer.RepairPending(
                         this.repo, this.config.AutoCaptureRepairPerCycle)
                 } catch as err {

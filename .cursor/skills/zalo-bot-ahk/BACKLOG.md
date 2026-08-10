@@ -116,7 +116,7 @@ oldest-first audit shard still provides eventual coverage.
 
 - Startup popup accepts drag/drop or file selection.
 - `group_name` rows are deduplicated in file order; configured outputs are excluded.
-- Every watch cycle searches all file rows sequentially, then waits and restarts.
+- Cycle 1 searches all file rows; cycle 2+ intersects file rows with unread groups.
 - Acc-v2 remains available for conversation text/image elements, not source discovery.
 
 ---
