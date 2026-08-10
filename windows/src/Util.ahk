@@ -47,7 +47,7 @@ WriteTextFile(path, content) {
     dir := RegExReplace(path, "\\[^\\]+$")
     if dir != path
         EnsureDir(dir)
-    temp := path ".tmp." A_Pid "." A_TickCount
+    temp := path ".tmp." ProcessExist() "." A_TickCount
     FileAppend content, temp, "UTF-8-RAW"
     FileMove temp, path, 1
 }

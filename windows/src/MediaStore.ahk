@@ -58,7 +58,7 @@ class ListingMediaStore {
 
     PrepareArchive(listingId, append := false) {
         listingDir := this.ListingDir(listingId)
-        generation := CompactStamp() "." A_Pid "." A_TickCount
+        generation := CompactStamp() "." ProcessExist() "." A_TickCount
         generationDir := EnsureDir(
             listingDir "\generations\" generation)
 
