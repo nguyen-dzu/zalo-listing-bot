@@ -1,4 +1,5 @@
 #Requires AutoHotkey v2.0
+#Include Parser.ahk
 ; Composer.ahk — Builder: batch listings into outbound Zalo messages
 
 class MessageComposer {

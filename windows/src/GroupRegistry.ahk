@@ -1,6 +1,8 @@
 #Requires AutoHotkey v2.0
 ; GroupRegistry.ahk — Repository: source groups loaded from CSV/XLSX
 
+#Include Util.ahk
+
 class GroupRegistry {
     __New(config) {
         this.config := config

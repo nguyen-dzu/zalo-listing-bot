@@ -1,6 +1,8 @@
 #Requires AutoHotkey v2.0
 ; GroupActivity.ahk — pure unread detection + bounded sequential harvest planning
 
+#Include GroupRegistry.ahk
+
 class GroupActivityDetector {
     ; Zalo may expose textual unread labels in copied group-list content.
     ; When it does not, scheduler audit shards guarantee eventual coverage.

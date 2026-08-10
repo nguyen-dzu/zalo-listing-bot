@@ -19,8 +19,8 @@ class DurableListingPublisher {
     RunSession(maxBatches := 0, bypassCooldown := false) {
         if this.running
             throw Error("Publish session đang chạy.")
-        if !bypassCooldown
-            && this.nextSessionAt != "" && this.nextSessionAt > CompactStamp()
+        if (!bypassCooldown
+            && this.nextSessionAt != "" && this.nextSessionAt > CompactStamp())
             throw Error("Publish đang cooldown đến " this.nextSessionAt ".")
         if !this._WithinActiveHours()
             throw Error("Ngoài khung giờ publish đã cấu hình.")

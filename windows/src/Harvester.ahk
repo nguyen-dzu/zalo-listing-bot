@@ -293,10 +293,10 @@ class MessageHarvester {
             this.state.MarkSeen(groupName, hash)
             result["saved"]++
             result["saved_records"].Push(record)
-            if this.mediaCapturer
+            if (this.mediaCapturer
                 && this.config.AutoCapture
                 && ((record.Has("image_count") && record["image_count"] > 0)
-                    || this.config.AutoCaptureProbeImages) {
+                    || this.config.AutoCaptureProbeImages)) {
                 if this.mediaCapturer.CaptureForRecord(groupName, record)
                     result["media_captured"]++
                 else

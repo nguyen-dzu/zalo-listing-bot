@@ -21,7 +21,7 @@ if not exist "%BOT%" (
 )
 set "MISSING="
 for %%F in (
-  Util.ahk JSON.ahk Config.ahk TableLoader.ahk GroupRegistry.ahk
+  BotModules.ahk Util.ahk JSON.ahk Config.ahk TableLoader.ahk GroupRegistry.ahk
   SourceGroupFile.ahk BotControlWindow.ahk BlockList.ahk Parser.ahk
   Storage.ahk StateStore.ahk QueueStore.ahk MediaStore.ahk Composer.ahk
   ZaloUI.ahk Acc.ahk GroupActivity.ahk MediaCapturer.ahk Harvester.ahk

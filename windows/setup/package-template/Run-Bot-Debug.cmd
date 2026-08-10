@@ -42,7 +42,7 @@ for %%C in (
     set "SRC_DIR=%%~dpC"
     set "SRC_OK=1"
     for %%F in (
-      Util.ahk JSON.ahk Config.ahk TableLoader.ahk GroupRegistry.ahk
+      BotModules.ahk Util.ahk JSON.ahk Config.ahk TableLoader.ahk GroupRegistry.ahk
       SourceGroupFile.ahk BotControlWindow.ahk BlockList.ahk Parser.ahk
       Storage.ahk StateStore.ahk QueueStore.ahk MediaStore.ahk Composer.ahk
       ZaloUI.ahk Acc.ahk GroupActivity.ahk MediaCapturer.ahk Harvester.ahk
@@ -58,7 +58,7 @@ for %%C in (
     ) else (
       echo [CANH BAO] Bo src thieu file include — bo qua: %%~C
       for %%F in (
-        Util.ahk JSON.ahk Config.ahk TableLoader.ahk GroupRegistry.ahk
+        BotModules.ahk Util.ahk JSON.ahk Config.ahk TableLoader.ahk GroupRegistry.ahk
         SourceGroupFile.ahk BotControlWindow.ahk BlockList.ahk Parser.ahk
         Storage.ahk StateStore.ahk QueueStore.ahk MediaStore.ahk Composer.ahk
         ZaloUI.ahk Acc.ahk GroupActivity.ahk MediaCapturer.ahk Harvester.ahk
@@ -101,11 +101,15 @@ if not defined AHK_EXE (
 
 if not exist "data" mkdir "data"
 set "ERRLOG=%CD%\data\ahk-stderr.log"
+set "REPO_DATA="
+if /I "!BOT_SOURCE!"=="repo windows\src" set "REPO_DATA=%CD%\..\..\data"
+if not defined REPO_DATA if /I "!BOT_SOURCE!"=="parent src" set "REPO_DATA=%CD%\..\data"
 del /q "!ERRLOG!" 2>nul
 
 echo Nguon script: !BOT_SOURCE!
 echo AutoHotkey  : !AHK_EXE!
 echo Bot.ahk     : !BOT_AHK!
+if defined REPO_DATA echo Log repo    : !REPO_DATA\
 echo.
 echo Dang chay (loi ghi vao data\ahk-stderr.log)...
 echo.
@@ -120,7 +124,7 @@ if !EXITCODE! neq 0 (
   echo  Bot thoat voi ma loi !EXITCODE!
   echo.
   echo  Ma loi thuong gap:
-  echo    2 = thieu file include ^(Acc.ahk^) hoac dist\src cu
+  echo    2 = loi load script ^(syntax / thieu #Include^) — xem ahk-stderr.log
   echo    1 = loi khoi dong ^(xem startup-error.log^)
 )
 if exist "data\ahk-stderr.log" (
@@ -130,14 +134,30 @@ if exist "data\ahk-stderr.log" (
     echo.
   )
 )
+if defined REPO_DATA if exist "!REPO_DATA!\ahk-stderr.log" (
+  for %%F in ("!REPO_DATA!\ahk-stderr.log") do if %%~zF gtr 0 (
+    echo  === repo ahk-stderr.log ===
+    type "!REPO_DATA!\ahk-stderr.log"
+    echo.
+  )
+)
 if exist "data\startup-error.log" (
   echo  === startup-error.log ===
   type "data\startup-error.log"
   echo.
 )
-if !EXITCODE! neq 0 if exist "%CD%\..\..\src\diag-startup.ahk" (
-  echo  Chay them diag-startup.ahk...
-  "!AHK_EXE!" "%CD%\..\..\src\diag-startup.ahk"
+if defined REPO_DATA if exist "!REPO_DATA!\startup-error.log" (
+  echo  === repo startup-error.log ===
+  type "!REPO_DATA!\startup-error.log"
+  echo.
+)
+set "DIAG_AHK="
+if exist "%CD%\..\..\src\diag-bot.ahk" set "DIAG_AHK=%CD%\..\..\src\diag-bot.ahk"
+if not defined DIAG_AHK if exist "%CD%\..\src\diag-bot.ahk" set "DIAG_AHK=%CD%\..\src\diag-bot.ahk"
+if not defined DIAG_AHK if exist "%CD%\src\diag-bot.ahk" set "DIAG_AHK=%CD%\src\diag-bot.ahk"
+if !EXITCODE! neq 0 if defined DIAG_AHK (
+  echo  Chay them diag-bot.ahk...
+  "!AHK_EXE!" "!DIAG_AHK!"
 )
 echo.
 pause

@@ -1,7 +1,9 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 
-; Admin + config path trước khi load module (release: exe cạnh config/; dev: src/ + ../config).
+#Include BotModules.ahk
+
+; Admin + config path trước khi chạy (release: exe cạnh config/; dev: src/ + ../config).
 DetectAppRootEarly(dir) {
     Loop 6 {
         if DirExist(dir "\config")
@@ -13,39 +15,24 @@ DetectAppRootEarly(dir) {
     }
     return dir
 }
-_startupRoot := DetectAppRootEarly(A_ScriptDir)
-_startupIni := _startupRoot "\config\config.ini"
-if !FileExist(_startupIni)
-    _startupIni := _startupRoot "\config\config.example.ini"
-if FileExist(_startupIni) {
-    _requireAdmin := Trim(IniRead(_startupIni, "Startup", "RequireAdmin", "0"))
-    if (_requireAdmin = "1" || StrLower(_requireAdmin) = "true") && !A_IsAdmin {
-        try Run('*RunAs "' A_ScriptFullPath '"')
-        ExitApp()
-    }
-}
 
 Persistent
 
-#Include Util.ahk
-#Include JSON.ahk
-#Include Config.ahk
-#Include TableLoader.ahk
-#Include GroupRegistry.ahk
-#Include SourceGroupFile.ahk
-#Include BotControlWindow.ahk
-#Include BlockList.ahk
-#Include Parser.ahk
-#Include Storage.ahk
-#Include StateStore.ahk
-#Include QueueStore.ahk
-#Include MediaStore.ahk
-#Include Composer.ahk
-#Include ZaloUI.ahk
-#Include GroupActivity.ahk
-#Include MediaCapturer.ahk
-#Include Harvester.ahk
-#Include Publisher.ahk
+try {
+    _startupRoot := DetectAppRootEarly(A_ScriptDir)
+    _startupIni := _startupRoot "\config\config.ini"
+    if !FileExist(_startupIni)
+        _startupIni := _startupRoot "\config\config.example.ini"
+    if FileExist(_startupIni) {
+        _requireAdmin := Trim(IniRead(_startupIni, "Startup", "RequireAdmin", "0"))
+        if (_requireAdmin = "1" || StrLower(_requireAdmin) = "true") && !A_IsAdmin {
+            try Run('*RunAs "' A_ScriptFullPath '"')
+            ExitApp()
+        }
+    }
+} catch as err {
+    LogStartupError("Admin preflight: " err.Message)
+}
 
 ; ── Facade: one method per operator action ────────────────
 class ListingBotService {
@@ -61,7 +48,6 @@ class ListingBotService {
     _Build() {
         this.registry := GroupRegistry(this.config)
         this.groupsDiscovered := false
-        this._LoadSourceGroups()
         this.blockList := BlockList(this.config)
         this.state := HarvestStateStore(this.config)
         this.queue := PublishQueueStore(this.config)
@@ -110,14 +96,14 @@ class ListingBotService {
     }
 
     _MediaMetadataMatches(entry, metadata) {
-        if !entry.Has("media_metadata")
-            || entry["media_metadata"].Length != metadata.Length
+        if (!entry.Has("media_metadata")
+            || entry["media_metadata"].Length != metadata.Length)
             return false
         for index, item in metadata {
             current := entry["media_metadata"][index]
-            if !current.Has("path") || !current.Has("size")
+            if (!current.Has("path") || !current.Has("size")
                 || current["path"] != item["path"]
-                || current["size"] != item["size"]
+                || current["size"] != item["size"])
                 return false
         }
         return true
@@ -130,6 +116,7 @@ class ListingBotService {
         this.config.Reload()
         this.config.SourceGroupFilePath := sourceFile
         this._Build()
+        this._LoadSourceGroups()
         this._Notify("Đã nạp lại cấu hình",
             this.registry.SourceGroups().Length " nhóm nguồn, "
             . this.registry.MainGroups().Length " nhóm chính, "
@@ -490,12 +477,12 @@ class ListingBotService {
                 try {
                     ; Cycle 1 scans the complete spreadsheet in row order.
                     ; Cycle 2+ selects only spreadsheet groups marked unread.
-                    if this.config.SourceGroupReloadEachCycle
-                        || !this.groupsDiscovered
+                    if (this.config.SourceGroupReloadEachCycle
+                        || !this.groupsDiscovered)
                         this._LoadSourceGroups()
                     sources := this.registry.SourceGroups()
-                    if !fullScanCompleted
-                        || !this.config.WatchOnlyUnreadAfterFirstCycle {
+                    if (!fullScanCompleted
+                        || !this.config.WatchOnlyUnreadAfterFirstCycle) {
                         plan := Map(
                             "mode", "source_file_full",
                             "groups", sources,
@@ -518,9 +505,9 @@ class ListingBotService {
                         this.config.PublishBatchesPerWatchCycle
                     harvest := this.harvester.HarvestGroups(
                         plan["groups"], ObjBindMethod(this, "_AfterWatchGroup"))
-                    if plan["mode"] = "source_file_full"
+                    if (plan["mode"] = "source_file_full"
                         && harvest["groups"] = plan["groups"].Length
-                        && !this.watchStopRequested
+                        && !this.watchStopRequested)
                         fullScanCompleted := true
                     mediaRepair := this.mediaCapturer.RepairPending(
                         this.repo, this.config.AutoCaptureRepairPerCycle)
@@ -782,8 +769,13 @@ try {
     } else if cfg.SourceGroupFilePath = "" {
         throw Error(
             "Chua cau hinh [Groups] SourceFile va popup chon file dang tat.")
+    } else if !FileExist(cfg.SourceGroupFilePath) {
+        throw Error(
+            "Khong tim thay file nhom input:`n" cfg.SourceGroupFilePath
+            . "`n`nChay:`n  copy config\source-groups.example.csv config\source-groups.csv")
     }
     bot := ListingBotService(cfg)
+    bot._LoadSourceGroups()
     botControl := BotControlWindow(bot, cfg)
     botControl.Show()
 

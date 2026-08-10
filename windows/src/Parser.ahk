@@ -1,6 +1,8 @@
 #Requires AutoHotkey v2.0
 ; Parser.ahk — Strategy: turn raw Zalo text into structured listing objects
 
+#Include Util.ahk
+
 class ListingParser {
     ; Ordered: the first matching rule wins, so specific labels precede generic ones
     ; ("Giá điện" must be tested before "Giá").

@@ -1,6 +1,10 @@
 #Requires AutoHotkey v2.0
 ; SourceGroupFile.ahk — startup picker + CSV/XLSX source-group loader.
 
+#Include Util.ahk
+#Include TableLoader.ahk
+#Include GroupRegistry.ahk
+
 class SourceGroupFile {
     static LoadNames(path, sheetName := "", preferredColumn := "group_name") {
         if !FileExist(path)
