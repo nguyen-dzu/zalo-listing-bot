@@ -428,6 +428,30 @@ Check("parse text danh sách nhóm bỏ nhãn/member/trùng",
     && parsedGroupNames[1] = "Nhóm Input 1"
     && parsedGroupNames[2] = "Nhóm Output A")
 
+communityText := "
+(
+Danh sách nhóm
+Nhóm
+Nhóm Cho Thuê Q1
+50 thành viên
+Cộng đồng
+Cộng đồng BĐS Sài Gòn
+120 thành viên · 3 online
+)"
+communityNames := GroupRegistry.ParseCapturedNames(communityText)
+Check("parse ca nhom va cong dong",
+    communityNames.Length = 2
+    && communityNames[1] = "Nhóm Cho Thuê Q1"
+    && communityNames[2] = "Cộng đồng BĐS Sài Gòn")
+
+manualPath := A_Temp "\zalo-groups-manual-test.txt"
+WriteTextFile(manualPath, "# comment`nNhóm Manual A`n;skip`nNhóm Manual B`n")
+manualNames := GroupRegistry.LoadManualNames(manualPath)
+Check("manual list fallback",
+    manualNames.Length = 2 && manualNames[1] = "Nhóm Manual A")
+if FileExist(manualPath)
+    FileDelete manualPath
+
 Section("incremental harvest scheduler")
 schedulerGroups := [
     Map("group_name", "Nhóm A"),

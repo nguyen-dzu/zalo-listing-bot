@@ -393,20 +393,40 @@ class ListingBotService {
 
     _RefreshGroupsFromZalo() {
         raw := this.ui.CaptureAllGroupListText()
+        manualUsed := false
+        if Trim(raw) = "" {
+            manualNames := GroupRegistry.LoadManualNames(
+                this.config.GroupListManualFile)
+            if manualNames.Length {
+                raw := StrJoin(manualNames, "`n")
+                manualUsed := true
+            }
+        }
         this.lastGroupListRaw := raw
         WriteTextFile(this.config.GroupListCaptureFile, raw)
         names := GroupRegistry.ParseCapturedNames(
             raw, this.config.GroupListIgnoredLabels)
         count := this.registry.SetDiscovered(names)
         sources := this.registry.SourceGroups().Length
-        if !count || !sources
+        if !count {
             throw Error(
-                "Không đọc được danh sách nhóm từ Zalo. Xem file "
-                . this.config.GroupListCaptureFile)
+                "Khong doc duoc danh sach nhom/cong dong tu Zalo (clipboard rong).`n"
+                . "1) Mo Zalo tab Alt+3, thu chinh [Groups] ListPaneClickX/Y trong config.ini`n"
+                . "2) Hoac tao file " this.config.GroupListManualFile
+                . " (1 ten/dong)`n"
+                . "Raw da luu: " this.config.GroupListCaptureFile)
+        }
+        if !sources {
+            throw Error(
+                "Doc duoc " count " muc nhung 0 nhom nguon (tat ca trung output?).`n"
+                . "Kiem tra [Groups] OutputGroups trong config.ini.`n"
+                . "Raw: " this.config.GroupListCaptureFile)
+        }
         this.groupsDiscovered := true
-        this._Notify("Đã đọc nhóm từ Zalo",
-            count " nhóm tổng | " sources " input | "
-            . this.registry.MainGroups().Length " output", 1)
+        suffix := manualUsed ? " (manual list)" : ""
+        this._Notify("Da doc nhom tu Zalo",
+            count " tong | " sources " input | "
+            . this.registry.MainGroups().Length " output" suffix, 1)
         return true
     }
 

@@ -12,9 +12,15 @@ cfg := AppConfig.Instance()
 reg := GroupRegistry(cfg)
 ui := ZaloUIAdapter(cfg)
 raw := ui.CaptureAllGroupListText()
+if Trim(raw) = "" {
+    manual := GroupRegistry.LoadManualNames(cfg.GroupListManualFile)
+    if manual.Length
+        raw := StrJoin(manual, "`n")
+}
 WriteTextFile(cfg.GroupListCaptureFile, raw)
 reg.SetDiscovered(GroupRegistry.ParseCapturedNames(
     raw, cfg.GroupListIgnoredLabels))
+FileAppend "raw_chars=" StrLen(raw) "`n", out, "UTF-8-RAW"
 FileAppend "sources=" reg.SourceGroups().Length "`n", out, "UTF-8-RAW"
 for g in reg.SourceGroups()
     FileAppend "S:" g["group_name"] "`n", out, "UTF-8-RAW"

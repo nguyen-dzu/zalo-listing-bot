@@ -11,6 +11,7 @@ windows/data/queue/
 # Runtime config (contains real group names)
 windows/config/config.ini
 windows/config/blocklist.csv
+windows/config/groups-manual.txt
 windows/config/*.xlsx
 !windows/config/*.example.*
 

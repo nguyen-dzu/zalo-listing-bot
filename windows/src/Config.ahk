@@ -76,6 +76,22 @@ class AppConfig {
             this._Int(ini, "Groups", "ListSettleMs", 1500))
         this.GroupListScanPages := Max(1,
             this._Int(ini, "Groups", "ListScanPages", 80))
+        this.GroupListPaneClickXRatio := this._Float(
+            ini, "Groups", "ListPaneClickX", 0.20)
+        this.GroupListPaneClickYRatio := this._Float(
+            ini, "Groups", "ListPaneClickY", 0.42)
+        this.GroupCommunityTabClickXRatio := this._Float(
+            ini, "Groups", "CommunityTabClickX", 0.28)
+        this.GroupCommunityTabClickYRatio := this._Float(
+            ini, "Groups", "CommunityTabClickY", 0.14)
+        this.CaptureCommunities := this._Bool(
+            ini, "Groups", "CaptureCommunities", true)
+        this.GroupListScrollMode := StrLower(this._Read(
+            ini, "Groups", "ListScrollMode", "wheel"))
+        this.GroupListWheelSteps := Max(1,
+            this._Int(ini, "Groups", "ListWheelSteps", 8))
+        this.GroupListManualFile := this._Resolve(this._Read(
+            ini, "Groups", "ManualListFile", "config\groups-manual.txt"))
         this.GroupListIgnoredLabels := this._PipeList(this._Read(
             ini, "Groups", "IgnoredLabels", ""))
         this.GroupUnreadMarkerPattern := this._Read(
@@ -249,6 +265,13 @@ class AppConfig {
     _Int(ini, section, key, default) {
         value := this._Read(ini, section, key, default)
         return IsInteger(value) ? Integer(value) : default
+    }
+
+    _Float(ini, section, key, default) {
+        value := this._Read(ini, section, key, default)
+        if IsNumber(value)
+            return Number(value)
+        return default
     }
 
     _Bool(ini, section, key, default) {

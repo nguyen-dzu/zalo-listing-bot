@@ -61,17 +61,45 @@ class ZaloUIAdapter {
         return captured
     }
 
-    ; Open Zalo's complete group list (Alt+3), scan pages, and copy visible text.
-    ; Raw text is parsed by GroupRegistry so UI automation stays in this adapter.
+    ; Open Zalo's group + community lists (Alt+3), scroll the left pane, copy text.
     CaptureAllGroupListText() {
+        combined := ""
+        combined := this._MergeCapturedText(
+            combined, this._CaptureListSection(false))
+        if this.config.CaptureCommunities {
+            combined := this._MergeCapturedText(
+                combined, this._CaptureListSection(true))
+        }
+        return combined
+    }
+
+    _MergeCapturedText(existing, addition) {
+        addition := Trim(NormalizeNewlines(addition))
+        if addition = ""
+            return existing
+        if existing = ""
+            return addition
+        return existing "`n" addition
+    }
+
+    _CaptureListSection(communitiesTab := false) {
         this.Activate()
         Send "{Esc}"
         Sleep 150
         Send this.config.GroupListTabHotkey
         Sleep this.config.GroupListSettleMs
 
-        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
-        Click(x + Round(w * 0.58), y + Round(h * 0.45))
+        WinGetPos &winX, &winY, &winW, &winH, "ahk_exe " this.config.ExeName
+        if communitiesTab {
+            tabX := winX + Round(winW * this.config.GroupCommunityTabClickXRatio)
+            tabY := winY + Round(winH * this.config.GroupCommunityTabClickYRatio)
+            Click(tabX, tabY)
+            Sleep this.config.GroupListSettleMs
+        }
+
+        paneX := winX + Round(winW * this.config.GroupListPaneClickXRatio)
+        paneY := winY + Round(winH * this.config.GroupListPaneClickYRatio)
+        Click(paneX, paneY)
         Sleep this.config.PasteDelayMs
         Send "{Home}"
         Sleep this.config.GroupListSettleMs
@@ -90,7 +118,7 @@ class ZaloUIAdapter {
                     ? String(A_Clipboard) : ""
                 page := Trim(NormalizeNewlines(page))
                 if page != ""
-                    combined .= (combined = "" ? "" : "`n") page
+                    combined := this._MergeCapturedText(combined, page)
 
                 if page != "" && page = previous
                     repeated++
@@ -100,15 +128,23 @@ class ZaloUIAdapter {
                     break
                 previous := page
 
-                ; Collapse selection, then advance the virtualized group list.
-                Send "{Right}"
-                Send "{PgDn}"
-                Sleep this.config.GroupListSettleMs
+                Click(paneX, paneY)
+                this._AdvanceGroupListScroll()
             }
         } finally {
             A_Clipboard := old
         }
         return combined
+    }
+
+    _AdvanceGroupListScroll() {
+        if this.config.GroupListScrollMode = "wheel" {
+            Loop this.config.GroupListWheelSteps
+                Send "{WheelDown}"
+        } else {
+            Send "{PgDn}"
+        }
+        Sleep this.config.GroupListSettleMs
     }
 
     _ClickMessagePane() {

@@ -39,6 +39,7 @@ New-Item -ItemType Directory -Force -Path $configDir, $setupOut,
 # Sample config
 Copy-Item (Join-Path $windowsRoot "config\config.example.ini") (Join-Path $configDir "config.example.ini")
 Copy-Item (Join-Path $windowsRoot "config\blocklist.example.csv") (Join-Path $configDir "blocklist.example.csv")
+Copy-Item (Join-Path $windowsRoot "config\groups-manual.example.txt") (Join-Path $configDir "groups-manual.example.txt")
 Copy-Item (Join-Path $configDir "config.example.ini") (Join-Path $configDir "config.ini")
 Copy-Item (Join-Path $configDir "blocklist.example.csv") (Join-Path $configDir "blocklist.csv")
 
