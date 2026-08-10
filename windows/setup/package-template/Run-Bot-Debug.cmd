@@ -114,7 +114,7 @@ echo.
 echo Dang chay (loi ghi vao data\ahk-stderr.log)...
 echo.
 
-"!AHK_EXE!" /ErrorStdOut "!ERRLOG!" "!BOT_AHK!"
+"!AHK_EXE!" /ErrorStdOut "!BOT_AHK!" > "!ERRLOG!" 2>&1
 set "EXITCODE=!errorlevel!"
 
 :AfterRun

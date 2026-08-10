@@ -81,7 +81,7 @@ echo.
 echo Dang chay Bot.ahk...
 echo.
 
-"%AHK_EXE%" /ErrorStdOut "%ERRLOG%" "%BOT%"
+"%AHK_EXE%" /ErrorStdOut "%BOT%" > "%ERRLOG%" 2>&1
 set "EXITCODE=!errorlevel!"
 
 echo.
@@ -90,7 +90,7 @@ if !EXITCODE! neq 0 (
   echo.
   if !EXITCODE! equ 2 (
     echo Ma 2 = loi load script. Dang chay load-check.ahk...
-    "!AHK_EXE!" /ErrorStdOut "!ERRLOG!" "!LOAD_CHECK!"
+    "!AHK_EXE!" /ErrorStdOut "!LOAD_CHECK!" > "!ERRLOG!" 2>&1
     echo.
   )
 )
