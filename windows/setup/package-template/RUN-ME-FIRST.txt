@@ -1,0 +1,32 @@
+Zalo Listing Bot — Portable (Windows)
+=====================================
+
+1. Giai nen folder nay vao vi tri bat ky (vi du D:\Apps\ZaloListingBot)
+
+2. Chay Install.cmd
+   - Tao config.ini / blocklist.csv neu chua co
+   - Huong dan mo bot
+
+3. Danh sach nhom
+   - Bot tu mo Alt+3 va doc toan bo nhom tren Zalo PC
+   - 5 nhom output duoc khai bao tai [Groups] OutputGroups trong config.ini
+   - Tat ca nhom con lai tu dong la input; khong dung groups.csv
+
+4. Chay ZaloListingBot.exe
+   - Bot tu cho Zalo, tu harvest + publish (AutoRunWatch=1)
+   - Dung khan cap: Ctrl+Shift+K
+
+5. (Tuy chon) Tu mo khi dang nhap Windows:
+   setup\install-startup.cmd
+
+Yeu cau:
+- Windows 10/11
+- Zalo PC da cai, account bot trong du nhom
+- Khong can cai AutoHotkey neu da co ZaloListingBot.exe
+
+Log / du lieu:
+- data\listings\   — tin da harvest
+- data\queue\      — hang doi publish
+- data\media\      — archive anh
+
+Sua cau hinh: config\config.ini

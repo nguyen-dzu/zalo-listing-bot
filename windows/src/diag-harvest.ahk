@@ -10,6 +10,7 @@
 #Include Parser.ahk
 #Include Storage.ahk
 #Include StateStore.ahk
+#Include QueueStore.ahk
 #Include Composer.ahk
 #Include ZaloUI.ahk
 #Include Harvester.ahk
@@ -25,10 +26,16 @@ Log(msg) {
 cfg := AppConfig.Instance()
 reg := GroupRegistry(cfg)
 ui := ZaloUIAdapter(cfg)
-harvester := MessageHarvester(cfg, ui, reg, BlockList(cfg), HarvestStateStore(cfg), ListingRepository(cfg))
+queue := PublishQueueStore(cfg)
+repo := ListingRepository(cfg, queue)
+harvester := MessageHarvester(cfg, ui, reg, BlockList(cfg), HarvestStateStore(cfg), repo)
 
 Log("root=" cfg.Root)
 Log("Zalo running: " ui.IsRunning())
+rawGroups := ui.CaptureAllGroupListText()
+WriteTextFile(cfg.GroupListCaptureFile, rawGroups)
+reg.SetDiscovered(GroupRegistry.ParseCapturedNames(
+    rawGroups, cfg.GroupListIgnoredLabels))
 for g in reg.SourceGroups()
     Log("SOURCE: [" g["group_name"] "]")
 for g in reg.MainGroups()

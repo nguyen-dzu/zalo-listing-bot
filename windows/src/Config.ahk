@@ -11,7 +11,7 @@ class AppConfig {
     }
 
     __New() {
-        this.Root := RegExReplace(A_ScriptDir, "\\[^\\]+$")
+        this.Root := DetectAppRoot()
         this.IniPath := this.Root "\config\config.ini"
         examplePath := this.Root "\config\config.example.ini"
 
@@ -21,7 +21,6 @@ class AppConfig {
             FileCopy examplePath, this.IniPath, false
         }
 
-        this._SeedFromExample("config\groups.csv", "config\groups.example.csv")
         this._SeedFromExample("config\blocklist.csv", "config\blocklist.example.csv")
 
         this.Reload()
@@ -39,18 +38,54 @@ class AppConfig {
 
         ; ── Zalo ──
         this.ExeName := this._Read(ini, "Zalo", "ExeName", "Zalo.exe")
+        this.ZaloExePath := this._Read(ini, "Zalo", "ExePath", "")
 
         ; ── Paths ──
         this.DataDir := this._Resolve(this._Read(ini, "Paths", "DataDir", "data"))
         this.ListingsFile := this._Resolve(this._Read(ini, "Paths", "ListingsFile", "data\listings.json"))
+        this.ListingsDir := this._Resolve(this._Read(ini, "Paths", "ListingsDir", "data\listings"))
+        this.MediaDir := this._Resolve(this._Read(ini, "Paths", "MediaDir", "data\media"))
+        this.QueueDir := this._Resolve(this._Read(ini, "Paths", "QueueDir", "data\queue"))
+        this.QueueEventsFile := this._Resolve(this._Read(
+            ini, "Paths", "QueueEventsFile", "data\queue\events.jsonl"))
+        this.QueueSnapshotFile := this._Resolve(this._Read(
+            ini, "Paths", "QueueSnapshotFile", "data\queue\snapshot.json"))
+        this.QueueLogFile := this._Resolve(this._Read(
+            ini, "Paths", "QueueLogFile", "data\queue\publish.log"))
         this.AccessLogFile := this._Resolve(this._Read(ini, "Paths", "AccessLogFile", "data\access_log.json"))
         this.HarvestStateFile := this._Resolve(this._Read(ini, "Paths", "HarvestStateFile", "data\harvest_state.json"))
+        this.HarvestStateDir := this._Resolve(this._Read(
+            ini, "Paths", "HarvestStateDir", "data\harvest_state"))
         EnsureDir(this.DataDir)
+        EnsureDir(this.ListingsDir)
+        EnsureDir(this.MediaDir)
+        EnsureDir(this.QueueDir)
+        EnsureDir(this.HarvestStateDir)
 
-        ; ── Group + blocklist tables ──
-        this.GroupsXlsx := this._Resolve(this._Read(ini, "Groups", "GroupsXlsx", "config\zalo-groups.xlsx"))
-        this.GroupsSheet := this._Read(ini, "Groups", "GroupsSheet", "Groups")
-        this.GroupsCsv := this._Resolve(this._Read(ini, "Groups", "GroupsCsv", "config\groups.csv"))
+        ; ── Groups discovered from Zalo + configured output groups ──
+        this.OutputGroupNames := this._PipeList(this._Read(
+            ini, "Groups", "OutputGroups",
+            'Giỏ hàng cao thiên ⏏️ 6tr Phú Nhuận Bình Thạnh'
+            . '|Giỏ hàng cao thiên ⬇️ 5tr9 Phú Nhuận Bình Thạnh'
+            . '|Giỏ Hàng "Quận Ngoại Thành" Cao Thiên'
+            . '|Giỏ hàng Quận số Cao Thiên'
+            . '|Giỏ hàng NNC Cao Thiên.'))
+        this.GroupListTabHotkey := this._Read(
+            ini, "Groups", "ListTabHotkey", "!3")
+        this.GroupListSettleMs := Max(500,
+            this._Int(ini, "Groups", "ListSettleMs", 1500))
+        this.GroupListScanPages := Max(1,
+            this._Int(ini, "Groups", "ListScanPages", 80))
+        this.GroupListIgnoredLabels := this._PipeList(this._Read(
+            ini, "Groups", "IgnoredLabels", ""))
+        this.GroupUnreadMarkerPattern := this._Read(
+            ini, "Groups", "UnreadMarkerPattern",
+            "i)(?:tin nhắn mới|tin chưa đọc|chưa đọc|unread|new messages?)")
+        this.GroupListCaptureFile := this._Resolve(this._Read(
+            ini, "Paths", "GroupListCaptureFile",
+            "data\zalo-groups-capture.txt"))
+
+        ; ── Blocklist table ──
         this.BlocklistXlsx := this._Resolve(this._Read(ini, "Groups", "BlocklistXlsx", "config\zalo-groups.xlsx"))
         this.BlocklistSheet := this._Read(ini, "Groups", "BlocklistSheet", "Blocklist")
         this.BlocklistCsv := this._Resolve(this._Read(ini, "Groups", "BlocklistCsv", "config\blocklist.csv"))
@@ -67,10 +102,52 @@ class AppConfig {
         this.MaxMessageChars := this._Int(ini, "Output", "MaxMessageChars", 1800)
         this.MaskPhone := this._Bool(ini, "Output", "MaskPhone", true)
         this.PhoneHint := this._Read(ini, "Output", "PhoneHint", 'Nhắn bot "SĐT {room_code}" để lấy số')
+        this.OneMessagePerListing := this._Bool(ini, "Output", "OneMessagePerListing", false)
+        this.ListingsPerMessage := Max(1, this._Int(ini, "Output", "ListingsPerMessage", 5))
+        this.ListingSeparator := this._Read(ini, "Output", "ListingSeparator", "=======================")
+        this.IncludeGroupHeader := this._Bool(ini, "Output", "IncludeGroupHeader", false)
 
         ; ── Images ──
-        this.ImageStrategy := StrLower(this._Read(ini, "Images", "Strategy", "forward"))
+        this.ImageStrategy := StrLower(this._Read(ini, "Images", "Strategy", "clipboard"))
         this.ForwardHotkey := this._Read(ini, "Images", "ForwardHotkey", "^q")
+        this.ImagesBeforeText := this._Bool(ini, "Images", "ImagesBeforeText", true)
+        this.RelayImagesPerListing := this._Bool(ini, "Images", "RelayPerListing", true)
+        this.RelayImagesPauseMs := this._Int(ini, "Images", "RelayPauseMs", 5000)
+        this.ImageCopyHotkey := this._Read(ini, "Images", "ImageCopyHotkey", "^c")
+        this.MediaRequired := this._Bool(ini, "Images", "MediaRequired", true)
+        this.MediaCapturePauseMs := this._Int(ini, "Images", "MediaCapturePauseMs", 5000)
+        this.AutoCapture := this._Bool(ini, "Images", "AutoCapture", true)
+        this.AutoCaptureAnchor := StrLower(
+            this._Read(ini, "Images", "AutoCaptureAnchor", "room_code"))
+        this.AutoCaptureMaxRetries := Max(0,
+            this._Int(ini, "Images", "AutoCaptureMaxRetries", 2))
+        this.ImageSelectMode := StrLower(
+            this._Read(ini, "Images", "ImageSelectMode", "shift_up"))
+        this.ImageSelectStepPx := Max(40,
+            this._Int(ini, "Images", "ImageSelectStepPx", 80))
+        this.FindInChatHotkey := this._Read(ini, "Images", "FindInChatHotkey", "^f")
+
+        ; ── Watch loop ──
+        this.WatchIntervalMs := Max(60000,
+            this._Int(ini, "Watch", "IntervalMs", 300000))
+        this.WatchDrainQueueEachCycle := this._Bool(ini, "Watch", "DrainQueueEachCycle", true)
+        this.WatchBypassSessionCooldown := this._Bool(
+            ini, "Watch", "BypassSessionCooldown", true)
+        this.WatchStopOnUncertain := this._Bool(ini, "Watch", "StopOnUncertain", true)
+        this.WatchActiveHoursStart := this._Read(ini, "Watch", "ActiveHoursStart", "")
+        this.WatchActiveHoursEnd := this._Read(ini, "Watch", "ActiveHoursEnd", "")
+
+        ; ── Startup / auto-run ──
+        this.StartupAutoRunWatch := this._Bool(ini, "Startup", "AutoRunWatch", true)
+        this.StartupWaitForZaloSeconds := Max(5,
+            this._Int(ini, "Startup", "WaitForZaloSeconds", 120))
+        this.StartupLaunchZaloIfMissing := this._Bool(
+            ini, "Startup", "LaunchZaloIfMissing", true)
+        this.StartupMaximizeZalo := this._Bool(ini, "Startup", "MaximizeZalo", false)
+        this.StartupDelayMs := Max(0,
+            this._Int(ini, "Startup", "StartupDelayMs", 3000))
+        this.StartupRequireAdmin := this._Bool(ini, "Startup", "RequireAdmin", false)
+        this.StartupEnableHotkeys := this._Bool(ini, "Startup", "EnableHotkeys", false)
 
         ; ── Timing ──
         this.SearchDelayMs := this._Int(ini, "Timing", "SearchDelayMs", 400)
@@ -89,8 +166,63 @@ class AppConfig {
         this.RecheckAfterPublish := this._Bool(ini, "Batch", "RecheckAfterPublish", true)
         this.BetweenBatchesMs := this._Int(ini, "Batch", "BetweenBatchesMs", 2000)
 
+        ; ── Incremental harvest scheduler ──
+        this.HarvestInitialFullScan := this._Bool(
+            ini, "Harvest", "InitialFullScan", true)
+        this.HarvestMaxGroupsPerCycle := Max(1,
+            this._Int(ini, "Harvest", "MaxGroupsPerCycle", 50))
+        this.HarvestAuditGroupsPerCycle := Max(0,
+            this._Int(ini, "Harvest", "AuditGroupsPerCycle", 10))
+        this.HarvestPublishAfterGroups := Max(1,
+            this._Int(ini, "Harvest", "PublishAfterGroups", 5))
+        this.HarvestSaveStateEachGroup := this._Bool(
+            ini, "Harvest", "SaveStateEachGroup", true)
+
+        ; ── Durable publish queue ──
+        this.LeaseSize := this.OneMessagePerListing
+            ? 1
+            : Max(1, this._Int(ini, "PublishQueue", "LeaseSize", 5))
+        this.LeaseTimeoutMs := Max(60000,
+            this._Int(ini, "PublishQueue", "LeaseTimeoutMs", 7200000))
+        this.MaxPublishAttempts := Max(1,
+            this._Int(ini, "PublishQueue", "MaxAttempts", 3))
+        this.RetryBackoffSeconds := Max(1,
+            this._Int(ini, "PublishQueue", "RetryBackoffSeconds", 300))
+        this.QueueCompactEvery := Max(0,
+            this._Int(ini, "PublishQueue", "CompactEveryEvents", 250))
+        this.MaxBatchesPerSession := Max(1,
+            this._Int(ini, "PublishQueue", "MaxBatchesPerSession", 20))
+        this.SessionCooldownMs := Max(0,
+            this._Int(ini, "PublishQueue", "SessionCooldownMs", 300000))
+        this.ListingTtlDays := Max(0,
+            this._Int(ini, "PublishQueue", "ListingTtlDays", 30))
+        this.PublishActiveHoursStart := this._Read(
+            ini, "PublishQueue", "ActiveHoursStart", "")
+        this.PublishActiveHoursEnd := this._Read(
+            ini, "PublishQueue", "ActiveHoursEnd", "")
+
+        ; ── Rate limit / cycle budget ──
+        this.PublishBatchesPerWatchCycle := Max(1,
+            this._Int(ini, "RateLimit", "MaxBatchesPerWatchCycle", 10))
+        this.PublishSendDelayMinMs := Max(0,
+            this._Int(ini, "RateLimit", "SendDelayMinMs", 3000))
+        this.PublishSendDelayMaxMs := Max(
+            this.PublishSendDelayMinMs,
+            this._Int(ini, "RateLimit", "SendDelayMaxMs", 7000))
+        this.PublishGroupDelayMinMs := Max(0,
+            this._Int(ini, "RateLimit", "OutputGroupDelayMinMs", 5000))
+        this.PublishGroupDelayMaxMs := Max(
+            this.PublishGroupDelayMinMs,
+            this._Int(ini, "RateLimit", "OutputGroupDelayMaxMs", 10000))
+        this.HarvestGroupDelayMinMs := Max(0,
+            this._Int(ini, "RateLimit", "HarvestGroupDelayMinMs", 800))
+        this.HarvestGroupDelayMaxMs := Max(
+            this.HarvestGroupDelayMinMs,
+            this._Int(ini, "RateLimit", "HarvestGroupDelayMaxMs", 1600))
+
         ; ── State ──
-        this.MaxSeenHashes := this._Int(ini, "State", "MaxSeenHashes", 500)
+        this.MaxSeenHashes := Max(100,
+            this._Int(ini, "State", "MaxSeenHashes", 2000))
 
         ; ── Hotkeys ──
         this.HotkeyForward := this._Read(ini, "Hotkeys", "ForwardListing", "^+b")
@@ -99,7 +231,13 @@ class AppConfig {
         this.HotkeyPublish := this._Read(ini, "Hotkeys", "PublishMain", "^+g")
         this.HotkeyCycle := this._Read(ini, "Hotkeys", "HarvestAndPublish", "^+j")
         this.HotkeyRelayImages := this._Read(ini, "Hotkeys", "RelayImages", "^+i")
+        this.HotkeyArchiveMedia := this._Read(ini, "Hotkeys", "ArchiveMedia", "^+m")
+        this.HotkeyPausePublish := this._Read(ini, "Hotkeys", "PausePublish", "^+o")
+        this.HotkeyStopPublish := this._Read(ini, "Hotkeys", "StopPublish", "^+k")
+        this.HotkeyResolveUncertain := this._Read(
+            ini, "Hotkeys", "ResolveUncertain", "^+u")
         this.HotkeyReload := this._Read(ini, "Hotkeys", "ReloadConfig", "^+r")
+        this.HotkeyToggleWatch := this._Read(ini, "Hotkeys", "ToggleWatch", "^+w")
         return this
     }
 
@@ -121,6 +259,16 @@ class AppConfig {
     _List(value) {
         items := []
         for part in StrSplit(value, ",") {
+            part := Trim(part)
+            if part != ""
+                items.Push(part)
+        }
+        return items
+    }
+
+    _PipeList(value) {
+        items := []
+        for part in StrSplit(value, "|") {
             part := Trim(part)
             if part != ""
                 items.Push(part)

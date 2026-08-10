@@ -20,10 +20,10 @@ cd zalo-listing-bot
 On first run the bot creates from example files:
 
 - `windows\config\config.ini`
-- `windows\config\groups.csv`
 - `windows\config\blocklist.csv`
 
-Edit `groups.csv` to match real group names, then press `Ctrl+Shift+R` to reload.
+The bot reads the complete Zalo group list through `Alt+3`. Verify the five
+`[Groups] OutputGroups`; every remaining group is an input.
 
 ## Daily operation
 

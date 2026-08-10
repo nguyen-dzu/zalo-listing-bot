@@ -9,10 +9,14 @@ cfg := AppConfig.Instance()
 cfg.Reload()
 ```
 
-Properties: `ExeName`, `DataDir`, `ListingsFile`, `AccessLogFile`, `HarvestStateFile`,
-`GroupsXlsx`, `GroupsSheet`, `GroupsCsv`, `BlocklistXlsx`, `BlocklistSheet`, `BlocklistCsv`,
+Properties: `ExeName`, `DataDir`, `ListingsFile`, `ListingsDir`, `MediaDir`, `QueueDir`,
+`QueueEventsFile`, `QueueSnapshotFile`, `QueueLogFile`, `AccessLogFile`,
+`HarvestStateFile`, `HarvestStateDir`,
+`OutputGroupNames`, `GroupListTabHotkey`, `GroupListScanPages`,
+`BlocklistXlsx`, `BlocklistSheet`, `BlocklistCsv`,
 `CaptureMethod`, `ListingStartPattern`, `ImageMarkerPattern`, `MaxMessagesPerGroup`, `RequiredFields`,
-`Separator`, `MaxMessageChars`, `MaskPhone`, `PhoneHint`, `ImageStrategy`, `ForwardHotkey`,
+`Separator`, `ListingsPerMessage`, `ListingSeparator`, `MaskPhone`, `PhoneHint`,
+`ImageStrategy`, `MediaRequired`, `LeaseSize`, `MaxBatchesPerSession`, `MaxPublishAttempts`,
 `SearchDelayMs`, `OpenChatDelayMs`, `PasteDelayMs`, `SendDelayMs`, `BetweenMessagesMs`,
 `BetweenGroupsMs`, `ForwardDialogMs`, `ClipWaitSeconds`, `MaxSeenHashes`,
 plus the `Hotkey*` values.
@@ -77,7 +81,32 @@ state.Save()
 ```autohotkey
 composer := MessageComposer(cfg)
 chunks := composer.Compose(records)
+text   := composer.ComposeBatch(fiveRecords)
 ids    := composer.CollectIds(records)
+```
+
+### PublishQueueStore
+
+```autohotkey
+queue := PublishQueueStore(cfg)
+lease := queue.LeaseNext(5)          ; Map(token, ids)
+queue.MarkDeliveryIntent(lease["ids"], group, "text")
+queue.CheckpointText(lease["ids"], group)
+queue.CompleteLease(lease["token"])
+queue.FailLease(lease["token"], errorMessage)
+queue.ReclaimExpiredLeases()
+queue.ResolveUncertain(id, retry := true)
+stats := queue.Stats()
+```
+
+### ListingMediaStore
+
+```autohotkey
+media := ListingMediaStore(cfg)
+pending := media.PrepareArchive(listingId, append := false)
+ui.SaveClipboardArchive(pending["temp_path"])
+media.CommitGeneration(pending)
+files := media.RelativePaths(listingId)
 ```
 
 ### ZaloUIAdapter
@@ -91,6 +120,21 @@ ui.SendTextChunks(group, chunks)
 ui.RelayClipboardImage(group)
 ui.ForwardSelection(group)
 ui.PasteToActiveChat(text)
+ui.SaveClipboardArchive(path)
+ui.RestoreClipboardArchive(path)
+ui.BeginPublishSession(group)
+ui.PasteArchiveInSession(path)
+ui.SendTextInSession(text)
+```
+
+### DurableListingPublisher
+
+```autohotkey
+publisher := DurableListingPublisher(cfg, ui, registry, composer, queue, repo, media)
+summary := publisher.RunSession()
+publisher.TogglePause()
+publisher.Stop()
+stats := publisher.Status()
 ```
 
 ### MessageHarvester
@@ -115,10 +159,10 @@ JSON.Parse(text)
 
 ## JSON schemas
 
-**listings.json**
+**data/listings/{id}.json** (legacy `listings.json` is migrated automatically)
 
 ```json
-[{
+{
   "id": "04d8e762",
   "source_group": "Nhóm Cho Thuê Quận 1",
   "captured_at": "2026-08-06 18:00:00",
@@ -133,16 +177,14 @@ JSON.Parse(text)
   "info": "25m2, full nội thất",
   "extra_info": "",
   "image_count": 2,
-  "raw_text": "...",
-  "published": 0,
-  "published_at": ""
-}]
+  "raw_text": "..."
+}
 ```
 
-**harvest_state.json**
+**harvest_state/{group-hash}.json**
 
 ```json
-[{ "group_name": "Nhóm Cho Thuê Quận 1", "last_harvest_at": "2026-08-06 18:00:00", "seen": ["04d8e762"] }]
+{ "group_name": "Nhóm Cho Thuê Quận 1", "last_harvest_at": "2026-08-06 18:00:00", "seen": ["04d8e762"] }
 ```
 
 **access_log.json**
@@ -159,7 +201,7 @@ JSON.Parse(text)
 | Posts not splitting | Group uses different labels — adjust `[Capture] ListingStartPattern` |
 | Images assigned to wrong post | Adjust `[Capture] ImageMarkerPattern` to match Zalo copy text |
 | Messages sent to wrong chat | Increase `OpenChatDelayMs`, `BetweenMessagesMs` |
-| All posts marked Duplicate | Delete `windows\data\harvest_state.json` to reset cursor |
+| All posts marked Duplicate | Delete `windows\data\harvest_state\` and legacy `harvest_state.json` to reset cursor |
 | Excel not loading | MS Excel not installed → use CSV |
 | Valid posts blocked incorrectly | Check `blocklist.csv`, change `match_type` to `word` |
 

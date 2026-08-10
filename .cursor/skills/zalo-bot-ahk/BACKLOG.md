@@ -1,146 +1,139 @@
 # Backlog — Zalo Listing Bot
 
-Cập nhật: Aug 2026. Agent **phải đọc file này** trước khi sửa publish/parser/blocklist.
+Updated: Aug 2026. Agent **must read this file** before changing publish/parser/blocklist.
 
 ---
 
-## P0 — Bắt buộc (theo yêu cầu vận hành)
+## P0 — Required (operational)
 
-### 1. Một phòng = một tin nhắn output
+### 1. Output format — 5 rooms per Zalo message (Aug 2026)
 
-**Hiện trạng:** `MessageComposer.Compose()` gộp nhiều `record` thành chunk theo `MaxMessageChars`. `Bot._PublishRecords()` gọi `ui.SendTextChunks()` — một chunk có thể chứa nhiều phòng + separator nhóm.
+**Default:** `[Output] ListingsPerMessage=5`, `ListingSeparator=======================`
 
-**Mục tiêu:** Mỗi listing (một phòng) → **đúng 1 message** gửi tới **mỗi** nhóm `type=main`.
-
-**Gợi ý triển khai:**
-
-| File | Việc cần làm |
-|------|----------------|
-| `Composer.ahk` | Thêm `ComposeOne(record)` hoặc đổi `Compose()` trả về mảng 1 phần tử/record (bỏ gộp nhiều block) |
-| `Bot.ahk` | `_PublishRecords`: loop từng record → render → `SendTextChunks` với 1 chunk; `BetweenMessagesMs` giữa các tin |
-| `ZaloUI.ahk` | Đảm bảo mỗi lần gửi: focus compose → paste → Enter → chờ `SendDelayMs` |
-| `config.ini` | Có thể thêm `[Output] OneMessagePerListing=1` |
-| `RunTests.ahk` | Test: 3 record → 3 message, không gộp |
-
-**Không** gộp separator nhiều nhóm trong cùng một message trừ khi user yêu cầu lại.
-
----
-
-### 2. Số điện thoại — copy / cấp SĐT
-
-**Hiện trạng:**
-
-- Harvest: `ExtractPhone()` parse SĐT từ text (đã có: `0772988525`, `0377.785.784`).
-- Publish: `MaskPhone=1` → output chỉ hiện hint `Nhắn bot "SĐT {room_code}"`.
-- `ReleasePhoneFromClipboard()` (`Ctrl+Shift+P`): tìm listing theo `room_code`, paste SĐT vào chat đang mở.
-
-**Lỗi:** Trên Zalo thật SĐT **chưa copy/paste được** đúng (focus compose, clipboard, hoặc room_code không khớp).
-
-**Việc cần làm:**
-
-1. Debug `ZaloUI.PasteToActiveChat` / `_FocusComposeBox` sau khi mở nhóm main.
-2. Chuẩn hóa `room_code` khi save và khi lookup (xem mục 4).
-3. Test thủ công: harvest tin có SĐT → publish masked → nhắn `SĐT P102` → bot trả số.
-4. (Tùy chọn) Lưu SĐT vào field riêng, không đưa vào text gửi main nếu `MaskPhone=1`.
-
----
-
-### 3. Hình ảnh — copy / chuyển theo từng phòng
-
-**Hiện trạng:**
-
-- Parser đếm marker `[Hình ảnh]` trong text capture (`image_count`).
-- `RelayImages()` (`Ctrl+Shift+I`): **thủ công** — user chọn tin ảnh trên Zalo rồi forward sang main (`ForwardSelection` hoặc `RelayClipboardImage`).
-- Không có liên kết tự động listing JSON ↔ ảnh khi publish batch.
-
-**Lỗi:** Ảnh **chưa tự copy/chuyển** kèm từng phòng khi harvest+publish.
-
-**Việc cần làm:**
-
-1. Sau khi gửi text 1 phòng, gửi ảnh tương ứng (nếu `image_count > 0`) — cần quay lại nhóm nguồn hoặc giữ selection theo block.
-2. Ràng buộc Zalo: AHK không đọc pixel ảnh trong bubble — chỉ forward UI selection.
-3. Flow đề xuất: `PublishOneListing(record)` → text → (optional) `ForwardImagesForBlock(record)` với marker/hash khớp block harvest.
-4. Cấu hình `[Images] Strategy=forward|clipboard|off` — document rõ bước thủ công nếu auto fail.
-
----
-
-### 4. Mã phòng — format output
-
-**Hiện trạng:** Parser suy luận `202`, `P102`, `phòng 102` từ text tự do; `FormatBlock` in nguyên giá trị.
-
-**Lỗi:** Mã phòng **chưa format đúng** cho output và cho flow `SĐT {room_code}` (thiếu prefix thống nhất, trùng với số trong giá, v.v.).
-
-**Quy tắc format đề xuất** (agent implement + test):
+One Zalo text message:
 
 ```text
-- Luôn uppercase prefix P nếu là số phòng: P102, P202
-- Nguồn ưu tiên: label "Mã phòng" > "mã 202" > "P102" > fallback hash ngắn
-- Không dùng chuỗi giá (5tr7) làm room_code
-- PhoneHint thay {room_code} bằng mã đã chuẩn hóa
+📍 Địa chỉ: phòng 1 …
+…
+=======================
+📍 Địa chỉ: phòng 2 …
+…
 ```
 
-Thêm `ListingParser.NormalizeRoomCode(listing)` gọi trước `SaveListing` và trong `FormatBlock`.
+Set `OneMessagePerListing=1` for one room per message (old P0.1 mode).
 
 ---
 
-### 5. Blocklist — keyword mới
+### 2. Phone — copy / release — PARTIAL
 
-**Hiện trạng:** `blocklist.csv` mặc định:
+**Done:**
 
-```text
-LOCK, Chốt, Đã chốt, Đã cho thuê, Hết phòng, Ngưng
-```
+- `NormalizeRoomCode()` before save + lookup (`Storage.GetByRoomCode`, `ParsePhoneRequest`)
+- `ZaloUI.PasteToActiveChat()` focuses compose box before paste (`refocus=false` on second focus)
 
-**Yêu cầu:** Loại bỏ message có **keyword mới** (tin không phải phòng cho thuê lẻ / tin nhiễu).
+**Still manual on real Zalo:**
 
-**Keyword đề xuất bổ sung** (agent xác nhận với user trước khi bật):
-
-| keyword | match_type | Lý do |
-|---------|------------|--------|
-| `Sang CHDV` | contains | Tin sang nhượng CHDV, không phải cho thuê phòng lẻ |
-| `Giá sang` | contains | Tin sang shop/CHDV |
-| `Lợi nhuận Full` | contains | Tin đầu tư/sang |
-| `Tìm bạn ở ghép` | contains | Không phải listing phòng |
-| `Tuyển` | word | Tuyển dụng |
-| `@All` | contains | Ping cộng đồng, thường không phải 1 phòng |
-
-**Cách làm:**
-
-1. Thêm row vào `blocklist.example.csv` + `blocklist.csv`.
-2. Test `BlockList.Match()` case-insensitive (đã dùng `StrLower`).
-3. **Không** block `trống` / `cho thuê` — đó là tín hiệu tin mới.
-
-Parser `LooksLikeListing` và BlockList là **hai lớp**: blocklist loại trước; heuristic loại tin không giống cho thuê.
+- Test harvest → publish masked → type `SĐT P102` → verify paste in main group chat
+- Tune `[Timing] PasteDelayMs` / `OpenChatDelayMs` if compose focus misses
 
 ---
 
-## P1 — Cải thiện parser (đã phần nào xong)
+### 3. Images — auto archive during harvest — IMPLEMENTED / NEEDS WINDOWS E2E
+
+**Flow:**
+
+1. Harvest stores the room and queues it as `media_pending` when `MediaRequired=1`.
+2. With `[Images] AutoCapture=1`, bot finds the listing bubble by room code (or address), selects image bubbles above, copies to `.clip`, and attaches media — no `M` hotkey needed.
+3. Publisher restores the local archive for every output group, then sends one five-room text (`ImagesBeforeText=1`).
+
+**Manual fallback:** `Ctrl+Shift+M` (archive by room code) or `Ctrl+Shift+I` (RelayImages).
+
+**Calibrate on real Zalo:** `[Images] FindInChatHotkey`, `ImageSelectMode` (`shift_up` | `shift_click`).
+
+---
+
+### 4. Room code format — DONE (Aug 2026)
+
+`ListingParser.NormalizeRoomCode()`:
+
+- Numeric codes → `P102`, `P202`
+- Rejects price strings (`5tr7`) as room codes
+- `ParsePhoneRequest("SĐT 202")` → `P202`
+- Hash fallback `R{6hex}` when no code found
+
+Called in `Parse()`, `SaveListing()`, `RenderBlock()`, `FormatBlock()`.
+
+---
+
+### 5. Blocklist — new keywords — DONE (Aug 2026)
+
+Added to `blocklist.example.csv` + tests:
+
+| keyword | match_type |
+|---------|------------|
+| Sang CHDV | contains |
+| Giá sang | contains |
+| Lợi nhuận Full | contains |
+| Tìm bạn ở ghép | contains |
+| Tuyển | word |
+| @All | contains |
+
+**Note:** Copy new rows into runtime `blocklist.csv` or re-seed from example.
+
+---
+
+### 6. Durable queue for 1,000–5,000 rooms — IMPLEMENTED / NEEDS WINDOWS TEST
+
+- Append-only `events.jsonl` + periodic `snapshot.json`
+- Per-listing JSON files; automatic migration from legacy `listings.json`
+- FIFO/priority lease of 5 rooms, bounded sessions, cooldown
+- Per-output-group media/text checkpoints
+- Retry/backoff/dead-letter and expired-lease recovery
+- `uncertain` state for crash-after-Enter; `Ctrl+Shift+U` Retry/Skip
+- 5,000-record simulation expects exactly 1,000 completed leases
+
+---
+
+### 7. Incremental large-group watch — IMPLEMENTED / NEEDS WINDOWS E2E
+
+- First-ever cycle scans all discovered groups sequentially to establish baseline.
+- Later cycles select textual unread groups plus an oldest-first audit shard.
+- `MaxGroupsPerCycle` and `MaxBatchesPerWatchCycle` bound GUI/send work.
+- State saves after each group; publish is attempted every five groups.
+- Publish delays use configurable jitter; watch no longer rechecks all groups.
+
+**Risk:** Zalo may not expose unread text in copied Alt+3 content. Audit shard
+provides eventual coverage; Windows UIA/OCR remains a future stronger detector.
+
+---
+
+## P1 — Parser improvements (partially done)
 
 - [x] Heuristic `LooksLikeListing`
-- [x] Giá `5tr7`, `7tr7`
-- [x] SĐT có dấu chấm
-- [x] Link Google Maps là tín hiệu +
-- [x] Viết tắt Nc, Dv, PDV
-- [ ] Tách block khi ảnh và text là 2 bubble riêng (MyHouse) — có thể cần merge block liền kề cùng sender
-- [ ] Lưu `maps_url` field riêng nếu có link
+- [x] Price `5tr7`, `7tr7`
+- [x] Phone with dots `0377.785.784`
+- [x] Google Maps link signal
+- [x] Abbreviations Nc, Dv, PDV
+- [ ] Split blocks when image and text are separate bubbles (MyHouse) — may need adjacent-block merge
+- [ ] Store `maps_url` field when link present
 
 ---
 
-## P2 — Vận hành & DX
+## P2 — Ops & DX
 
-- [ ] Cập nhật `docs/SYSTEM_DESIGN.md` theo batch + heuristic
-- [ ] `Simulate.ahk` in từng message (1 phòng) sau khi refactor Composer
-- [ ] Script setup máy mới (check AHK path, Zalo process)
+- [x] Update system design for durable lease-five flow
+- [x] `Simulate.ahk` includes a temporary 5,000-record queue stress test
+- [ ] New-machine setup script (check AHK path, Zalo process)
 
 ---
 
-## Checklist trước khi coi task xong
+## Pre-ship checklist
 
 ```
-[ ] RunTests.ahk — 0 fail
-[ ] Simulate.ahk — output đúng 1 phòng/message (sau P0.1)
-[ ] Test thủ công 1 nhóm source → main (ghi lại trong PR/commit message)
-[ ] blocklist.csv — keyword mới có test
-[ ] Không hardcode tên nhóm / delay — dùng config.ini
-[ ] Cập nhật BACKLOG.md — đánh dấu item đã xong
+[ ] RunTests.ahk on Windows — queue/recovery/media-gating cases
+[ ] Simulate.ahk on Windows — 5,000 rooms → 1,000 leases
+[ ] Manual test: 1 source group → main (record in commit/PR)
+[x] blocklist.example.csv — new keywords + tests
+[x] No hardcoded group names / delays — config.ini
+[x] BACKLOG.md updated
 ```

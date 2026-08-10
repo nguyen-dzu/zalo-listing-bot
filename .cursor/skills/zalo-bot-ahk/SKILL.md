@@ -5,7 +5,7 @@ description: >-
   rental listings from Zalo PC source groups, block banned keywords, save JSON locally,
   publish to main groups. Read BACKLOG.md for known bugs (1 room = 1 message, phone/images
   copy, room code format, new blocklist keywords). Use for zalo-listing-bot, Parser,
-  Harvester, Composer, ZaloUI, groups.csv, blocklist.csv, config.ini.
+  Harvester, Composer, ZaloUI, dynamic Zalo group discovery, blocklist.csv, config.ini.
 ---
 
 # Zalo Listing Bot — Agent Skill
@@ -33,6 +33,7 @@ description: >-
 | UI automation | `ZaloUI.ahk` | Send, Click, WinActivate, clipboard |
 | Parse | `Parser.ahk` | Regex, heuristic, FormatBlock |
 | Harvest | `Harvester.ahk` | Loop nhóm, gọi UI + Parser |
+| Incremental schedule | `GroupActivity.ahk` | Baseline, unread priority, audit shard |
 | Publish | `Composer.ahk`, `Bot.ahk` | Gộp/gửi message |
 | Config | `Config.ahk` | Đọc ini, không hardcode nhóm/từ khóa |
 
@@ -56,21 +57,19 @@ windows\tests\run-tests.cmd
 
 ### E. Commit
 
-Chỉ commit khi user yêu cầu. Không commit `config.ini`, `groups.csv` runtime nếu chứa tên nhóm private.
+Chỉ commit khi user yêu cầu. Không commit private runtime data/config.
 
 ---
 
 ## Backlog P0 (tóm tắt — chi tiết trong BACKLOG.md)
 
-| # | Vấn đề | Hướng sửa |
-|---|--------|-----------|
-| 1 | **1 phòng = 1 message** output | Refactor `Composer` + `Bot._PublishRecords` — không gộp chunk |
-| 2 | **SĐT chưa copy** được trên Zalo thật | Fix `ZaloUI` focus/paste; chuẩn hóa `room_code` lookup |
-| 3 | **Ảnh chưa copy/chuyển** theo phòng | Publish flow: text rồi forward ảnh theo block/`image_count` |
-| 4 | **Mã phòng format sai** | `NormalizeRoomCode()` trước save + FormatBlock |
-| 5 | **Blocklist keyword mới** | Thêm CSV + test; tách tin *Sang CHDV* vs *cho thuê phòng* |
-
-Agent **ưu tiên P0.1** (1 phòng 1 message) trước khi tối ưu parser thêm.
+| # | Issue | Status |
+|---|--------|--------|
+| 1 | **5 phòng = 1 message** + `=======` separator | Done — `ListingsPerMessage=5` |
+| 2 | **Phone paste on Zalo** | Partial — normalize + focus fix |
+| 3 | **Copy ảnh trước text** | Archive `.clip` once; Windows E2E pending |
+| 4 | **Room code format** | Done — `NormalizeRoomCode()` |
+| 5 | **Blocklist keywords** | Done — see `blocklist.example.csv` |
 
 ---
 
@@ -101,11 +100,14 @@ Fields: `address`, `room_code`, `price`, `electric_price`, `water_price`, `utili
 - `_InferFields`: giá `5tr7`, SĐT, địa chỉ ngoặc, `Nc`/`Dv`/`PDV`
 - `ExtractPhone`: ưu tiên dòng ☎/Liên hệ; hỗ trợ `0377.785.784`
 
-### Batch publish
+### Durable batch publish
 
-`HarvestAllBatched()` — `BatchSize` nhóm → harvest → `publishFn(records)` → recheck snapshot → revisit queue.
+`PublishQueueStore` journals queue transitions and leases five eligible rooms at a time.
+`DurableListingPublisher` opens each output group once, restores local media archives,
+sends one five-room text, and checkpoints each group before completing the lease.
 
-**Lưu ý:** publish hiện gộp nhiều record (xem backlog P0.1).
+States: `media_pending → ready → leased → sending → completed`, with
+`retry_wait`, `dead_letter`, and `uncertain` recovery paths.
 
 ---
 
@@ -113,10 +115,16 @@ Fields: `address`, `room_code`, `price`, `electric_price`, `water_price`, `utili
 
 | Hotkey | Method |
 |--------|--------|
-| `Ctrl+Shift+H` | `HarvestAll()` |
-| `Ctrl+Shift+J` | `HarvestAllBatched()` + publish |
+| `Ctrl+Shift+H` | `HarvestAll()` (+ auto archive if `AutoCapture=1`) |
+| `Ctrl+Shift+J` | `HarvestAll()` + `RunSession()` |
+| `Ctrl+Shift+W` | `ToggleWatch()` — khi `[Startup] EnableHotkeys=1` |
+| `Ctrl+Shift+K` | Dừng watch/publish — luôn bật ở chế độ tự động |
 | `Ctrl+Shift+G` | `PublishToMain()` |
 | `Ctrl+Shift+I` | `RelayImages()` — thủ công, chọn ảnh trước |
+| `Ctrl+Shift+M` | Manual archive fallback for one room |
+| `Ctrl+Shift+O` | Pause / resume publish |
+| `Ctrl+Shift+K` | Stop publish or watch loop |
+| `Ctrl+Shift+U` | Resolve uncertain delivery |
 | `Ctrl+Shift+B` | Forward 1 tin từ selection |
 | `Ctrl+Shift+P` | `ReleasePhoneFromClipboard()` |
 | `Ctrl+Shift+R` | `Reload()` |
@@ -129,7 +137,7 @@ Fields: `address`, `room_code`, `price`, `electric_price`, `water_price`, `utili
 [ ] Cài AutoHotkey v2 (64-bit)
 [ ] Cài Zalo PC, account bot vào đủ nhóm
 [ ] Copy config.example.ini → config.ini
-[ ] Điền groups.csv (dump-groups.ahk verify)
+[ ] Kiểm tra `[Groups] OutputGroups`; chạy dump-groups.ahk để verify discovery
 [ ] Cursor: AutoHotkey2 interpreter path → AutoHotkey64.exe
 [ ] run-tests.cmd → all pass
 [ ] Chạy Bot.ahk, Ctrl+Shift+R
@@ -143,18 +151,23 @@ Path AHK thường gặp:
 
 ---
 
-## Output format hiện tại (sẽ đổi khi P0.1)
+## Output format (default: 5 rooms / message)
 
 ```text
-------------{source_group}------------
-📍 Địa chỉ: ...
-🔑 Số phòng: ...
-💰 Giá: ...
-...
-📞 Số chủ: Nhắn bot "SĐT {room_code}" để lấy số
+📍 Địa chỉ: …
+🔑 Số phòng: P102
+…
+=======================
+📍 Địa chỉ: …
+…
 ```
 
-Sau P0.1: **mỗi block trên = 1 message Zalo**, separator có thể gắn đầu mỗi tin hoặc bỏ gộp nhóm.
+Config: `[Output] ListingsPerMessage=5`, `ListingSeparator=======================`
+
+Publish: restore **archived images first** → **1 message text** / 5 rooms. Source
+groups are not reopened during publish.
+
+Set `[Output] OneMessagePerListing=1` for one room per Zalo message.
 
 ---
 

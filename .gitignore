@@ -2,10 +2,14 @@
 windows/data/listings.json
 windows/data/access_log.json
 windows/data/harvest_state.json
+windows/data/harvest_state/
+windows/data/zalo-groups-capture.txt
+windows/data/listings/
+windows/data/media/
+windows/data/queue/
 
 # Runtime config (contains real group names)
 windows/config/config.ini
-windows/config/groups.csv
 windows/config/blocklist.csv
 windows/config/*.xlsx
 !windows/config/*.example.*

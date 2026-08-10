@@ -4,11 +4,13 @@ Bot Windows (AutoHotkey v2) thu thập tin **phòng cho thuê** từ nhiều nh�
 
 ```
 Nhóm nguồn 1 ┐
-Nhóm nguồn 2 ├─► lọc blocklist ─► parse heuristic ─► listings.json ─► nhóm main
+Nhóm nguồn 2 ├─► lọc blocklist ─► parse ─► durable queue ─► nhóm main
 Nhóm nguồn N ┘                                              (text + ảnh)
 ```
 
-Tên nhóm và từ khóa cấm đọc từ **CSV/Excel** (`groups.csv`, `blocklist.csv`).
+Bot tự đọc toàn bộ nhóm từ tab **Danh sách nhóm** của Zalo PC (`Alt+3`).
+5 nhóm output khai báo trong `config.ini`; mọi nhóm còn lại tự động là input.
+Chỉ từ khóa cấm còn đọc từ `blocklist.csv`/Excel.
 
 ---
 
@@ -18,23 +20,26 @@ Tên nhóm và từ khóa cấm đọc từ **CSV/Excel** (`groups.csv`, `blockl
 
 | Tính năng | Mô tả |
 |-----------|--------|
-| Harvest batch | `Ctrl+Shift+J`: thu 5 nhóm/lượt → publish → recheck snapshot |
+| Harvest batch | `Ctrl+Shift+J`: harvest → publish một session |
+| Watch loop | Tự chạy khi mở script (`[Startup] AutoRunWatch=1`) — không cần hotkey |
+| Auto archive ảnh | `[Images] AutoCapture=1`: bot tìm bubble theo mã phòng, copy `.clip` khi harvest |
 | Parser linh hoạt | Nhận tin không có label chuẩn: *cho thuê*, *giá 5tr7*, *Nc/Dv/PDV*, link Google Maps, SĐT dạng `0377.785.784` |
 | Heuristic | `LooksLikeListing()` — không bắt buộc `Địa chỉ:` / `Giá:` / `SĐT:` nếu `RequiredFields` để trống |
 | Blocklist | `LOCK`, `Chốt`, `Đã chốt`, … — so khớp không phân biệt hoa thường |
-| State | `harvest_state.json`: hash trùng, capture snapshot, hàng đợi revisit |
+| State | `harvest_state/`: shard theo nhóm cho hash trùng, capture snapshot, revisit |
+| Durable queue | Lease 5 phòng/lượt, checkpoint theo nhóm output, retry/dead-letter, resume sau restart |
+| Media archive | Lưu selection ảnh thành `.clip` một lần, tái sử dụng cho mọi nhóm output |
+| Storage | Mỗi listing một file JSON; migrate tự động từ `listings.json` cũ |
 | ZaloUI | Tách `OpenGroup(focus)` `"read"` vs `"send"`; delay có thể chỉnh trong `config.ini` |
-| Test | `RunTests.ahk` — **75 test**, gồm mẫu UNIHOMES / MyHouse / Sang CHDV |
+| Scale test | `Simulate.ahk` tạo 5.000 phòng → 1.000 lease/message |
 
-### Chưa làm / lỗi đã biết
+### Giới hạn cần test trên Windows
 
 > Chi tiết triển khai và quy tắc sửa: [`.cursor/skills/zalo-bot-ahk/SKILL.md`](.cursor/skills/zalo-bot-ahk/SKILL.md) và [`BACKLOG.md`](.cursor/skills/zalo-bot-ahk/BACKLOG.md).
 
-1. **Một phòng = một tin nhắn output** — Hiện `MessageComposer` gộp nhiều listing vào một cụm (chunk) theo `MaxMessageChars`. Cần đổi publish: **mỗi phòng gửi 1 message riêng** tới nhóm main.
-2. **SĐT chưa copy được** — Flow `ReleasePhone` (`Ctrl+Shift+P`) và mask SĐT khi publish chưa hoạt động ổn trên Zalo thật; cần kiểm tra paste/focus compose box.
-3. **Ảnh chưa copy/chuyển được** — `RelayImages` / `ForwardSelection` phụ thuộc UI Zalo; chưa tự động gắn ảnh theo từng listing khi harvest.
-4. **Mã phòng chưa format đúng** — Parser suy luận `202`, `P102`, `7tr7` nhưng output `FormatBlock` chưa chuẩn hóa mã (prefix, padding, tách khỏi giá).
-5. **Blocklist keyword mới** — Cần bổ sung và lọc tin có keyword mới (xem `BACKLOG.md`).
+1. Auto archive dùng find-in-chat + chọn bubble — cần calibrate `FindInChatHotkey` / `ImageSelectMode` trên Zalo PC thật.
+2. Delivery bị crash ngay sau phím Enter được đánh dấu `uncertain`; phải chọn Retry hoặc Skip để tránh gửi trùng.
+3. Clipboard archive và focus compose chỉ xác minh đầy đủ được trên Windows + Zalo PC thật.
 
 ---
 
@@ -47,7 +52,7 @@ Tên nhóm và từ khóa cấm đọc từ **CSV/Excel** (`groups.csv`, `blockl
 | Windows 10/11 | Bắt buộc |
 | [AutoHotkey v2](https://www.autohotkey.com/) | **v2**, không dùng v1. Có thể cài user-level: `%LocalAppData%\Programs\AutoHotkey\v2\AutoHotkey64.exe` |
 | Zalo PC | Đăng nhập tài khoản bot, đã vào **tất cả** nhóm source + main |
-| MS Excel | Tùy chọn — không có Excel thì dùng CSV |
+| MS Excel | Tùy chọn — chỉ dùng cho blocklist; không cần cho danh sách nhóm |
 
 ### 2. Clone repo & config
 
@@ -60,7 +65,6 @@ Copy hoặc chỉnh các file runtime (không commit secret):
 
 ```text
 windows/config/config.ini      ← từ config.example.ini
-windows/config/groups.csv      ← tên nhóm Zalo thật, cột type=source|main
 windows/config/blocklist.csv   ← từ blocklist.example.csv
 ```
 
@@ -88,13 +92,52 @@ C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe
 
 Project đã có `.vscode/settings.json` — cập nhật path nếu khác máy.
 
-### 4. Chạy bot
+### 4. Tự chạy khi bật máy (khuyến nghị)
+
+**Build bản portable (.exe + zip) để copy sang máy test:**
+
+```cmd
+windows\setup\build-release.cmd
+```
+
+Output: `windows\dist\ZaloListingBot-YYYYMMDD.zip` — giải nén trên máy Windows, chạy `Install.cmd`.
+
+**Cài Startup trên máy đang dev:**
+
+```cmd
+windows\setup\install-startup.cmd
+```
+
+Script tạo shortcut trong thư mục Startup (`Win+R` → `shell:startup`):
+- **Zalo.exe**
+- **Bot.ahk** (qua AutoHotkey64.exe)
+
+Sau khi đăng nhập Windows, bot tự:
+1. Chờ Zalo mở (hoặc tự launch nếu thiếu)
+2. Bật **watch loop** — harvest → auto archive → publish → nghỉ 5 phút → lặp
+
+Cấu hình trong `config.ini`:
+
+```ini
+[Startup]
+AutoRunWatch=1          ; tự chạy watch khi mở Bot.ahk
+WaitForZaloSeconds=120  ; chờ Zalo sau khi boot
+LaunchZaloIfMissing=1
+StartupDelayMs=3000
+EnableHotkeys=0         ; 0 = không cần Ctrl+Shift+… (Ctrl+Shift+K vẫn dừng khẩn cấp)
+RequireAdmin=0          ; 1 = bot tự nâng quyền Admin khi mở
+```
+
+Nếu Zalo cài ở path lạ, ghi `[Zalo] ExePath=C:\path\to\Zalo.exe`.
+
+**Chạy thủ công** (debug):
 
 ```powershell
 & "$env:LOCALAPPDATA\Programs\AutoHotkey\v2\AutoHotkey64.exe" windows\src\Bot.ahk
 ```
 
-Lần đầu: mở Zalo PC → sửa `groups.csv` cho đúng tên nhóm → **`Ctrl+Shift+R`** reload.
+Lần đầu: kiểm tra 5 tên output trong `[Groups] OutputGroups`. Bot tự đọc các
+nhóm input từ Zalo; không dùng `groups.csv`.
 
 ### 5. Test (không cần Zalo)
 
@@ -110,29 +153,44 @@ Diagnostic harvest một nhóm (cần Zalo mở):
 
 ---
 
-## Hotkeys
+## Hotkeys (tùy chọn)
+
+Mặc định `[Startup] EnableHotkeys=0` — bot chạy **hoàn toàn tự động**, không cần phím tắt.
+
+| Phím | Hành động |
+|------|-----------|
+| `Ctrl+Shift+K` | **Luôn bật** ở chế độ tự động — dừng watch/publish khẩn cấp |
+
+Khi `EnableHotkeys=1`:
 
 | Phím | Hành động |
 |------|-----------|
 | `Ctrl+Shift+H` | Harvest tất cả nhóm nguồn |
-| `Ctrl+Shift+J` | **Batch harvest + publish** (5 nhóm/lượt, recheck) |
-| `Ctrl+Shift+G` | Publish các tin pending trong `listings.json` |
-| `Ctrl+Shift+I` | Chuyển ảnh đang chọn sang nhóm main |
-| `Ctrl+Shift+B` | Forward thủ công 1 tin đang bôi đen |
-| `Ctrl+Shift+P` | Cấp SĐT theo mã phòng (từ clipboard) |
-| `Ctrl+Shift+R` | Reload config + CSV |
+| `Ctrl+Shift+J` | Harvest → publish một session |
+| `Ctrl+Shift+W` | Bật/tắt watch loop |
+| `Ctrl+Shift+G` | Publish queue (tối đa 20 batch) |
+| `Ctrl+Shift+M` | Archive ảnh thủ công (fallback) |
+| `Ctrl+Shift+U` | Resolve delivery `uncertain` |
+| `Ctrl+Shift+R` | Reload config + blocklist |
 
 ---
 
 ## Cấu hình
 
-### `windows/config/groups.csv`
+### Danh sách nhóm Zalo
 
-| Cột | Giá trị |
-|-----|---------|
-| `group_name` | Tên nhóm **trùng khớp** trên Zalo PC |
-| `type` | `source` (đọc) hoặc `main` (gửi) |
-| `enabled` | `1` / `0` |
+Bot mở tab `Alt+3`, scan danh sách nhóm và lưu bản chụp chẩn đoán tại
+`data/zalo-groups-capture.txt`.
+
+```ini
+[Groups]
+OutputGroups=Giỏ hàng cao thiên ⏏️ 6tr Phú Nhuận Bình Thạnh|Giỏ hàng cao thiên ⬇️ 5tr9 Phú Nhuận Bình Thạnh|Giỏ Hàng "Quận Ngoại Thành" Cao Thiên|Giỏ hàng Quận số Cao Thiên|Giỏ hàng NNC Cao Thiên.
+ListTabHotkey=!3
+ListScanPages=80
+```
+
+Tên trong `OutputGroups` được phân cách bằng `|`. Mọi nhóm Zalo còn lại là input.
+`groups.csv` không còn được đọc.
 
 ### `windows/config/blocklist.csv`
 
@@ -151,11 +209,40 @@ RequiredFields=             ; để trống = heuristic LooksLikeListing
 
 [Batch]
 Size=5
-RecheckAfterPublish=1
+RecheckAfterPublish=0
 
 [Output]
-MaxMessageChars=1800        ; TODO: sẽ đổi khi 1 phòng = 1 message
+ListingsPerMessage=5
+ListingSeparator=======================
 MaskPhone=1
+
+[Images]
+MediaRequired=1             ; có marker ảnh → phải archive trước khi ready
+AutoCapture=1               ; tự archive khi harvest (không cần M)
+ImagesBeforeText=1
+
+[Watch]
+IntervalMs=300000           ; 5 phút giữa các vòng
+DrainQueueEachCycle=1
+BypassSessionCooldown=1
+
+[Harvest]
+InitialFullScan=1          ; vòng đầu tạo baseline toàn bộ nhóm
+MaxGroupsPerCycle=50      ; vòng 2+ chỉ xử lý unread + audit shard
+AuditGroupsPerCycle=10    ; fallback khi Zalo không expose unread
+PublishAfterGroups=5
+SaveStateEachGroup=1
+
+[RateLimit]
+MaxBatchesPerWatchCycle=10
+SendDelayMinMs=3000
+SendDelayMaxMs=7000
+
+[PublishQueue]
+LeaseSize=5
+MaxBatchesPerSession=20
+LeaseTimeoutMs=7200000
+MaxAttempts=3
 ```
 
 Đầy đủ: `windows/config/config.example.ini`.
@@ -170,7 +257,19 @@ OpenGroup(read) → CaptureConversationText → SplitBlocks
   → BlockList?      skip (blocked), vẫn MarkSeen
   → Validate fail?  skip (invalid)
   → SaveListing + MarkSeen
+  → nếu image_count > 0 và AutoCapture=1:
+      find bubble theo mã phòng → chọn ảnh → archive .clip → ready
 ```
+
+**Watch loop incremental:**
+
+1. Vòng đầu quét tuần tự toàn bộ nhóm để tạo baseline `last_harvest_at`.
+2. Từ vòng hai, đọc marker unread từ tab nhóm; ưu tiên nhóm có tin mới.
+3. Thêm một audit shard nhỏ theo nhóm lâu chưa kiểm tra để tránh bỏ sót unread.
+4. Xử lý tuần tự, lưu state sau từng nhóm; mỗi 5 nhóm thử publish một batch.
+5. Mỗi chu kỳ có giới hạn nhóm và publish, sau đó nghỉ `[Watch] IntervalMs`.
+
+Watch không còn recheck toàn bộ nhóm sau publish.
 
 **SplitBlocks** thử lần lượt:
 
@@ -182,6 +281,26 @@ Chỉ giữ block pass `LooksLikeListing()`.
 
 ---
 
+## Luồng publish bền vững
+
+```text
+Harvest hợp lệ → lưu listing JSON → enqueue
+  → nếu có ảnh và MediaRequired=1: media_pending
+  → AutoCapture=1: bot archive ảnh trong harvest → ready
+  → (fallback) Ctrl+Shift+M archive thủ công
+  → lease 5 phòng
+  → mở từng nhóm output đúng một lần/session
+  → restore + paste media theo thứ tự phòng
+  → gửi 1 text chứa 5 phòng, ngăn cách =======================
+  → checkpoint theo nhóm → completed
+```
+
+Nếu bot dừng giữa chừng, lease hết hạn được trả về queue. Nếu dừng sau khi bot đã nhấn
+`Enter` nhưng chưa checkpoint, record chuyển `uncertain`; dùng `Ctrl+Shift+U` để quyết
+định Retry hoặc Skip.
+
+---
+
 ## Cấu trúc thư mục
 
 ```text
@@ -189,14 +308,22 @@ windows/
 ├── src/
 │   ├── Bot.ahk           # Entry + hotkeys
 │   ├── Parser.ahk        # Parse / heuristic / FormatBlock
-│   ├── Harvester.ahk     # Harvest + batch
-│   ├── Composer.ahk      # Gộp message (cần refactor → 1 phòng/ message)
+│   ├── Harvester.ahk     # Harvest + batch + revisit
+│   ├── GroupActivity.ahk # Unread detector + bounded scheduler
+│   ├── MediaCapturer.ahk # Auto archive ảnh khi harvest
+│   ├── Composer.ahk      # 5 phòng / message
+│   ├── QueueStore.ahk    # Journal, snapshot, lease/retry/checkpoint
+│   ├── MediaStore.ahk    # ClipboardAll archive paths
+│   ├── Publisher.ahk     # Resumable publish service
 │   ├── ZaloUI.ahk        # UI automation Zalo
 │   ├── BlockList.ahk
 │   ├── Config.ahk
 │   └── ...
 ├── config/               # ini + csv
-├── data/                 # listings.json, harvest_state.json (runtime)
+├── data/
+│   ├── listings/         # một JSON / listing
+│   ├── media/            # .clip archives
+│   └── queue/            # events.jsonl + snapshot.json
 └── tests/                # RunTests.ahk, samples/
 ```
 
@@ -208,8 +335,12 @@ windows/
 
 | File | Nội dung |
 |------|----------|
-| `windows/data/listings.json` | Listing đã harvest |
-| `windows/data/harvest_state.json` | Hash đã thấy, capture snapshot, revisit queue |
+| `windows/data/listings/*.json` | Listing đã harvest; migrate từ `listings.json` cũ |
+| `windows/data/media/<id>/generations/` | Ảnh `.clip` theo generation; `current.txt` chọn generation active |
+| `windows/data/queue/events.jsonl` | Append-only queue journal |
+| `windows/data/queue/snapshot.json` | Queue index đã compact |
+| `windows/data/queue/publish.log` | Session/batch counters và lỗi gửi |
+| `windows/data/harvest_state/` | State shard theo nhóm; hash đã thấy, snapshot, revisit |
 | `windows/data/access_log.json` | Log cấp SĐT |
 
 Reset harvest (cẩn thận):
@@ -218,7 +349,8 @@ Reset harvest (cẩn thận):
 []
 ```
 
-cho `harvest_state.json` nếu muốn quét lại từ đầu.
+cho thư mục `harvest_state/` (và file legacy `harvest_state.json`, nếu có)
+nếu muốn quét lại từ đầu.
 
 ---
 
@@ -226,7 +358,7 @@ cho `harvest_state.json` nếu muốn quét lại từ đầu.
 
 | Triệu chứng | Cách xử lý |
 |-------------|------------|
-| `saved=0` mãi | Kiểm tra tên nhóm trong `groups.csv`; chạy `diag-harvest.ahk`; xem `invalid` vs `blocked` |
+| `saved=0` mãi | Kiểm tra `data/zalo-groups-capture.txt`; chạy `dump-groups.ahk`/`diag-harvest.ahk`; xem `invalid` vs `blocked` |
 | Paste không vào nhóm main | Tăng `[Timing]`; kiểm tra `OpenGroup(..., "send")` + focus compose |
 | Extension AHK không resolve exe | Sửa interpreter path; **không** mở `.exe` như file text |
 | Test fail "Đã chốt" | Đã fix case-insensitive trong `BlockList.ahk` — pull code mới |

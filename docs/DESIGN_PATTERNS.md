@@ -11,9 +11,13 @@ Each class has a single responsibility. When adding features, find the right lay
 | Strategy | `ListingParser` | Parser.ahk | Text → object, object → text |
 | Repository | `ListingRepository` | Storage.ahk | Save/read objects + audit log |
 | Repository | `HarvestStateStore` | StateStore.ahk | Harvest cursor, seen hashes |
+| Repository | `PublishQueueStore` | QueueStore.ahk | Durable leases, journal, retries, checkpoints |
+| Repository | `ListingMediaStore` | MediaStore.ahk | Clipboard archive paths and metadata |
 | Builder | `MessageComposer` | Composer.ahk | Merge objects into message clusters |
 | Adapter | `ZaloUIAdapter` | ZaloUI.ahk | All Zalo PC UI operations |
 | Service | `MessageHarvester` | Harvester.ahk | Orchestrate harvest loop |
+| Service | `ListingMediaCapturer` | MediaCapturer.ahk | Auto-select and archive image bubbles during harvest |
+| Service | `DurableListingPublisher` | Publisher.ahk | Resumable five-room publish sessions |
 | Facade | `ListingBotService` | Bot.ahk | One method per hotkey |
 
 Tests for pure logic classes (`Parser`, `BlockList`, `GroupRegistry`, `Composer`, `JSON`) live in `windows/tests/RunTests.ahk` and run without Zalo.
@@ -27,7 +31,8 @@ cfg := AppConfig.Instance()
 cfg.Reload()   ; Ctrl+Shift+R reloads config + Excel without restarting the bot
 ```
 
-Automatically copies `config.example.ini`, `groups.example.csv`, `blocklist.example.csv` to runtime files on first run.
+Automatically copies `config.example.ini` and `blocklist.example.csv` to
+runtime files on first run. Group names are discovered from Zalo PC.
 
 **Rule:** do not hardcode group names, delays, or keywords in code — everything goes through `AppConfig`.
 
@@ -86,7 +91,23 @@ Hash is FNV-1a on whitespace-stripped text, so reposts with slightly different f
 
 ## 6. Builder — `MessageComposer`
 
-Merges unpublished objects into message strings, inserts `------------{group}------------` when the source group changes, and splits chunks when exceeding `MaxMessageChars`. Each new chunk reprints the separator so readers do not lose context.
+Renders one leased batch (normally five rooms) as one Zalo message. Room blocks are
+separated by `ListingSeparator`; the queue, not the composer, owns ordering and retry.
+
+---
+
+## 6a. Repository — `PublishQueueStore`
+
+Uses an append-only JSONL event journal and compact snapshots. `LeaseNext(5)` prevents
+loading/publishing the complete inventory at once. Delivery intent is persisted before
+each Zalo UI action; successful media/text sends add checkpoints. Expired leases are
+reclaimed, while ambiguous sends become `uncertain`.
+
+## 6b. Service — `DurableListingPublisher`
+
+Acquires a bounded number of leases, opens each output group once, restores archived
+media, sends one five-room text, and completes leases only after every output group has
+been checkpointed.
 
 ---
 

@@ -2,25 +2,27 @@
 ; Harvester.ahk — Service: read source groups, drop blocked/duplicate posts, persist new listings
 
 class MessageHarvester {
-    __New(config, ui, registry, blockList, stateStore, repository) {
+    __New(config, ui, registry, blockList, stateStore, repository, mediaCapturer := 0) {
         this.config := config
         this.ui := ui
         this.registry := registry
         this.blockList := blockList
         this.state := stateStore
         this.repo := repository
+        this.mediaCapturer := mediaCapturer
     }
 
     _EmptySummary() {
         return Map(
             "groups", 0, "batches", 0, "saved", 0, "blocked", 0,
             "duplicate", 0, "invalid", 0, "published", 0,
-            "revisit", 0, "errors", []
+            "revisit", 0, "media_captured", 0, "media_failed", 0, "errors", []
         )
     }
 
     _MergeSummary(total, part) {
-        for key in ["groups", "batches", "saved", "blocked", "duplicate", "invalid", "published", "revisit"]
+        for key in ["groups", "batches", "saved", "blocked", "duplicate", "invalid",
+            "published", "revisit", "media_captured", "media_failed"]
             total[key] += part[key]
         for err in part["errors"]
             total["errors"].Push(err)
@@ -29,22 +31,45 @@ class MessageHarvester {
 
     ; Harvest every enabled source group. Returns a summary Map.
     HarvestAll() {
+        return this.HarvestGroups(this.registry.SourceGroups())
+    }
+
+    ; Sequential bounded harvest. State may be flushed after every group so a
+    ; restart resumes from the oldest untouched group instead of losing a cycle.
+    HarvestGroups(groups, afterGroupFn := 0) {
         summary := this._EmptySummary()
-        for group in this.registry.SourceGroups() {
+        for index, group in groups {
             summary["groups"]++
+            result := 0
             try {
                 result := this.HarvestGroup(group["group_name"])
                 summary["saved"] += result["saved"]
                 summary["blocked"] += result["blocked"]
                 summary["duplicate"] += result["duplicate"]
                 summary["invalid"] += result["invalid"]
+                summary["media_captured"] += result["media_captured"]
+                summary["media_failed"] += result["media_failed"]
             } catch as err {
                 summary["errors"].Push(group["group_name"] ": " err.Message)
             }
-            Sleep this.config.BetweenGroupsMs
+            if this.config.HarvestSaveStateEachGroup
+                this.state.Save()
+            if afterGroupFn {
+                try afterGroupFn.Call(index, group, result, summary)
+                catch as err
+                    summary["errors"].Push(
+                        "after-group " group["group_name"] ": " err.Message)
+            }
+            this._SequentialGroupDelay()
         }
         this.state.Save()
         return summary
+    }
+
+    _SequentialGroupDelay() {
+        Sleep Random(
+            this.config.HarvestGroupDelayMinMs,
+            this.config.HarvestGroupDelayMaxMs)
     }
 
     ; Harvest source groups in batches of BatchSize, publish after each batch,
@@ -113,6 +138,8 @@ class MessageHarvester {
                 part["blocked"] += result["blocked"]
                 part["duplicate"] += result["duplicate"]
                 part["invalid"] += result["invalid"]
+                part["media_captured"] += result["media_captured"]
+                part["media_failed"] += result["media_failed"]
                 for record in result["saved_records"]
                     savedRecords.Push(record)
             } catch as err {
@@ -168,9 +195,51 @@ class MessageHarvester {
         return false
     }
 
+    ; Harvest revisit groups, then mark groups whose conversation changed after publish.
+    ProcessRevisitQueue() {
+        summary := Map(
+            "revisit", 0, "groups", 0, "saved", 0,
+            "media_captured", 0, "media_failed", 0, "errors", []
+        )
+        revisitNames := this.state.ListRevisitGroups()
+        sources := this.registry.SourceGroups()
+        if revisitNames.Length {
+            batch := this._NamesToGroups(revisitNames, sources)
+            for group in batch {
+                summary["groups"]++
+                try {
+                    result := this.HarvestGroup(group["group_name"])
+                    summary["saved"] += result["saved"]
+                    summary["media_captured"] += result["media_captured"]
+                    summary["media_failed"] += result["media_failed"]
+                    this.state.MarkNeedsRevisit(group["group_name"], false)
+                } catch as err {
+                    summary["errors"].Push(group["group_name"] ": " err.Message)
+                }
+                Sleep this.config.BetweenGroupsMs
+            }
+        }
+
+        if this.config.RecheckAfterPublish {
+            Sleep this.config.AfterPublishRecheckMs
+            for group in sources {
+                try {
+                    if this._RecheckForNewMessages(group["group_name"])
+                        summary["revisit"]++
+                } catch as err {
+                    summary["errors"].Push("recheck " group["group_name"] ": " err.Message)
+                }
+            }
+        }
+
+        this.state.Save()
+        return summary
+    }
+
     HarvestGroup(groupName) {
         result := Map(
-            "saved", 0, "blocked", 0, "duplicate", 0, "invalid", 0, "saved_records", []
+            "saved", 0, "blocked", 0, "duplicate", 0, "invalid", 0,
+            "media_captured", 0, "media_failed", 0, "saved_records", []
         )
 
         this.ui.OpenGroup(groupName, "read")
@@ -219,6 +288,14 @@ class MessageHarvester {
             this.state.MarkSeen(groupName, hash)
             result["saved"]++
             result["saved_records"].Push(record)
+            if this.mediaCapturer
+                && record.Has("image_count") && record["image_count"] > 0
+                && this.config.AutoCapture {
+                if this.mediaCapturer.CaptureForRecord(groupName, record)
+                    result["media_captured"]++
+                else
+                    result["media_failed"]++
+            }
         }
 
         this.state.TouchHarvest(groupName)

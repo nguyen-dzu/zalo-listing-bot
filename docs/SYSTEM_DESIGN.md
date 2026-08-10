@@ -6,12 +6,12 @@ The bot collects room listings from **multiple source groups** on Zalo PC, filte
 
 | Aspect | Description |
 |--------|-------------|
-| **Input** | Source groups (not the main group). Group names come from Excel/CSV. Each post may include images, address, phone, room code, price, electric/water/service fees, and room details. |
+| **Input** | Groups discovered from Zalo Alt+3, excluding configured outputs. Each post may include images, address, phone, room code, price, electric/water/service fees, and room details. |
 | **Output** | Main group receives **images first**, then a text message cluster of sale listings. |
-| **Storage** | Each harvested post → one JSON object under `windows/data/listings.json`. |
+| **Storage** | Each harvested post → one JSON file under `windows/data/listings/`; publish state uses a queue journal/snapshot. |
 | **Separation** | Each source group is separated by `------------Group Name------------`. |
 | **Filtering** | Drop posts containing banned keywords (`LOCK`, `Chốt`, `Đã chốt`, …) from Excel/CSV. |
-| **New posts only** | Dedupe by content hash, stored in `harvest_state.json`. |
+| **New posts only** | Dedupe by content hash, stored in per-group `harvest_state/` shards. |
 
 ## 2. Scope
 
@@ -21,8 +21,8 @@ Windows only. The entire project is AutoHotkey v2 controlling Zalo PC — no oth
 
 ```
                     ┌──────────────────────────┐
-                    │  zalo-groups.xlsx / CSV  │
-                    │  Sheet Groups + Blocklist│
+                    │ Zalo Alt+3 group list    │
+                    │ + blocklist Excel / CSV  │
                     └────────────┬─────────────┘
                                  │
 ┌────────────────────────────────▼────────────────────────────────┐
@@ -42,10 +42,13 @@ Windows only. The entire project is AutoHotkey v2 controlling Zalo PC — no oth
 │                            │                                    │
 │                            ▼                                    │
 │              ListingRepository.SaveListing()                    │
-│                     listings.json (local objects)               │
+│              per-listing JSON + durable queue journal           │
 │                            │                                    │
 │                            ▼                                    │
-│              MessageComposer.Compose()                          │
+│        PublishQueueStore.LeaseNext(5)                            │
+│              │                 │                                 │
+│              ▼                 ▼                                 │
+│       local .clip media   MessageComposer.ComposeBatch()         │
 │                            │                                    │
 │                            ▼                                    │
 │         Main group: [images] → [message with separators]        │
@@ -57,7 +60,7 @@ Windows only. The entire project is AutoHotkey v2 controlling Zalo PC — no oth
 ### Flow H — Harvest (`Ctrl+Shift+H`)
 
 ```
-For each group with type=source in Excel/CSV:
+For each selected source group:
   OpenGroup(group name)
   CaptureConversationText()          Method=manual | selectall
   SplitBlocks()                      split on "Địa chỉ:" lines, attach preceding images
@@ -68,30 +71,62 @@ For each group with type=source in Excel/CSV:
 TouchHarvest() + Save state
 ```
 
-### Flow P — Publish to main (`Ctrl+Shift+G`)
+### Flow W — Incremental watch
 
 ```
-Pending() = listings not yet published
-Compose() → chunks, each chunk < MaxMessageChars
-For each group with type=main:
-  SendTextChunks()
-MarkPublished()
+First cycle:
+  sequential full scan → baseline last_harvest_at
+
+Cycle 2+:
+  capture Alt+3 group-list text
+  detect textual unread markers
+  add a small oldest-first audit shard
+  cap to MaxGroupsPerCycle
+  process each group sequentially; save state after each group
+  after each 5 groups, attempt one publish batch
+  stop at MaxBatchesPerWatchCycle
+  sleep Watch.IntervalMs
 ```
+
+The watch path deliberately does not re-open every source group after publish.
+If Zalo does not expose textual unread markers, the rotating audit shard provides
+eventual coverage with bounded GUI work.
+
+### Flow P — Durable publish session (`Ctrl+Shift+G`)
+
+```
+ReclaimExpiredLeases()
+LeaseNext(5) × MaxBatchesPerSession
+For each group with type=main (open once):
+  For each lease:
+    restore archived .clip media and paste in room order
+    checkpoint each media paste
+    ComposeBatch(5 rooms, "=======================")
+    send one text message and checkpoint group delivery
+CompleteLease() only after every main group succeeds
+```
+
+Queue states: `media_pending → ready → leased → sending → completed`. Failures become
+`retry_wait` / `dead_letter`; a crash after issuing a UI send becomes `uncertain` and
+requires an operator Retry/Skip decision.
 
 ### Flow I — Relay images (`Ctrl+Shift+I`)
 
-Images must reach the main group **before** text. Select an image post in a source group and press the hotkey; the bot uses Zalo's **Forward** dialog (or pastes from clipboard) to every main group.
+For scalable publishing, select all images for one harvested room and press
+`Ctrl+Shift+M`. The bot saves the native Windows clipboard payload once under
+`data/media/{listing_id}/generations/`. An atomically replaced `current.txt` pointer
+selects the complete active generation. Publishing restores that archive for every main group,
+without reopening source groups.
 
-Why separate: AutoHotkey cannot read image content inside Zalo, so images are **relayed as-is** rather than downloaded and re-uploaded.
+`Ctrl+Shift+I` remains an ad-hoc manual relay fallback.
 
 ### Flow R — Release phone (`Ctrl+Shift+P`)
 
-Select `SĐT P001` → look up `listings.json` → paste phone into active chat → write `access_log.json`.
+Select `SĐT P001` → look up the per-listing JSON store → paste phone into active chat → write `access_log.json`.
 
 ## 5. Output format
 
-```
-------------Nhóm Cho Thuê Quận 1------------
+```text
 📍 Địa chỉ: 123 Nguyễn Văn A, Quận 1
 🔑 Số phòng: P001
 💰 Giá: 5 triệu/tháng
@@ -101,27 +136,24 @@ Select `SĐT P001` → look up `listings.json` → paste phone into active chat 
 ℹ️ Thông tin: 25m2, full nội thất
 📞 Số chủ: Nhắn bot "SĐT P001" để lấy số
 
-📍 Địa chỉ: 45 Lê Lợi, Quận 1
-...
+=======================
 
-------------Nhóm Cho Thuê Quận 3------------
-📍 Địa chỉ: 88 Võ Văn Tần, Quận 3
+📍 Địa chỉ: 45 Lê Lợi, Quận 1
 ...
 ```
 
-When output exceeds `MaxMessageChars`, the bot splits into multiple messages and **reprints the separator** at the start of each continuation.
+Each Zalo text message contains at most five room blocks separated by
+`=======================`. The final lease may contain fewer than five rooms.
 
 ## 6. Excel / CSV files
 
 Excel is tried first (via COM, requires MS Excel); on failure, CSV is used as fallback.
 
-**Sheet `Groups`** — `windows/config/groups.csv`
+**Group discovery**
 
-| group_name | type | enabled | note |
-|------------|------|---------|------|
-| Nhóm Cho Thuê Quận 1 | source | 1 | Source group |
-| Nhóm Sale Nội Bộ | main | 1 | Main group |
-| Nhóm Test | source | 0 | Disabled |
+At startup, `ZaloUIAdapter` opens Zalo's group-list tab (`Alt+3`) and captures
+the list. `GroupRegistry` excludes the exact names in `[Groups] OutputGroups`;
+every remaining discovered group is a source. No group CSV/Excel is loaded.
 
 **Sheet `Blocklist`** — `windows/config/blocklist.csv`
 
@@ -135,7 +167,7 @@ Excel is tried first (via COM, requires MS Excel); on failure, CSV is used as fa
 
 ## 7. Local object schema
 
-`windows/data/listings.json`
+`windows/data/listings/{id}.json`
 
 ```json
 {
@@ -153,15 +185,18 @@ Excel is tried first (via COM, requires MS Excel); on failure, CSV is used as fa
   "info": "25m2, full nội thất",
   "extra_info": "",
   "image_count": 2,
-  "raw_text": "...",
-  "published": 0,
-  "published_at": ""
+  "raw_text": "..."
 }
 ```
 
-`published: 0` means not yet sent to the main group; `PublishToMain()` only picks up these records.
+Queue lifecycle and per-group delivery checkpoints live in
+`windows/data/queue/events.jsonl` and `snapshot.json`. `listings.json` is only a
+legacy migration source.
 
-`windows/data/harvest_state.json` stores `last_harvest_at` and up to `MaxSeenHashes` hashes per group.
+`windows/data/harvest_state/` stores one small JSON shard per group with
+`last_harvest_at` and up to `MaxSeenHashes` hashes. The old
+`harvest_state.json` remains a read-compatible migration source. Per-group
+shards avoid rewriting a large monolithic file after every sequential group.
 
 ## 8. Folder structure
 
@@ -171,8 +206,12 @@ zalo-listing-bot/
 ├── docs/                          # System design, patterns, testing
 └── windows/
     ├── src/                       # AutoHotkey v2 modules
-    ├── config/                    # config.ini, groups.csv, blocklist.csv
-    ├── data/                      # JSON objects (gitignored)
+    ├── config/                    # config.ini, blocklist.csv
+    ├── data/
+    │   ├── listings/             # one immutable JSON payload per listing
+    │   ├── media/                # native ClipboardAll .clip archives
+    │   ├── queue/                # append-only journal + compact snapshot
+    │   └── harvest_state/        # one cursor/dedupe shard per source group
     └── tests/                     # RunTests.ahk, Simulate.ahk, samples/
 ```
 
@@ -180,8 +219,11 @@ zalo-listing-bot/
 
 | Limitation | Mitigation |
 |------------|------------|
-| AHK cannot read image content in Zalo | Relay images via Forward / clipboard |
-| Zalo has no standard "select all messages" | `Method=manual`: operator selects posts, then presses hotkey |
+| Zalo exposes no stable text-to-image bubble ID | Auto archive via find-in-chat + bubble selection; manual `M` fallback |
+| Crash after issuing Enter has ambiguous delivery | Mark `uncertain`; operator chooses Retry or Skip |
+| 5,000 rooms = 1,000 text messages per group | Bounded sessions, cooldown, TTL and superseding; watch bypasses cooldown between drain passes |
+| Continuous monitoring | `[Watch] IntervalMs` loop: harvest → publish → sleep |
+| Zalo has no standard "select all messages" | `[Capture] Method=selectall` for watch; `manual` still supported |
 | Posts not matching format (missing "Địa chỉ:") | Skipped; adjust `ListingStartPattern` for your groups |
 | Zalo UI changes | Tune `[Timing]` first, then edit `ZaloUI.ahk` |
 | Excel requires MS Excel installed | Use CSV fallback |

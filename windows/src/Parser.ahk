@@ -157,6 +157,10 @@ class ListingParser {
             if InStr(haystack, signal[1])
                 score += signal[2]
         }
+        for signal in ListingParser._INTENT_REGEX_SIGNALS {
+            if RegExMatch(haystack, signal[1])
+                score += signal[2]
+        }
         if RegExMatch(haystack, "i)\d+tr\d|\d+\s*tr\s*\d")
             score += 2
         else if RegExMatch(haystack, "i)\d+[\.,]?\d*\s*(?:tr|triệu|k| củ)(?:\s*/\s*th(?:áng|ang)?)?")
@@ -185,6 +189,15 @@ class ListingParser {
         ["điện", 1], ["nước", 1], ["dịch vụ", 1], ["pdv", 1], ["sđt", 1], ["liên hệ", 2],
         ["full nội thất", 1], ["m²", 1], ["m2", 1], ["gác", 1], ["ban công", 1],
         ["google.com", 2], ["maps.app", 2], ["goo.gl", 2]
+    ]
+
+    ; Config-independent whitelist/intent signals. Multiple dimensions increase
+    ; confidence; blacklist still runs before parse/save in Harvester.
+    static _INTENT_REGEX_SIGNALS := [
+        ["i)(?:trống|còn|sẵn)\s+(?:phòng|studio|1pn|2pn|phòng trọ)", 4],
+        ["i)(?:địa chỉ|dự án|đường|quận|phường|gần trường|gần đh)\s*:?", 2],
+        ["i)(?:sđt|lh|mọi chi tiết|zalo|call)\s*:?\s*0[35789]\d{8}", 3],
+        ["i)(?:giá|điện|nước|dịch vụ)\s*:?\s*\d+(?:[\.,]\d+)?(?:k|tr|triệu)?", 2]
     ]
 
     ; Drop blank and sender/time header lines from both ends of a block.
@@ -251,8 +264,59 @@ class ListingParser {
 
         listing["image_count"] := ListingParser.CountMatches(listing["raw_text"], marker)
         ListingParser._InferFields(listing)
+        listing["room_code"] := ListingParser.NormalizeRoomCode(listing, "")
 
         return listing
+    }
+
+    ; Reject price strings; prefer labeled codes; prefix P for numeric rooms (P102).
+    static LooksLikePrice(value) {
+        v := Trim(value)
+        if v = ""
+            return false
+        return RegExMatch(v, "i)^\d+tr\d|\d+\s*tr\b|\d+[\.,]?\d*\s*(?:tr|triệu|k| củ)\b")
+    }
+
+    static NormalizeRoomCode(listing, fallbackHash := "") {
+        raw := listing.Has("room_code") ? Trim(listing["room_code"]) : ""
+        text := listing.Has("raw_text") ? listing["raw_text"] : ""
+
+        if raw != "" && ListingParser.LooksLikePrice(raw)
+            raw := ""
+
+        if raw = "" && text != "" {
+            if RegExMatch(text, "i)(?:🔑\s*)?(?:Mã phòng|Số phòng|Phòng số|Mã)\s*[:\-–]\s*(\S+)", &found)
+                raw := Trim(found[1])
+            else if RegExMatch(text, "i)(?:mã|ma)\s+(\d{2,4})\b", &found)
+                raw := found[1]
+            else if RegExMatch(text, "i)\bP(\d{2,4})\b", &found)
+                raw := "P" found[1]
+            else if RegExMatch(text, "i)(?:phòng|room)\s+(\d{2,4})\b", &found)
+                raw := found[1]
+            else if RegExMatch(text, "i)trống\s+mã\s+(\d{2,4})\b", &found)
+                raw := found[1]
+        }
+
+        if raw != "" && ListingParser.LooksLikePrice(raw)
+            raw := ""
+
+        if raw = "" {
+            if fallbackHash != ""
+                return "R" SubStr(fallbackHash, 1, 6)
+            return ""
+        }
+
+        raw := RegExReplace(raw, "^\s*(?:🔑|#)\s*", "")
+        raw := Trim(raw)
+
+        if RegExMatch(raw, "^\d{2,4}$")
+            return "P" raw
+        if RegExMatch(raw, "i)^p(\d{2,4})$", &found)
+            return "P" found[1]
+        if RegExMatch(raw, "i)^([A-Za-z]\d[\w.\-]{0,11})$", &found)
+            return StrUpper(found[1])
+
+        return StrUpper(raw)
     }
 
     static _StripLinePrefix(line) {
@@ -424,13 +488,16 @@ class ListingParser {
 
     static ParsePhoneRequest(text) {
         text := Trim(text)
+        code := ""
         if RegExMatch(text, "i)(?:SĐT|SDT|Số chủ|Số điện thoại)\s*(\S+)", &found)
-            return found[1]
-        if RegExMatch(text, "^\d{9,}$")   ; a bare phone number is not a room code
+            code := found[1]
+        else if RegExMatch(text, "^\d{9,}$")   ; bare phone number is not a room code
             return ""
-        if RegExMatch(text, "^(?=.*\d)([A-Za-z0-9][A-Za-z0-9.\-]{1,11})$", &found)
-            return found[1]
-        return ""
+        else if RegExMatch(text, "^(?=.*\d)([A-Za-z0-9][A-Za-z0-9.\-]{1,11})$", &found)
+            code := found[1]
+        else
+            return ""
+        return ListingParser.NormalizeRoomCode(Map("room_code", code), code)
     }
 
     ; Single-listing legacy output (Ctrl+Shift+B flow)
@@ -450,9 +517,13 @@ class ListingParser {
         ListingParser._AddLine(lines, "ℹ️ Thông tin", listing, "info")
         ListingParser._AddLine(lines, "📝 Khác", listing, "extra_info")
 
+        roomCode := ListingParser.NormalizeRoomCode(listing, listing.Has("id") ? listing["id"] : "")
+        if roomCode != "" && listing["room_code"] != roomCode
+            listing["room_code"] := roomCode
+
         if maskPhone {
             hint := phoneHint != "" ? phoneHint : 'Nhắn bot "SĐT {room_code}" để lấy số'
-            hint := StrReplace(hint, "{room_code}", listing["room_code"] != "" ? listing["room_code"] : "mã phòng")
+            hint := StrReplace(hint, "{room_code}", roomCode != "" ? roomCode : "mã phòng")
             lines.Push("📞 Số chủ: " hint)
         } else if listing["owner_phone"] != "" {
             lines.Push("📞 Số chủ: " listing["owner_phone"])

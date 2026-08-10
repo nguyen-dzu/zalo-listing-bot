@@ -11,6 +11,9 @@ class JSON {
             text := SubStr(text, 2)
         pos := 1
         value := JSON._ParseValue(text, &pos)
+        JSON._SkipWs(text, &pos)
+        if pos <= StrLen(text)
+            throw Error("Unexpected trailing JSON content at position " pos)
         return value
     }
 
@@ -110,7 +113,9 @@ class JSON {
             JSON._SkipWs(text, &pos)
             key := JSON._ParseString(text, &pos)
             JSON._SkipWs(text, &pos)
-            pos++ ; consume ':'
+            if SubStr(text, pos, 1) != ":"
+                throw Error("Expected ':' at JSON position " pos)
+            pos++
             result[key] := JSON._ParseValue(text, &pos)
             JSON._SkipWs(text, &pos)
             c := SubStr(text, pos, 1)
@@ -118,7 +123,7 @@ class JSON {
             if c = "}"
                 break
             if c != ","
-                break
+                throw Error("Expected ',' or '}' in JSON object")
         }
         return result
     }
@@ -139,12 +144,14 @@ class JSON {
             if c = "]"
                 break
             if c != ","
-                break
+                throw Error("Expected ',' or ']' in JSON array")
         }
         return result
     }
 
     static _ParseString(text, &pos) {
+        if SubStr(text, pos, 1) != '"'
+            throw Error("Expected JSON string at position " pos)
         pos++ ; opening quote
         out := ""
         while pos <= StrLen(text) {
@@ -163,16 +170,25 @@ class JSON {
                     case "b": out .= "`b"
                     case "f": out .= "`f"
                     case "u":
-                        out .= Chr("0x" SubStr(text, pos, 4))
+                        hex := SubStr(text, pos, 4)
+                        if !RegExMatch(hex, "^[0-9A-Fa-f]{4}$")
+                            throw Error("Invalid JSON unicode escape")
+                        out .= Chr("0x" hex)
                         pos += 4
-                    default: out .= esc
+                    default:
+                        if esc = '"' || esc = "\" || esc = "/"
+                            out .= esc
+                        else
+                            throw Error("Invalid JSON escape")
                 }
                 continue
             }
+            if Ord(c) < 0x20
+                throw Error("Unescaped control character in JSON string")
             out .= c
             pos++
         }
-        return out
+        throw Error("Unterminated JSON string")
     }
 
     static _ParseNumber(text, &pos) {
@@ -185,6 +201,9 @@ class JSON {
                 break
         }
         raw := SubStr(text, start, pos - start)
-        return InStr(raw, ".") || InStr(raw, "e") || InStr(raw, "E") ? Float(raw) : Integer(raw)
+        if !RegExMatch(raw, "^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$")
+            throw Error("Invalid JSON number at position " start)
+        return InStr(raw, ".") || InStr(raw, "e") || InStr(raw, "E")
+            ? Float(raw) : Integer(raw)
     }
 }

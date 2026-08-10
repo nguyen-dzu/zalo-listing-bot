@@ -1,55 +1,109 @@
 #Requires AutoHotkey v2.0
-; GroupRegistry.ahk — Repository: Zalo group list loaded from Excel/CSV
+; GroupRegistry.ahk — Repository: groups discovered from Zalo PC at runtime
 
 class GroupRegistry {
     __New(config) {
         this.config := config
-        this.rows := []
-        this.Reload()
+        this.discoveredNames := []
     }
 
-    Reload() {
-        this.rows := TableLoader.Load(
-            this.config.GroupsXlsx,
-            this.config.GroupsSheet,
-            this.config.GroupsCsv
-        )
-        return this.rows.Length
+    SetDiscovered(names) {
+        this.discoveredNames := []
+        seen := Map()
+        for name in names {
+            clean := Trim(name)
+            key := GroupRegistry._Key(clean)
+            if clean = "" || seen.Has(key)
+                continue
+            seen[key] := true
+            this.discoveredNames.Push(clean)
+        }
+        return this.discoveredNames.Length
     }
 
     SourceGroups() {
-        return this._Filter("source")
-    }
-
-    MainGroups() {
-        return this._Filter("main")
-    }
-
-    _Filter(kind) {
         result := []
-        for row in this.rows {
-            if !this._IsEnabled(row)
-                continue
-            if StrLower(this._Get(row, "type")) != kind
-                continue
-            name := this._Get(row, "group_name")
-            if name = ""
+        outputs := this._OutputLookup()
+        for name in this.discoveredNames {
+            if outputs.Has(GroupRegistry._Key(name))
                 continue
             result.Push(Map(
                 "group_name", name,
-                "type", kind,
-                "note", this._Get(row, "note")
+                "type", "source",
+                "note", "Discovered from Zalo PC"
             ))
         }
         return result
     }
 
-    _IsEnabled(row) {
-        value := StrLower(this._Get(row, "enabled"))
-        return value = "" || value = "1" || value = "true" || value = "yes" || value = "x"
+    MainGroups() {
+        result := []
+        for name in this.config.OutputGroupNames {
+            result.Push(Map(
+                "group_name", name,
+                "type", "main",
+                "note", "Configured output group"
+            ))
+        }
+        return result
     }
 
-    _Get(row, key) {
-        return row.Has(key) ? Trim(row[key]) : ""
+    _OutputLookup() {
+        result := Map()
+        for name in this.config.OutputGroupNames
+            result[GroupRegistry._Key(name)] := true
+        return result
+    }
+
+    ; Parse text copied from Zalo's Alt+3 "Danh sách nhóm" screen.
+    static ParseCapturedNames(text, ignoredLabels := 0) {
+        ignored := Map()
+        defaults := [
+            "danh sách nhóm", "nhóm", "tất cả", "tìm kiếm",
+            "tìm kiếm nhóm", "nhóm đang tham gia", "nhóm của tôi",
+            "tạo nhóm", "phân loại", "tin nhắn", "danh bạ"
+        ]
+        for label in defaults
+            ignored[GroupRegistry._Key(label)] := true
+        if ignoredLabels {
+            for label in ignoredLabels
+                ignored[GroupRegistry._Key(label)] := true
+        }
+
+        names := []
+        seen := Map()
+        for rawLine in StrSplit(NormalizeNewlines(text), "`n") {
+            line := Trim(RegExReplace(rawLine, "\s+", " "))
+            line := Trim(RegExReplace(
+                line, "i)\s+\d+\s*(?:thành viên|members?)$", ""))
+            if line = ""
+                continue
+            lower := GroupRegistry._Key(line)
+            if ignored.Has(lower)
+                continue
+            if RegExMatch(line, "i)^\d+\s*(?:thành viên|members?)$")
+                continue
+            if RegExMatch(line, "i)^(?:\d+\s*)?nhóm(?:\s*\(\d+\))?$")
+                continue
+            if RegExMatch(line,
+                "i)^(?:nhóm đang tham gia|nhóm của tôi|tất cả)(?:\s*\(\d+\))?$")
+                continue
+            if RegExMatch(line,
+                "i)^(?:\d+\s*)?(?:tin nhắn mới|tin chưa đọc|chưa đọc|unread|new messages?)$")
+                continue
+            if RegExMatch(line, "i)^(?:online|offline|\d+\s*(?:phút|giờ|ngày).*)$")
+                continue
+            if seen.Has(lower)
+                continue
+            seen[lower] := true
+            names.Push(line)
+        }
+        return names
+    }
+
+    static _Key(name) {
+        key := StrLower(Trim(name))
+        key := StrReplace(key, Chr(0xFE0F), "")
+        return RegExReplace(key, "\s+", " ")
     }
 }

@@ -19,11 +19,15 @@ if exist "%~dp0RunTests.log" type "%~dp0RunTests.log"
 echo.
 echo === SIMULATE HARVEST ===
 %AHK% "%~dp0Simulate.ahk"
+set SIM_RESULT=%ERRORLEVEL%
 if exist "%~dp0Simulate.log" type "%~dp0Simulate.log"
 
 echo.
 if %RESULT% NEQ 0 (
   echo RESULT: SOME TESTS FAILED
+) else if %SIM_RESULT% NEQ 0 (
+  echo RESULT: QUEUE SIMULATION FAILED
+  set RESULT=%SIM_RESULT%
 ) else (
   echo RESULT: ALL TESTS PASSED
 )

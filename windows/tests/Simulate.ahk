@@ -10,6 +10,7 @@
 #Include ../src/BlockList.ahk
 #Include ../src/Parser.ahk
 #Include ../src/Composer.ahk
+#Include ../src/QueueStore.ahk
 #Include TestLog.ahk
 
 InitTestLog("Simulate.log")
@@ -19,19 +20,32 @@ class SimConfig {
     MaxMessageChars := 1800
     MaskPhone := true
     PhoneHint := 'Nhắn bot "SĐT {room_code}" để lấy số'
+    OneMessagePerListing := false
+    ListingsPerMessage := 5
+    LeaseSize := 5
+    ListingSeparator := "======================="
+    IncludeGroupHeader := false
     BlocklistSheet := "Blocklist"
-    GroupsSheet := "Groups"
     BlocklistXlsx := ""
-    GroupsXlsx := ""
     BlocklistCsv := ""
-    GroupsCsv := ""
-    RequiredFields := ["address", "price", "owner_phone"]
+    OutputGroupNames := ["Nhóm Sale Nội Bộ"]
+    RequiredFields := []
+    QueueDir := ""
+    QueueEventsFile := ""
+    QueueSnapshotFile := ""
+    QueueCompactEvery := 1000
+    MediaRequired := false
+    ListingTtlDays := 30
+    LeaseTimeoutMs := 7200000
+    MaxPublishAttempts := 3
+    RetryBackoffSeconds := 300
 
     __New(root) {
-        this.GroupsXlsx := SimConfig.Pick(root "\config\zalo-groups.xlsx", "")
-        this.BlocklistXlsx := this.GroupsXlsx
-        this.GroupsCsv := SimConfig.Pick(root "\config\groups.csv", root "\config\groups.example.csv")
+        this.BlocklistXlsx := SimConfig.Pick(root "\config\zalo-groups.xlsx", "")
         this.BlocklistCsv := SimConfig.Pick(root "\config\blocklist.csv", root "\config\blocklist.example.csv")
+        this.QueueDir := A_Temp "\zalo-queue-5000"
+        this.QueueEventsFile := this.QueueDir "\events.jsonl"
+        this.QueueSnapshotFile := this.QueueDir "\snapshot.json"
     }
 
     static Pick(primary, fallback) {
@@ -43,6 +57,12 @@ Root := RegExReplace(A_ScriptDir, "\\[^\\]+$")
 SamplesDir := A_ScriptDir "\samples"
 cfg := SimConfig(Root)
 groupCatalog := GroupRegistry(cfg)
+groupCatalog.SetDiscovered([
+    "Nhóm Cho Thuê Quận 1",
+    "Nhóm Cho Thuê Quận 3",
+    "Nhóm Phòng Trọ Bình Thạnh",
+    "Nhóm Sale Nội Bộ"
+])
 blockedWords := BlockList(cfg)
 composerSvc := MessageComposer(cfg)
 
@@ -102,6 +122,7 @@ for name in sourceNames {
 
         listing["id"] := hash
         listing["source_group"] := name
+        listing["room_code"] := ListingParser.NormalizeRoomCode(listing, hash)
         records.Push(listing)
         totalImages += listing["image_count"]
         saved++
@@ -118,12 +139,47 @@ TestLog()
 
 chunks := composerSvc.Compose(records)
 TestLog("== Sẽ gửi vào nhóm chính ==")
-TestLog("Bước 1: chuyển " totalImages " ảnh (hotkey RelayImages)")
-TestLog("Bước 2: " chunks.Length " message text")
+TestLog("Flow: ảnh trước (chọn bubble → copy) → text gom " cfg.ListingsPerMessage " phòng/message")
+TestLog("Ngăn cách phòng: " cfg.ListingSeparator)
+TestLog("Tổng " records.Length " phòng → " chunks.Length " message Zalo, " totalImages " ảnh cần copy")
 for index, chunk in chunks {
     TestLog()
     TestLog("----- MESSAGE " index "/" chunks.Length " (" StrLen(chunk) " ký tự) -----")
     TestLog(chunk)
 }
 
-ExitApp 0
+TestLog()
+TestLog("== Durable queue stress: 5.000 phòng ==")
+if DirExist(cfg.QueueDir)
+    DirDelete cfg.QueueDir, true
+stressQueue := PublishQueueStore(cfg)
+Loop 5000 {
+    stressQueue.Enqueue(Map(
+        "id", Format("stress{:05}", A_Index),
+        "room_code", "",
+        "captured_at", NowStamp(),
+        "image_count", 0
+    ))
+}
+
+stressBatches := 0
+Loop {
+    stressLease := stressQueue.LeaseNext(5)
+    if stressLease["token"] = ""
+        break
+    stressQueue.CompleteLease(stressLease["token"])
+    stressBatches++
+}
+stressQueue.Compact()
+stressReloaded := PublishQueueStore(cfg)
+stressStats := stressReloaded.Stats()
+stressPass := stressBatches = 1000
+    && stressStats["completed"] = 5000
+    && stressStats["total"] = 5000
+TestLog((stressPass ? "PASS" : "FAIL")
+    . " — 5.000 phòng → " stressBatches " batch; completed="
+    . stressStats["completed"] "; total=" stressStats["total"])
+if DirExist(cfg.QueueDir)
+    DirDelete cfg.QueueDir, true
+
+ExitApp stressPass ? 0 : 1
