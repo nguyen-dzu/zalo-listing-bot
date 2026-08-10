@@ -90,7 +90,7 @@ if !EXITCODE! neq 0 (
   echo.
   if !EXITCODE! equ 2 (
     echo Ma 2 = loi load script. Dang chay load-check.ahk...
-    "%AHK_EXE!" /ErrorStdOut "%ERRLOG%" "%LOAD_CHECK%"
+    "!AHK_EXE!" /ErrorStdOut "!ERRLOG!" "!LOAD_CHECK!"
     echo.
   )
 )
@@ -117,7 +117,7 @@ if exist "%WIN%\data\startup-error.log" (
 )
 if !EXITCODE! neq 0 if exist "%DIAG_BOT%" (
   echo Chay them diag-bot.ahk...
-  "%AHK_EXE%" "%DIAG_BOT%"
+  "!AHK_EXE!" "!DIAG_BOT!"
 )
 echo.
 pause
