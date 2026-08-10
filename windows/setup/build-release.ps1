@@ -1,10 +1,10 @@
 # Build portable Zalo Listing Bot package + ZaloListingBot.exe for Windows.
-# Chạy trên Windows (cần AutoHotkey v2 + Ahk2Exe):
+# Run on Windows (needs AutoHotkey v2 + Ahk2Exe):
 #   powershell -ExecutionPolicy Bypass -File windows\setup\build-release.ps1
 #
 # Output:
-#   windows\dist\ZaloListingBot-YYYYMMDD\   (folder portable)
-#   windows\dist\ZaloListingBot-YYYYMMDD.zip  (copy sang máy test)
+#   windows\dist\ZaloListingBot-YYYYMMDD\   (portable folder)
+#   windows\dist\ZaloListingBot-YYYYMMDD.zip
 
 param(
     [string]$OutName = ""
@@ -13,12 +13,11 @@ param(
 $ErrorActionPreference = "Stop"
 $setupDir = $PSScriptRoot
 $windowsRoot = Split-Path $setupDir -Parent
-$repoRoot = Split-Path $windowsRoot -Parent
 $srcBot = Join-Path $windowsRoot "src\Bot.ahk"
 $distRoot = Join-Path $windowsRoot "dist"
 
 if (-not (Test-Path $srcBot)) {
-    Write-Error "Không tìm thấy $srcBot"
+    Write-Error "Bot script not found: $srcBot"
 }
 
 $stamp = if ($OutName) { $OutName } else { Get-Date -Format "yyyyMMdd" }
@@ -37,7 +36,7 @@ New-Item -ItemType Directory -Force -Path $configDir, $setupOut,
     (Join-Path $dataDir "queue"),
     (Join-Path $dataDir "harvest_state") | Out-Null
 
-# Config mẫu
+# Sample config
 Copy-Item (Join-Path $windowsRoot "config\config.example.ini") (Join-Path $configDir "config.example.ini")
 Copy-Item (Join-Path $windowsRoot "config\blocklist.example.csv") (Join-Path $configDir "blocklist.example.csv")
 Copy-Item (Join-Path $configDir "config.example.ini") (Join-Path $configDir "config.ini")
@@ -75,23 +74,20 @@ if ($compiler) {
         $compiled = $true
         Write-Host "Created: $exeOut"
     } else {
-        Write-Warning "Ahk2Exe chạy xong nhưng không thấy $exeOut"
+        Write-Warning "Ahk2Exe finished but output exe was not found: $exeOut"
     }
 } else {
-    Write-Warning "Không tìm thấy Ahk2Exe. Cài AutoHotkey v2 (bundle Compiler) rồi chạy lại."
+    Write-Warning "Ahk2Exe not found. Install AutoHotkey v2 with Compiler, then rerun."
 }
 
 if (-not $compiled) {
-    # Fallback: copy script + launcher (can AutoHotkey tren may dich)
     $fallbackDir = Join-Path $releaseDir "src"
     New-Item -ItemType Directory -Force -Path $fallbackDir | Out-Null
     Get-ChildItem (Join-Path $windowsRoot "src\*.ahk") | Copy-Item -Destination $fallbackDir
-    Copy-Item (Join-Path $setupDir "package-template\Launch-Bot.cmd") `
-        (Join-Path $releaseDir "Launch-Bot.cmd")
-    Write-Host "Fallback: Launch-Bot.cmd + src\ (can AutoHotkey tren may dich)"
+    Copy-Item (Join-Path $setupDir "package-template\Launch-Bot.cmd") (Join-Path $releaseDir "Launch-Bot.cmd")
+    Write-Host "Fallback: Launch-Bot.cmd + src folder (requires AutoHotkey on target PC)"
 }
 
-# Version stamp
 @{
     built_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
     release = $releaseName
@@ -99,7 +95,6 @@ if (-not $compiled) {
     source = "zalo-listing-bot"
 } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $releaseDir "version.json")
 
-# Zip
 if (-not (Test-Path $distRoot)) {
     New-Item -ItemType Directory -Force -Path $distRoot | Out-Null
 }
@@ -108,8 +103,8 @@ if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 Compress-Archive -Path $releaseDir -DestinationPath $zipPath -Force
 
 Write-Host ""
-Write-Host "=== Build xong ==="
+Write-Host "=== Build done ==="
 Write-Host "Folder : $releaseDir"
 Write-Host "Zip    : $zipPath"
 Write-Host ""
-Write-Host "Copy zip sang may Windows test, giai nen, chay Install.cmd"
+Write-Host "Copy zip to test PC, extract, run Install.cmd"

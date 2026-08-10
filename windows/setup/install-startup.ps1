@@ -1,6 +1,6 @@
-# Tạo shortcut Zalo + Zalo Listing Bot trong thư mục Windows Startup.
+# Create Zalo + Zalo Listing Bot shortcuts in Windows Startup folder.
 # Dev repo:  windows\setup\install-startup.ps1
-# Release:   setup\install-startup.ps1 (trong folder portable)
+# Release:   setup\install-startup.ps1 (inside portable folder)
 
 $ErrorActionPreference = "Stop"
 
@@ -32,7 +32,6 @@ function Find-Ahk64 {
     return $null
 }
 
-# Detect package root: release (ZaloListingBot.exe + config/) or dev (windows/)
 $setupDir = $PSScriptRoot
 $packageRoot = Split-Path $setupDir -Parent
 $portableExe = Join-Path $packageRoot "ZaloListingBot.exe"
@@ -47,13 +46,12 @@ if ((Test-Path $portableExe) -or (Test-Path $portableConfig) -or (Test-Path $por
     $configExample = $portableConfigExample
 } else {
     $windowsRoot = Split-Path $setupDir -Parent
-    $repoRoot = Split-Path $windowsRoot -Parent
     $botExe = $null
     $botScript = Join-Path $windowsRoot "src\Bot.ahk"
     $configIni = Join-Path $windowsRoot "config\config.ini"
     $configExample = Join-Path $windowsRoot "config\config.example.ini"
     if (-not (Test-Path $botScript) -and -not (Test-Path $botExe)) {
-        Write-Error "Không tìm thấy bot. Chạy từ thư mục setup/ của repo hoặc bản portable."
+        Write-Error "Bot not found. Run from repo setup/ or portable package setup/."
     }
 }
 
@@ -86,7 +84,7 @@ if ((Test-Path $botExe)) {
 } else {
     $ahkPath = Find-Ahk64
     if (-not $ahkPath) {
-        Write-Error "Không tìm thấy ZaloListingBot.exe hoặc AutoHotkey64.exe."
+        Write-Error "ZaloListingBot.exe and AutoHotkey64.exe were not found."
     }
     $botShortcut.TargetPath = $ahkPath
     $botShortcut.Arguments = "`"$botScript`""
@@ -95,7 +93,7 @@ if ((Test-Path $botExe)) {
 }
 
 $botShortcut.WindowStyle = 7
-$botShortcut.Description = "Zalo Listing Bot — auto harvest/publish"
+$botShortcut.Description = "Zalo Listing Bot - auto harvest/publish"
 $botShortcut.Save()
 Write-Host "Created: $botLink"
 
@@ -109,9 +107,9 @@ if ($zaloPath -and (Test-Path $zaloPath)) {
     $zaloShortcut.Save()
     Write-Host "Created: $zaloLink"
 } else {
-    Write-Warning "Không tìm thấy Zalo.exe — chỉ tạo shortcut bot. Cấu hình [Zalo] ExePath nếu cần."
+    Write-Warning "Zalo.exe not found - only bot shortcut was created. Set [Zalo] ExePath in config.ini."
 }
 
 Write-Host ""
 Write-Host "Startup folder: $startup"
-Write-Host "Sau khi đăng nhập Windows, Zalo và Bot sẽ tự mở."
+Write-Host "After Windows login, Zalo and the bot will start automatically."
