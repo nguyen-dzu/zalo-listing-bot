@@ -5,8 +5,10 @@ cd /d "%~dp0"
 set "ROOT=%~dp0"
 set "BOT="
 
-rem portable package: src\Bot.ahk next to Launch-Bot.cmd
-if exist "%ROOT%src\Bot.ahk" set "BOT=%ROOT%src\Bot.ahk"
+rem Repo src (moi nhat sau git pull) truoc, portable dist\src sau.
+if exist "%ROOT%..\..\src\Bot.ahk" set "BOT=%ROOT%..\..\src\Bot.ahk"
+if not defined BOT if exist "%ROOT%..\src\Bot.ahk" set "BOT=%ROOT%..\src\Bot.ahk"
+if not defined BOT if exist "%ROOT%src\Bot.ahk" set "BOT=%ROOT%src\Bot.ahk"
 
 rem fix double-nested extract
 if not defined BOT if exist "%ROOT%..\src\Bot.ahk" (
@@ -14,22 +16,26 @@ if not defined BOT if exist "%ROOT%..\src\Bot.ahk" (
   set "BOT=%ROOT%src\Bot.ahk"
 )
 
-rem dev: windows\dist\ZaloListingBot-xxx inside cloned repo
-if not defined BOT if exist "%ROOT%..\..\src\Bot.ahk" (
-  set "BOT=%ROOT%..\..\src\Bot.ahk"
-)
-
 if not defined BOT (
   echo.
   echo  Khong tim thay src\Bot.ahk
   echo  Thu muc hien tai: %CD%
   echo.
-  echo  Da thu:
-  echo    %ROOT%src\Bot.ahk
-  echo    %ROOT%..\..\src\Bot.ahk  (repo windows\src)
+  echo  Chay git pull roi:
+  echo    windows\setup\Launch-Bot-Dev.cmd
+  echo  hoac build lai dist:
+  echo    powershell -File windows\setup\build-release.ps1
   echo.
-  echo  Chay lai build-release.ps1, hoac dung windows\setup\Launch-Bot-Dev.cmd
+  pause
+  exit /b 1
+)
+
+set "ACC=%BOT:\Bot.ahk=\Acc.ahk%"
+if not exist "%ACC%" (
   echo.
+  echo  Thieu Acc.ahk - dist\src co the cu.
+  echo  Chay: windows\setup\Launch-Bot-Dev.cmd
+  echo  Can: %ACC%
   pause
   exit /b 1
 )
