@@ -3,12 +3,15 @@
 
 ; Admin + config path trước khi load module (release: exe cạnh config/; dev: src/ + ../config).
 DetectAppRootEarly(dir) {
-    if DirExist(dir "\config")
-        return dir
-    parent := RegExReplace(dir, "\\[^\\]+$")
-    if DirExist(parent "\config")
-        return parent
-    return parent
+    Loop 6 {
+        if DirExist(dir "\config")
+            return dir
+        parent := RegExReplace(dir, "\\[^\\]+$")
+        if parent = dir
+            break
+        dir := parent
+    }
+    return dir
 }
 _startupRoot := DetectAppRootEarly(A_ScriptDir)
 _startupIni := _startupRoot "\config\config.ini"
@@ -724,44 +727,68 @@ class ListingBotService {
 }
 
 ; ── Bootstrap ─────────────────────────────────────────────
-cfg := AppConfig.Instance()
-bot := ListingBotService(cfg)
-
-if cfg.StartupEnableHotkeys {
-    Hotkey cfg.HotkeyHarvest,
-        (*) => bot.RunExclusive("harvest", ObjBindMethod(bot, "HarvestAll"))
-    Hotkey cfg.HotkeyPublish,
-        (*) => bot.RunExclusive("publish", ObjBindMethod(bot, "PublishToMainNotify"))
-    Hotkey cfg.HotkeyCycle,
-        (*) => bot.RunExclusive("harvest + publish", ObjBindMethod(bot, "HarvestAndPublish"))
-    Hotkey cfg.HotkeyRelayImages,
-        (*) => bot.RunExclusive("relay ảnh", ObjBindMethod(bot, "RelayImages"))
-    Hotkey cfg.HotkeyArchiveMedia,
-        (*) => bot.RunExclusive("archive ảnh", ObjBindMethod(bot, "ArchiveMedia"))
-    Hotkey cfg.HotkeyPausePublish, (*) => bot.TogglePublishPause()
-    Hotkey cfg.HotkeyStopPublish, (*) => bot.StopPublish()
-    Hotkey cfg.HotkeyResolveUncertain,
-        (*) => bot.RunExclusive("resolve uncertain", ObjBindMethod(bot, "ResolveUncertain"))
-    Hotkey cfg.HotkeyForward,
-        (*) => bot.RunExclusive("forward listing", ObjBindMethod(bot, "ForwardListingFromClipboard"))
-    Hotkey cfg.HotkeyRelease,
-        (*) => bot.RunExclusive("cấp số điện thoại", ObjBindMethod(bot, "ReleasePhoneFromClipboard"))
-    Hotkey cfg.HotkeyReload,
-        (*) => bot.RunExclusive("reload", ObjBindMethod(bot, "Reload"))
-    Hotkey cfg.HotkeyToggleWatch,
-        (*) => bot.ToggleWatch()
-} else if cfg.StartupAutoRunWatch {
-    Hotkey cfg.HotkeyStopPublish, (*) => bot.StopPublish()
+Startup_OnError(Err, Mode) {
+    if Mode in ("Return", "Throw")
+        return false
+    detail := Err.Message
+    if Err.HasProp("File") && Err.File != ""
+        detail .= "`n" Err.File ":" Err.Line
+    logPath := LogStartupError(detail)
+    MsgBox "Bot khong khoi dong duoc:`n`n" detail "`n`nLog: " logPath,
+        "Zalo Listing Bot", "Iconx"
+    return true
 }
 
-_autoMode := cfg.StartupAutoRunWatch ? "tự động" : "thủ công (hotkey)"
-TrayTip "Zalo Listing Bot",
-    Format("Sẵn sàng — {1} nhóm nguồn, {2} nhóm chính`n{3}`nChế độ: {4}",
+OnError(Startup_OnError)
+
+try {
+    cfg := AppConfig.Instance()
+    bot := ListingBotService(cfg)
+
+    if cfg.StartupEnableHotkeys {
+        Hotkey cfg.HotkeyHarvest,
+            (*) => bot.RunExclusive("harvest", ObjBindMethod(bot, "HarvestAll"))
+        Hotkey cfg.HotkeyPublish,
+            (*) => bot.RunExclusive("publish", ObjBindMethod(bot, "PublishToMainNotify"))
+        Hotkey cfg.HotkeyCycle,
+            (*) => bot.RunExclusive("harvest + publish", ObjBindMethod(bot, "HarvestAndPublish"))
+        Hotkey cfg.HotkeyRelayImages,
+            (*) => bot.RunExclusive("relay ảnh", ObjBindMethod(bot, "RelayImages"))
+        Hotkey cfg.HotkeyArchiveMedia,
+            (*) => bot.RunExclusive("archive ảnh", ObjBindMethod(bot, "ArchiveMedia"))
+        Hotkey cfg.HotkeyPausePublish, (*) => bot.TogglePublishPause()
+        Hotkey cfg.HotkeyStopPublish, (*) => bot.StopPublish()
+        Hotkey cfg.HotkeyResolveUncertain,
+            (*) => bot.RunExclusive("resolve uncertain", ObjBindMethod(bot, "ResolveUncertain"))
+        Hotkey cfg.HotkeyForward,
+            (*) => bot.RunExclusive("forward listing", ObjBindMethod(bot, "ForwardListingFromClipboard"))
+        Hotkey cfg.HotkeyRelease,
+            (*) => bot.RunExclusive("cấp số điện thoại", ObjBindMethod(bot, "ReleasePhoneFromClipboard"))
+        Hotkey cfg.HotkeyReload,
+            (*) => bot.RunExclusive("reload", ObjBindMethod(bot, "Reload"))
+        Hotkey cfg.HotkeyToggleWatch,
+            (*) => bot.ToggleWatch()
+    } else if cfg.StartupAutoRunWatch {
+        Hotkey cfg.HotkeyStopPublish, (*) => bot.StopPublish()
+    }
+
+    _autoMode := cfg.StartupAutoRunWatch ? "tu dong" : "thu cong (hotkey)"
+    TrayTip Format(
+        "San sang — {1} nhom nguon, {2} nhom chinh`n{3}`nChe do: {4}",
         bot.registry.SourceGroups().Length,
         bot.registry.MainGroups().Length,
         bot.QueueStatus(), _autoMode),
-    1
+        "Zalo Listing Bot", "Iconi"
 
-; Auto-execute: chờ Zalo rồi bật watch loop (không chặn đăng ký hotkey phía trên).
-if cfg.StartupAutoRunWatch
-    SetTimer(ObjBindMethod(bot, "AutoStart"), -500)
+    ; Auto-execute: chờ Zalo rồi bật watch loop (không chặn đăng ký hotkey phía trên).
+    if cfg.StartupAutoRunWatch
+        SetTimer(ObjBindMethod(bot, "AutoStart"), -500)
+} catch as err {
+    detail := err.Message
+    if err.HasProp("File") && err.File != ""
+        detail .= "`n" err.File ":" err.Line
+    logPath := LogStartupError(detail)
+    MsgBox "Bot khong khoi dong duoc:`n`n" detail "`n`nLog: " logPath,
+        "Zalo Listing Bot", "Iconx"
+    ExitApp 1
+}

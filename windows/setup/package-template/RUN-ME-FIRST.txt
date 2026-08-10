@@ -7,6 +7,10 @@ Zalo Listing Bot — Portable (Windows)
    - Tao config.ini / blocklist.csv neu chua co
    - Huong dan mo bot
 
+   NEU BOT CRASH NGAY:
+   - Chay Run-Bot-Debug.cmd (hien MsgBox + data\startup-error.log)
+   - Hoac: AutoHotkey64.exe src\diag-startup.ahk
+
 3. Danh sach nhom
    - Bot tu mo Alt+3 va doc toan bo nhom tren Zalo PC
    - 5 nhom output duoc khai bao tai [Groups] OutputGroups trong config.ini

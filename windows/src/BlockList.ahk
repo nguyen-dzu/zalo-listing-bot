@@ -9,11 +9,16 @@ class BlockList {
     }
 
     Reload() {
-        rows := TableLoader.Load(
-            this.config.BlocklistXlsx,
-            this.config.BlocklistSheet,
-            this.config.BlocklistCsv
-        )
+        try {
+            rows := TableLoader.Load(
+                this.config.BlocklistXlsx,
+                this.config.BlocklistSheet,
+                this.config.BlocklistCsv
+            )
+        } catch as err {
+            LogStartupError("BlockList: " err.Message)
+            rows := []
+        }
 
         this.rules := []
         for row in rows {

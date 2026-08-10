@@ -64,15 +64,32 @@ TrimLines(text) {
 }
 
 ; App root: dev layout (src/Bot.ahk + ../config) or release (ZaloListingBot.exe + config/).
-DetectAppRoot(scriptDir := "") {
+DetectAppRoot(scriptDir := "", throwIfMissing := true) {
     dir := scriptDir != "" ? scriptDir : A_ScriptDir
-    if DirExist(dir "\config")
-        return dir
-    parent := RegExReplace(dir, "\\[^\\]+$")
-    if DirExist(parent "\config")
-        return parent
-    throw Error("Không tìm thấy thư mục config/. "
-        . "Đặt ZaloListingBot.exe cạnh thư mục config/.")
+    Loop 6 {
+        if DirExist(dir "\config")
+            return dir
+        parent := RegExReplace(dir, "\\[^\\]+$")
+        if parent = dir
+            break
+        dir := parent
+    }
+    if throwIfMissing
+        throw Error("Khong tim thay thu muc config/.`n"
+            . "Hay giai nen dung folder co Install.cmd + config\ + ZaloListingBot.exe.`n"
+            . "Thu muc hien tai: " A_ScriptDir)
+    return ""
+}
+
+LogStartupError(message) {
+    root := DetectAppRoot(A_ScriptDir, false)
+    if root = ""
+        root := A_ScriptDir
+    logPath := root "\data\startup-error.log"
+    try EnsureDir(root "\data")
+    stamp := FormatTime(, "yyyy-MM-dd HH:mm:ss")
+    try FileAppend stamp " " message "`n", logPath, "UTF-8"
+    return logPath
 }
 
 WithinConfiguredHours(start, finish, current := "") {

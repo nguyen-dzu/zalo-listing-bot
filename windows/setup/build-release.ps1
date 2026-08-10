@@ -57,6 +57,7 @@ Copy-Item (Join-Path $configDir "blocklist.example.csv") (Join-Path $configDir "
 Copy-Item (Join-Path $setupDir "install-startup.ps1") $setupOut
 Copy-Item (Join-Path $setupDir "install-startup.cmd") $setupOut
 Copy-Item (Join-Path $setupDir "package-template\Install.cmd") (Join-Path $releaseDir "Install.cmd")
+Copy-Item (Join-Path $setupDir "package-template\Run-Bot-Debug.cmd") (Join-Path $releaseDir "Run-Bot-Debug.cmd")
 Copy-Item (Join-Path $setupDir "package-template\RUN-ME-FIRST.txt") (Join-Path $releaseDir "RUN-ME-FIRST.txt")
 Copy-Item (Join-Path $windowsRoot "src\Acc.LICENSE.txt") (Join-Path $releaseDir "Acc.LICENSE.txt")
 
