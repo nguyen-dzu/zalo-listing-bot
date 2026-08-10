@@ -3,22 +3,32 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 set "ROOT=%~dp0"
-set "BOT=%ROOT%src\Bot.ahk"
+set "BOT="
 
-rem Fix double-nested extract: ...\ZaloListingBot-xxx\ZaloListingBot-xxx\...
-if not exist "%BOT%" if exist "%ROOT%..\src\Bot.ahk" (
+rem portable package: src\Bot.ahk next to Launch-Bot.cmd
+if exist "%ROOT%src\Bot.ahk" set "BOT=%ROOT%src\Bot.ahk"
+
+rem fix double-nested extract
+if not defined BOT if exist "%ROOT%..\src\Bot.ahk" (
   set "ROOT=%ROOT%..\"
   set "BOT=%ROOT%src\Bot.ahk"
 )
 
-if not exist "%BOT%" (
+rem dev: windows\dist\ZaloListingBot-xxx inside cloned repo
+if not defined BOT if exist "%ROOT%..\..\src\Bot.ahk" (
+  set "BOT=%ROOT%..\..\src\Bot.ahk"
+)
+
+if not defined BOT (
   echo.
   echo  Khong tim thay src\Bot.ahk
   echo  Thu muc hien tai: %CD%
-  echo  Can co file: %ROOT%src\Bot.ahk
   echo.
-  echo  Neu duong dan co 2 lan "ZaloListingBot-...", ban giai nen sai.
-  echo  Hay vao folder CHA co Install.cmd + src\ + config\ roi chay lai.
+  echo  Da thu:
+  echo    %ROOT%src\Bot.ahk
+  echo    %ROOT%..\..\src\Bot.ahk  (repo windows\src)
+  echo.
+  echo  Chay lai build-release.ps1, hoac dung windows\setup\Launch-Bot-Dev.cmd
   echo.
   pause
   exit /b 1

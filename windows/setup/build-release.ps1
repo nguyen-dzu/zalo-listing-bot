@@ -58,7 +58,6 @@ Copy-Item (Join-Path $setupDir "install-startup.ps1") $setupOut
 Copy-Item (Join-Path $setupDir "install-startup.cmd") $setupOut
 Copy-Item (Join-Path $setupDir "package-template\Install.cmd") (Join-Path $releaseDir "Install.cmd")
 Copy-Item (Join-Path $setupDir "package-template\Run-Bot-Debug.cmd") (Join-Path $releaseDir "Run-Bot-Debug.cmd")
-Copy-Item (Join-Path $setupDir "package-template\_bot-launch.inc.cmd") (Join-Path $releaseDir "_bot-launch.inc.cmd")
 Copy-Item (Join-Path $setupDir "package-template\RUN-ME-FIRST.txt") (Join-Path $releaseDir "RUN-ME-FIRST.txt")
 Copy-Item (Join-Path $windowsRoot "src\Acc.LICENSE.txt") (Join-Path $releaseDir "Acc.LICENSE.txt")
 
@@ -85,8 +84,14 @@ if ($compiler) {
     Write-Host "Compiling with: $compiler"
     & $compiler "/in" $srcBot "/out" $exeOut "/cp65001"
     if (Test-Path $exeOut) {
-        $compiled = $true
-        Write-Host "Created: $exeOut"
+        $size = (Get-Item $exeOut).Length
+        if ($size -gt 65536) {
+            $compiled = $true
+            Write-Host "Created: $exeOut ($size bytes)"
+        } else {
+            Write-Warning "Ahk2Exe output too small ($size bytes), treating as failed."
+            Remove-Item $exeOut -Force -ErrorAction SilentlyContinue
+        }
     } else {
         Write-Warning "Ahk2Exe finished but output exe was not found: $exeOut"
     }
@@ -94,16 +99,19 @@ if ($compiler) {
     Write-Warning "Ahk2Exe not found. Install AutoHotkey v2 with Compiler, then rerun."
 }
 
+# Always ship src + Launch-Bot.cmd so AutoHotkey fallback works even with a valid exe.
+$fallbackDir = Join-Path $releaseDir "src"
+New-Item -ItemType Directory -Force -Path $fallbackDir | Out-Null
+Get-ChildItem (Join-Path $windowsRoot "src\*.ahk") | Copy-Item -Destination $fallbackDir -Force
+Copy-Item (Join-Path $windowsRoot "src\Acc.LICENSE.txt") $fallbackDir -Force
+Copy-Item (Join-Path $setupDir "package-template\Launch-Bot.cmd") (Join-Path $releaseDir "Launch-Bot.cmd") -Force
 if (-not $compiled) {
     if (Test-Path $exeOut) {
         Remove-Item $exeOut -Force -ErrorAction SilentlyContinue
     }
-    $fallbackDir = Join-Path $releaseDir "src"
-    New-Item -ItemType Directory -Force -Path $fallbackDir | Out-Null
-    Get-ChildItem (Join-Path $windowsRoot "src\*.ahk") | Copy-Item -Destination $fallbackDir
-    Copy-Item (Join-Path $windowsRoot "src\Acc.LICENSE.txt") $fallbackDir
-    Copy-Item (Join-Path $setupDir "package-template\Launch-Bot.cmd") (Join-Path $releaseDir "Launch-Bot.cmd")
-    Write-Host "Fallback: Launch-Bot.cmd + src folder (requires AutoHotkey on target PC)"
+    Write-Host "No portable exe — use Launch-Bot.cmd + AutoHotkey v2"
+} else {
+    Write-Host "Portable exe + Launch-Bot.cmd fallback both included"
 }
 
 @{
