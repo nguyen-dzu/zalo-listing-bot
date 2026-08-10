@@ -5,6 +5,7 @@
 
 #Include ../src/Util.ahk
 #Include ../src/JSON.ahk
+#Include ../src/Config.ahk
 #Include ../src/TableLoader.ahk
 #Include ../src/GroupRegistry.ahk
 #Include ../src/SourceGroupFile.ahk
@@ -230,6 +231,13 @@ MakePublisherRecord(index, imageCount := 0) {
 Root := RegExReplace(A_ScriptDir, "\\[^\\]+$")
 SamplesDir := A_ScriptDir "\samples"
 cfg := TestConfig(Root)
+
+Section("UTF-8 config")
+utf8GroupName := "Giỏ hàng cao thiên ⏏️ 6tr Phú Nhuận Bình Thạnh"
+utf8Ini := "[Groups]`nOutputGroups=" utf8GroupName "|Nhóm chính 2`n"
+Check("đọc tên nhóm Unicode/emoji từ INI UTF-8",
+    AppConfig.ReadIniValue(
+        utf8Ini, "Groups", "OutputGroups", "") = utf8GroupName "|Nhóm chính 2")
 
 ; ── Parse đủ trường ───────────────────────────────────────
 Section("parse fields")

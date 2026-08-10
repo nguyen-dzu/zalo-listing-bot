@@ -35,6 +35,10 @@ class AppConfig {
 
     Reload() {
         ini := this.IniPath
+        ; Windows' IniRead API treats UTF-8-without-BOM as an ANSI file on
+        ; some systems, corrupting Vietnamese and emoji output-group names.
+        ; Keep one explicit UTF-8 decode and read values from it first.
+        this._IniUtf8Text := ReadTextFile(ini)
 
         ; ── Zalo ──
         this.ExeName := this._Read(ini, "Zalo", "ExeName", "Zalo.exe")
@@ -194,6 +198,18 @@ class AppConfig {
             this._Int(ini, "Images", "ImageSelectStepPx", 80))
         this.FindInChatHotkey := this._Read(ini, "Images", "FindInChatHotkey", "^f")
 
+        ; ── Relay mode ──
+        ; Text-only is the safe/default workflow. It deliberately overrides old
+        ; runtime config.ini files that still have AutoCapture/MediaRequired=1,
+        ; so copied listing text can never be used as an in-chat search query.
+        this.TextOnlyRelay := this._Bool(
+            ini, "Relay", "TextOnly", true)
+        if this.TextOnlyRelay {
+            this.MediaRequired := false
+            this.AutoCapture := false
+            this.AutoCaptureRepairPerCycle := 0
+        }
+
         ; ── Watch loop ──
         this.WatchIntervalMs := Max(60000,
             this._Int(ini, "Watch", "IntervalMs", 300000))
@@ -313,8 +329,39 @@ class AppConfig {
     }
 
     _Read(ini, section, key, default) {
+        missing := Chr(0xE000) "__MISSING_INI_VALUE__"
+        if this.HasProp("_IniUtf8Text") {
+            decoded := AppConfig.ReadIniValue(
+                this._IniUtf8Text, section, key, missing)
+            if decoded != missing
+                return decoded
+        }
         value := IniRead(ini, section, key, default)
         return Trim(value)
+    }
+
+    static ReadIniValue(text, section, key, default := "") {
+        activeSection := ""
+        for rawLine in StrSplit(NormalizeNewlines(text), "`n") {
+            line := Trim(rawLine)
+            if line = "" || SubStr(line, 1, 1) = ";"
+                || SubStr(line, 1, 1) = "#"
+                continue
+            if RegExMatch(line, "^\[([^\]]+)\]$", &header) {
+                activeSection := Trim(header[1])
+                continue
+            }
+            if StrLower(activeSection) != StrLower(section)
+                continue
+            separator := InStr(line, "=")
+            if !separator
+                continue
+            lineKey := Trim(SubStr(line, 1, separator - 1))
+            if StrLower(lineKey) != StrLower(key)
+                continue
+            return Trim(SubStr(line, separator + 1))
+        }
+        return default
     }
 
     _Int(ini, section, key, default) {

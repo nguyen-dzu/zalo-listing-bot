@@ -106,8 +106,11 @@ Added to `blocklist.example.csv` + tests:
 - First-ever cycle scans all discovered groups sequentially to establish baseline.
 - Later cycles select textual unread groups plus an oldest-first audit shard.
 - `MaxGroupsPerCycle` and `MaxBatchesPerWatchCycle` bound GUI/send work.
-- State saves after each group; publish is attempted every five groups.
+- State saves after each group; a group with new rooms is published before the next source.
 - Publish delays use configurable jitter; watch no longer rechecks all groups.
+- `[Relay] TextOnly=1` overrides stale image settings so harvested text is never
+  reused as an in-chat Ctrl+F query. Output names are decoded directly as UTF-8
+  and pasted through the clipboard to preserve Vietnamese and emoji.
 
 **Risk:** Some Zalo builds may not expose unread state through MSAA. The
 oldest-first audit shard still provides eventual coverage.

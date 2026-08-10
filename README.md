@@ -242,12 +242,15 @@ ListingSeparator=======================
 MaskPhone=1
 
 [Images]
-MediaRequired=1             ; có marker ảnh → phải archive trước khi ready
-AutoCapture=1               ; tự archive khi harvest (không cần M)
+MediaRequired=0             ; text relay không chờ ảnh
+AutoCapture=0               ; không dùng text phòng để Ctrl+F trong chat
 AutoCaptureMode=accessibility
 AutoCaptureProbeImages=1    ; vẫn dò graphic khi text copy không có marker ảnh
 AutoCaptureRepairPerCycle=3 ; retry media_pending ở các watch cycle sau
 ImagesBeforeText=1
+
+[Relay]
+TextOnly=1                  ; khóa AutoCapture/MediaRequired, kể cả config.ini cũ
 
 [Watch]
 IntervalMs=300000           ; 5 phút giữa các vòng
@@ -258,7 +261,7 @@ BypassSessionCooldown=1
 InitialFullScan=1          ; vòng đầu tạo baseline toàn bộ nhóm
 MaxGroupsPerCycle=50      ; vòng 2+ chỉ xử lý unread + audit shard
 AuditGroupsPerCycle=10    ; fallback khi Zalo không expose unread
-PublishAfterGroups=5
+PublishAfterGroups=1
 SaveStateEachGroup=1
 
 [RateLimit]
@@ -294,7 +297,7 @@ OpenGroup(read) → CaptureConversationText → SplitBlocks
 1. Vòng đầu quét tuần tự toàn bộ nhóm để tạo baseline `last_harvest_at`.
 2. Từ vòng hai, đọc marker unread từ tab nhóm; ưu tiên nhóm có tin mới.
 3. Thêm một audit shard nhỏ theo nhóm lâu chưa kiểm tra để tránh bỏ sót unread.
-4. Xử lý tuần tự, lưu state sau từng nhóm; mỗi 5 nhóm thử publish một batch.
+4. Xử lý tuần tự, lưu state; nhóm có phòng mới được publish trước khi sang nhóm nguồn tiếp theo.
 5. Mỗi chu kỳ có giới hạn nhóm và publish, sau đó nghỉ `[Watch] IntervalMs`.
 
 Watch không còn recheck toàn bộ nhóm sau publish.

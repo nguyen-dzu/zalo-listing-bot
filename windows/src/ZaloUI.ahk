@@ -67,10 +67,9 @@ class ZaloUIAdapter {
             Sleep 150
             Send "^f"
             Sleep this.config.SearchDelayMs
-            ; Clear stale search text (clipboard/history) before typing group name.
-            Send "^a{Backspace}"
-            Sleep 80
-            SendText groupName
+            ; Clipboard paste preserves Vietnamese/emoji group names more
+            ; reliably than simulated Unicode keyboard input in Zalo Electron.
+            this._ReplaceFocusedText(groupName)
             Sleep this.config.SearchDelayMs + 300
             Send "{Enter}"
             Sleep this.config.OpenChatDelayMs
@@ -189,7 +188,9 @@ class ZaloUIAdapter {
         }
 
         if mode = "selectall" {
-            this._ClickMessagePane()
+            ; Use a deterministic point inside the conversation bubbles. MSAA
+            ; Pane/Document may resolve to the compose box or left search pane.
+            this._ClickConversationTextArea()
             Send "^a"
             Sleep this.config.PasteDelayMs
         }
@@ -198,8 +199,17 @@ class ZaloUIAdapter {
         A_Clipboard := ""
         Send "^c"
         captured := ClipWait(this.config.ClipWaitSeconds) ? A_Clipboard : ""
+        Send "{Esc}"
         A_Clipboard := old
         return captured
+    }
+
+    _ClickConversationTextArea() {
+        win := this._WindowRect()
+        this._ScreenClick(
+            win["x"] + Round(win["w"] * 0.68),
+            win["y"] + Round(win["h"] * 0.48))
+        Sleep this.config.PasteDelayMs
     }
 
     _CaptureAccessibleConversationText() {
@@ -899,13 +909,35 @@ class ZaloUIAdapter {
         this.Activate()
         Send this.config.ForwardHotkey
         Sleep this.config.ForwardDialogMs
-        SendText groupName
+        this._ReplaceFocusedText(groupName)
         Sleep this.config.SearchDelayMs + 200
         Send "{Enter}"
         Sleep this.config.PasteDelayMs
         Send "{Enter}"
         Sleep this.config.SendDelayMs
         return true
+    }
+
+    _ReplaceFocusedText(text) {
+        if Trim(text) = ""
+            throw Error("Không thể paste chuỗi tìm kiếm rỗng.")
+        old := ClipboardAll()
+        A_Clipboard := ""
+        A_Clipboard := text
+        if !ClipWait(this.config.ClipWaitSeconds) {
+            A_Clipboard := old
+            throw Error("Không đặt được tên nhóm Unicode vào clipboard.")
+        }
+        try {
+            Send "^a"
+            Sleep 80
+            Send "{Backspace}"
+            Sleep 80
+            Send "^v"
+            Sleep this.config.PasteDelayMs
+        } finally {
+            A_Clipboard := old
+        }
     }
 
     _PasteAndSend(message, refocus := true, beforeSend := 0) {

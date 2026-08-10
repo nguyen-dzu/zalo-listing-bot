@@ -95,7 +95,7 @@ class ListingMediaCapturer {
 
     RepairPending(repository, limit := 0) {
         result := Map("attempted", 0, "captured", 0, "failed", 0)
-        if limit <= 0
+        if limit <= 0 || !this.config.AutoCapture
             return result
         for entry in this.queue.MediaPendingEntries(limit) {
             record := repository.Get(entry["id"])

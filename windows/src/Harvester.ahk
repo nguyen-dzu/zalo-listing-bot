@@ -255,13 +255,29 @@ class MessageHarvester {
         if Trim(normalized) = ""
             return result
 
-        captureHash := FnvHash(normalized)
-        this.state.SetCaptureHash(groupName, captureHash)
-        this.state.MarkNeedsRevisit(groupName, false)
-
         blocks := ListingParser.SplitBlocks(
             normalized, this.config.ListingStartPattern, this.config.ImageMarkerPattern
         )
+        ; Accessibility can return only Zalo chrome/header labels on some
+        ; versions. Retry from the actual message-bubble area before deciding
+        ; that the source group has no rental listing.
+        if (!blocks.Length && this.config.CaptureMethod != "selectall") {
+            fallbackText := this.ui.CaptureConversationText("selectall")
+            fallbackNormalized := NormalizeNewlines(fallbackText)
+            fallbackBlocks := ListingParser.SplitBlocks(
+                fallbackNormalized,
+                this.config.ListingStartPattern,
+                this.config.ImageMarkerPattern
+            )
+            if fallbackBlocks.Length {
+                normalized := fallbackNormalized
+                blocks := fallbackBlocks
+            }
+        }
+
+        captureHash := FnvHash(normalized)
+        this.state.SetCaptureHash(groupName, captureHash)
+        this.state.MarkNeedsRevisit(groupName, false)
         count := 0
 
         for block in blocks {
