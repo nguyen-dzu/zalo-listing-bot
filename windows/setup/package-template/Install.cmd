@@ -45,7 +45,8 @@ if exist "ZaloListingBot.exe" (
 ) else if exist "Launch-Bot.cmd" (
   call "%~dp0Launch-Bot.cmd"
 ) else (
-  echo Khong tim thay ZaloListingBot.exe. Chay build-release.cmd tren may co AutoHotkey.
+  echo Khong tim thay ZaloListingBot.exe hoac Launch-Bot.cmd
+  echo Kiem tra folder co config\ va src\Bot.ahk
 )
 
 :done
