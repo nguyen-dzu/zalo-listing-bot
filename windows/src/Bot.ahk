@@ -424,7 +424,7 @@ class ListingBotService {
         if this.config.ZaloExePath != "" && FileExist(this.config.ZaloExePath)
             return this.config.ZaloExePath
         candidates := [
-            A_LocalAppData "\Programs\Zalo\Zalo.exe",
+            EnvGet("LocalAppData") "\Programs\Zalo\Zalo.exe",
             A_AppData "\Zalo\Zalo.exe",
             EnvGet("ProgramFiles") "\Zalo\Zalo.exe",
             EnvGet("ProgramFiles(x86)") "\Zalo\Zalo.exe"
