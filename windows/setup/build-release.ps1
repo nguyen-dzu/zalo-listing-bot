@@ -109,7 +109,7 @@ if (-not $compiled) {
     if (Test-Path $exeOut) {
         Remove-Item $exeOut -Force -ErrorAction SilentlyContinue
     }
-    Write-Host "No portable exe — use Launch-Bot.cmd + AutoHotkey v2"
+    Write-Host "No portable exe - use Launch-Bot.cmd + AutoHotkey v2"
 } else {
     Write-Host "Portable exe + Launch-Bot.cmd fallback both included"
 }

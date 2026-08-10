@@ -45,7 +45,7 @@ echo.
 if "!HAS_EXE!"=="1" (
   echo  Co ZaloListingBot.exe hop le.
 ) else (
-  echo  Khong co exe — can AutoHotkey v2, dung Launch-Bot.cmd.
+  echo  Khong co exe - can AutoHotkey v2, dung Launch-Bot.cmd.
 )
 echo  Neu crash: Run-Bot-Debug.cmd
 echo.
