@@ -73,11 +73,11 @@ class AppConfig {
         this.GroupListTabHotkey := this._Read(
             ini, "Groups", "ListTabHotkey", "!3")
         this.GroupDiscoveryMode := StrLower(this._Read(
-            ini, "Groups", "DiscoveryMode", "accessibility"))
+            ini, "Groups", "DiscoveryMode", "hybrid"))
         this.GroupListSettleMs := Max(500,
             this._Int(ini, "Groups", "ListSettleMs", 1500))
         this.GroupListScanPages := Max(1,
-            this._Int(ini, "Groups", "ListScanPages", 80))
+            this._Int(ini, "Groups", "ListScanPages", 30))
         this.GroupRefreshEveryCycles := Max(1,
             this._Int(ini, "Groups", "RefreshEveryCycles", 12))
         this.GroupListPaneClickXRatio := this._Float(
@@ -94,12 +94,16 @@ class AppConfig {
             ini, "Groups", "ListScrollMode", "wheel"))
         this.GroupListWheelSteps := Max(1,
             this._Int(ini, "Groups", "ListWheelSteps", 8))
+        this.GroupListUsePaneClick := this._Bool(
+            ini, "Groups", "ListUsePaneClick", false)
+        this.UiUseRatioClicks := this._Bool(
+            ini, "Groups", "UiUseRatioClicks", false)
         this.GroupAccessibilityDepth := Max(3,
             this._Int(ini, "Groups", "AccessibilityDepth", 18))
         this.GroupAccessibilityLeftRatio := this._Float(
             ini, "Groups", "AccessibilityLeftRatio", 0.52)
         this.PreferAccessibleConversationClick := this._Bool(
-            ini, "Groups", "PreferAccessibleConversationClick", true)
+            ini, "Groups", "PreferAccessibleConversationClick", false)
         this.VerifyActiveConversation := this._Bool(
             ini, "Groups", "VerifyActiveConversation", true)
         this.GroupListManualFile := this._Resolve(this._Read(
@@ -120,7 +124,7 @@ class AppConfig {
 
         ; ── Capture ──
         this.CaptureMethod := StrLower(this._Read(
-            ini, "Capture", "Method", "accessibility"))
+            ini, "Capture", "Method", "selectall"))
         this.CaptureAccessibilityFallback := StrLower(this._Read(
             ini, "Capture", "AccessibilityFallback", "selectall"))
         this.ListingStartPattern := this._Read(ini, "Capture", "ListingStartPattern", "")

@@ -63,6 +63,17 @@ TrimLines(text) {
     return lines
 }
 
+EnablePerMonitorDpiAwareness() {
+    static done := false
+    if done
+        return
+    done := true
+    ; PER_MONITOR_AWARE_V2 (-4) aligns WinGetPos with MSAA accLocation.
+    try DllCall("SetProcessDpiAwarenessContext", "Ptr", -4, "Ptr")
+    catch try DllCall("SetThreadDpiAwarenessContext", "Ptr", -4, "Ptr")
+    catch try DllCall("user32\SetProcessDPIAware")
+}
+
 ; App root: dev layout (src/Bot.ahk + ../config) or release (ZaloListingBot.exe + config/).
 DetectAppRoot(scriptDir := "", throwIfMissing := true) {
     dir := scriptDir != "" ? scriptDir : A_ScriptDir

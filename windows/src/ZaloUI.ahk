@@ -6,6 +6,38 @@ class ZaloUIAdapter {
     __New(config) {
         this.config := config
         this.publishGroup := ""
+        EnablePerMonitorDpiAwareness()
+        CoordMode("Mouse", "Screen")
+    }
+
+    _ScreenClick(x, y, options := "") {
+        CoordMode("Mouse", "Screen")
+        if options != ""
+            Click(x, y, options)
+        else
+            Click(x, y)
+    }
+
+    _ElementClick(element) {
+        try {
+            element.Click()
+            return true
+        } catch {
+            try {
+                loc := element.Location
+                this._ScreenClick(
+                    loc.x + Round(loc.w / 2),
+                    loc.y + Round(loc.h / 2))
+                return true
+            } catch {
+                return false
+            }
+        }
+    }
+
+    _WindowRect() {
+        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
+        return Map("x", x, "y", y, "w", w, "h", h)
     }
 
     IsRunning() {
@@ -56,17 +88,19 @@ class ZaloUIAdapter {
         root := this._AccessibleRoot()
         if !root
             return false
-        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
-        maxX := x + Round(w * this.config.GroupAccessibilityLeftRatio)
+        win := this._WindowRect()
+        maxX := win["x"] + Round(win["w"] * this.config.GroupAccessibilityLeftRatio)
         targetKey := GroupRegistry._Key(groupName)
+        ; ListItem/OutlineItem only — StaticText matches random labels and
+        ; causes repeated clicks at wrong coordinates.
         try elements := root.FindElements([
             {Role: Acc.Role.ListItem},
-            {Role: Acc.Role.OutlineItem},
-            {Role: Acc.Role.StaticText},
-            {Role: Acc.Role.Text}
+            {Role: Acc.Role.OutlineItem}
         ], Acc.TreeScope.Descendants, 0, this.config.GroupAccessibilityDepth)
         catch
             return false
+        best := 0
+        bestScore := -1
         for element in elements {
             name := ""
             try name := element.Name
@@ -79,15 +113,23 @@ class ZaloUIAdapter {
             catch
                 continue
             if location.w <= 0 || location.h <= 0
-                || location.x < x || location.x >= maxX
-                || location.y < y || location.y >= y + h
+                || location.x < win["x"] || location.x >= maxX
+                || location.y < win["y"] || location.y >= win["y"] + win["h"]
                 continue
-            Click(location.x + Round(location.w / 2),
-                location.y + Round(location.h / 2))
-            Sleep this.config.OpenChatDelayMs
-            return true
+            score := StrLen(nameKey)
+            if nameKey = targetKey
+                score += 1000
+            if score > bestScore {
+                bestScore := score
+                best := element
+            }
         }
-        return false
+        if !best
+            return false
+        if !this._ElementClick(best)
+            return false
+        Sleep this.config.OpenChatDelayMs
+        return true
     }
 
     _ActiveConversationMatches(groupName) {
@@ -248,20 +290,14 @@ class ZaloUIAdapter {
         Send this.config.GroupListTabHotkey
         Sleep this.config.GroupListSettleMs
 
-        WinGetPos &winX, &winY, &winW, &winH, "ahk_exe " this.config.ExeName
-        if communitiesTab {
-            tabX := winX + Round(winW * this.config.GroupCommunityTabClickXRatio)
-            tabY := winY + Round(winH * this.config.GroupCommunityTabClickYRatio)
-            Click(tabX, tabY)
-            Sleep this.config.GroupListSettleMs
-        }
+        win := this._WindowRect()
+        if communitiesTab
+            this._ActivateCommunityTab(win)
 
-        paneX := winX + Round(winW * this.config.GroupListPaneClickXRatio)
-        paneY := winY + Round(winH * this.config.GroupListPaneClickYRatio)
-        Click(paneX, paneY)
-        Sleep this.config.PasteDelayMs
-        Send "{Home}"
-        Sleep this.config.GroupListSettleMs
+        if this.config.GroupListUsePaneClick
+            this._FocusGroupListPaneByRatio(win)
+        else
+            Send "{Home}"
 
         old := ClipboardAll()
         combined := ""
@@ -292,13 +328,55 @@ class ZaloUIAdapter {
                     break
                 previous := page
 
-                Click(paneX, paneY)
                 this._AdvanceGroupListScroll()
             }
         } finally {
             A_Clipboard := old
         }
         return combined
+    }
+
+    _FocusGroupListPaneByRatio(win) {
+        paneX := win["x"] + Round(win["w"] * this.config.GroupListPaneClickXRatio)
+        paneY := win["y"] + Round(win["h"] * this.config.GroupListPaneClickYRatio)
+        this._ScreenClick(paneX, paneY)
+        Sleep this.config.PasteDelayMs
+        Send "{Home}"
+        Sleep this.config.GroupListSettleMs
+    }
+
+    _ActivateCommunityTab(win) {
+        root := this._AccessibleRoot()
+        if root {
+            try tabs := root.FindElements([
+                {Role: Acc.Role.PageTab},
+                {Role: Acc.Role.Button}
+            ], Acc.TreeScope.Descendants, 0, this.config.GroupAccessibilityDepth)
+            catch
+                tabs := []
+            maxX := win["x"] + Round(win["w"] * 0.45)
+            for tab in tabs {
+                label := ""
+                try label := tab.Name
+                if label = "" || !RegExMatch(label, "i)(?:cong dong|community|cộng đồng)")
+                    continue
+                try location := tab.Location
+                catch
+                    continue
+                if location.x > maxX
+                    continue
+                if this._ElementClick(tab) {
+                    Sleep this.config.GroupListSettleMs
+                    return
+                }
+            }
+        }
+        if this.config.UiUseRatioClicks {
+            tabX := win["x"] + Round(win["w"] * this.config.GroupCommunityTabClickXRatio)
+            tabY := win["y"] + Round(win["h"] * this.config.GroupCommunityTabClickYRatio)
+            this._ScreenClick(tabX, tabY)
+            Sleep this.config.GroupListSettleMs
+        }
     }
 
     ; Read Chromium/Electron accessibility names instead of selecting/copying
@@ -484,7 +562,7 @@ class ZaloUIAdapter {
     CopyImageAt(location) {
         this.Activate()
         A_Clipboard := ""
-        Click(location["x"], location["y"])
+        this._ScreenClick(location["x"], location["y"])
         Sleep this.config.ImageViewerSettleMs
         Send this.config.ImageCopyHotkey
         Sleep this.config.PasteDelayMs + 200
@@ -496,7 +574,7 @@ class ZaloUIAdapter {
         Send "{Esc}"
         Sleep 150
         A_Clipboard := ""
-        Click(location["x"], location["y"], "Right")
+        this._ScreenClick(location["x"], location["y"], "Right")
         Sleep this.config.PasteDelayMs + 200
         Send this.config.ImageContextCopyKey
         Sleep this.config.PasteDelayMs + 200
@@ -515,18 +593,70 @@ class ZaloUIAdapter {
     }
 
     _ClickMessagePane() {
-        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
-        ; Message pane sits right of the conversation list; click a neutral spot.
-        Click(x + Round(w * 0.65), y + Round(h * 0.45))
+        if this._FocusAccRegion(["Document", "Pane"], 0.36, 0.96, 0.12, 0.87)
+            return
+        if !this.config.UiUseRatioClicks
+            return
+        win := this._WindowRect()
+        this._ScreenClick(
+            win["x"] + Round(win["w"] * 0.65),
+            win["y"] + Round(win["h"] * 0.45))
         Sleep this.config.PasteDelayMs
     }
 
     ; Zalo PC: after search/open chat, focus must be in the compose box before Ctrl+V.
     _FocusComposeBox() {
         this.Activate()
-        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
-        Click(x + Round(w * 0.65), y + h - 90)
+        if this._FocusAccRegion(["Edit", "Document"], 0.36, 0.96, 0.78, 0.98)
+            return
+        if !this.config.UiUseRatioClicks {
+            Send "{Tab}"
+            Sleep this.config.PasteDelayMs
+            return
+        }
+        win := this._WindowRect()
+        this._ScreenClick(
+            win["x"] + Round(win["w"] * 0.65),
+            win["y"] + win["h"] - 90)
         Sleep this.config.PasteDelayMs + 100
+    }
+
+    _FocusAccRegion(roleNames, minXRatio, maxXRatio, minYRatio, maxYRatio) {
+        root := this._AccessibleRoot()
+        if !root
+            return false
+        win := this._WindowRect()
+        minX := win["x"] + Round(win["w"] * minXRatio)
+        maxX := win["x"] + Round(win["w"] * maxXRatio)
+        minY := win["y"] + Round(win["h"] * minYRatio)
+        maxY := win["y"] + Round(win["h"] * maxYRatio)
+        criteria := []
+        for roleName in roleNames
+            criteria.Push({Role: Acc.Role.%roleName%})
+        try elements := root.FindElements(
+            criteria, Acc.TreeScope.Descendants, 0,
+            this.config.GroupAccessibilityDepth)
+        catch
+            return false
+        best := 0
+        bestArea := -1
+        for element in elements {
+            try location := element.Location
+            catch
+                continue
+            if location.w <= 0 || location.h <= 0
+                || location.x < minX || location.x > maxX
+                || location.y < minY || location.y > maxY
+                continue
+            area := location.w * location.h
+            if area > bestArea {
+                bestArea := area
+                best := element
+            }
+        }
+        if !best
+            return false
+        return this._ElementClick(best)
     }
 
     SendTextChunks(groupName, chunks) {
@@ -584,17 +714,17 @@ class ZaloUIAdapter {
         this._ClickMessagePane()
         mode := StrLower(this.config.ImageSelectMode)
         if mode = "shift_click" {
-            WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
-            clickX := x + Round(w * 0.65)
-            baseY := y + Round(h * 0.45)
+            win := this._WindowRect()
+            clickX := win["x"] + Round(win["w"] * 0.65)
+            baseY := win["y"] + Round(win["h"] * 0.45)
             step := this.config.ImageSelectStepPx
             Send "{Shift down}"
             Loop imageCount {
-                clickY := Max(y + 80, baseY - (A_Index * step))
+                clickY := Max(win["y"] + 80, baseY - (A_Index * step))
                 if A_Index = 1
-                    Click(clickX, clickY)
+                    this._ScreenClick(clickX, clickY)
                 else
-                    Click(clickX, clickY, , , "D")
+                    this._ScreenClick(clickX, clickY, , , "D")
                 Sleep this.config.PasteDelayMs
             }
             Send "{Shift up}"
