@@ -69,9 +69,22 @@ EnablePerMonitorDpiAwareness() {
         return
     done := true
     ; PER_MONITOR_AWARE_V2 (-4) aligns WinGetPos with MSAA accLocation.
-    try DllCall("SetProcessDpiAwarenessContext", "Ptr", -4, "Ptr")
-    catch try DllCall("SetThreadDpiAwarenessContext", "Ptr", -4, "Ptr")
-    catch try DllCall("user32\SetProcessDPIAware")
+    if _TryDpiAwarenessCall("SetProcessDpiAwarenessContext")
+        return
+    if _TryDpiAwarenessCall("SetThreadDpiAwarenessContext")
+        return
+    try {
+        DllCall("user32\SetProcessDPIAware")
+    }
+}
+
+_TryDpiAwarenessCall(functionName) {
+    try {
+        DllCall(functionName, "Ptr", -4, "Ptr")
+        return true
+    } catch {
+        return false
+    }
 }
 
 ; App root: dev layout (src/Bot.ahk + ../config) or release (ZaloListingBot.exe + config/).

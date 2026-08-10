@@ -10,9 +10,12 @@ class ZaloUIAdapter {
         CoordMode("Mouse", "Screen")
     }
 
+    ; options: "" | WhichButton ("Left","Right",...) | "D"/"U" (mouse down/up for drag)
     _ScreenClick(x, y, options := "") {
         CoordMode("Mouse", "Screen")
-        if options != ""
+        if options = "D" || options = "U"
+            Click(x, y, , , options)
+        else if options != ""
             Click(x, y, options)
         else
             Click(x, y)
@@ -724,7 +727,7 @@ class ZaloUIAdapter {
                 if A_Index = 1
                     this._ScreenClick(clickX, clickY)
                 else
-                    this._ScreenClick(clickX, clickY, , , "D")
+                    this._ScreenClick(clickX, clickY, "D")
                 Sleep this.config.PasteDelayMs
             }
             Send "{Shift up}"
