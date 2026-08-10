@@ -728,7 +728,7 @@ class ListingBotService {
 
 ; ── Bootstrap ─────────────────────────────────────────────
 Startup_OnError(Err, Mode) {
-    if Mode in ("Return", "Throw")
+    if (Mode = "Return" || Mode = "Throw")
         return false
     detail := Err.Message
     if Err.HasProp("File") && Err.File != ""
