@@ -1,7 +1,26 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 
-#Include BotModules.ahk
+#Include Util.ahk
+#Include JSON.ahk
+#Include Config.ahk
+#Include TableLoader.ahk
+#Include GroupRegistry.ahk
+#Include SourceGroupFile.ahk
+#Include BotControlWindow.ahk
+#Include BlockList.ahk
+#Include Parser.ahk
+#Include Storage.ahk
+#Include StateStore.ahk
+#Include QueueStore.ahk
+#Include MediaStore.ahk
+#Include Composer.ahk
+#Include Acc.ahk
+#Include ZaloUI.ahk
+#Include GroupActivity.ahk
+#Include MediaCapturer.ahk
+#Include Harvester.ahk
+#Include Publisher.ahk
 
 ; Admin + config path trước khi chạy (release: exe cạnh config/; dev: src/ + ../config).
 DetectAppRootEarly(dir) {
@@ -583,8 +602,8 @@ class ListingBotService {
         Loop requested {
             if this.watchStopRequested
                 break
-            if this.config.WatchStopOnUncertain
-                && this.queue.UncertainEntries().Length {
+            if (this.config.WatchStopOnUncertain
+                && this.queue.UncertainEntries().Length) {
                 this.watchStopRequested := true
                 this._Notify("Watch dừng",
                     "Queue có delivery uncertain. Dùng ResolveUncertain.", 3)
