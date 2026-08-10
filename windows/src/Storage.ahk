@@ -1,4 +1,5 @@
 #Requires AutoHotkey v2.0
+#Include Parser.ahk
 ; Storage.ahk — Repository: per-listing JSON persistence and phone-access audit
 
 class ListingRepository {

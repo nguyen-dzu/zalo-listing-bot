@@ -53,6 +53,7 @@ Copy-Item (Join-Path $windowsRoot "config\groups-manual.example.txt") (Join-Path
 Copy-Item (Join-Path $windowsRoot "config\source-groups.example.csv") (Join-Path $configDir "source-groups.example.csv")
 Copy-Item (Join-Path $configDir "config.example.ini") (Join-Path $configDir "config.ini")
 Copy-Item (Join-Path $configDir "blocklist.example.csv") (Join-Path $configDir "blocklist.csv")
+Copy-Item (Join-Path $configDir "source-groups.example.csv") (Join-Path $configDir "source-groups.csv")
 
 # Setup scripts
 Copy-Item (Join-Path $setupDir "install-startup.ps1") $setupOut

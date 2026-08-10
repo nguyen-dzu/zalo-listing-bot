@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
 #Include Acc.ahk
+#Include GroupRegistry.ahk
 ; ZaloUI.ahk — Adapter: every Zalo PC keystroke lives here. Calibrate delays in config.ini.
 
 class ZaloUIAdapter {
