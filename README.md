@@ -8,9 +8,9 @@ Nhóm nguồn 2 ├─► lọc blocklist ─► parse ─► durable queue ─�
 Nhóm nguồn N ┘                                              (text + ảnh)
 ```
 
-Bot tự đọc toàn bộ nhóm từ tab **Danh sách nhóm** của Zalo PC (`Alt+3`).
-5 nhóm output khai báo trong `config.ini`; mọi nhóm còn lại tự động là input.
-Chỉ từ khóa cấm còn đọc từ `blocklist.csv`/Excel.
+Khi khởi động, bot mở popup để chọn hoặc kéo-thả file **CSV/XLSX** chứa tên
+nhóm input. Bot giữ nguyên thứ tự dòng trong file. 5 nhóm output vẫn khai báo
+trong `config.ini`; từ khóa cấm đọc từ `blocklist.csv`/Excel.
 
 ---
 
@@ -53,7 +53,7 @@ Chỉ từ khóa cấm còn đọc từ `blocklist.csv`/Excel.
 | Windows 10/11 | Bắt buộc |
 | [AutoHotkey v2](https://www.autohotkey.com/) | **v2**, không dùng v1. Có thể cài user-level: `%LocalAppData%\Programs\AutoHotkey\v2\AutoHotkey64.exe` |
 | Zalo PC | Đăng nhập tài khoản bot, đã vào **tất cả** nhóm source + main |
-| MS Excel | Tùy chọn — chỉ dùng cho blocklist; không cần cho danh sách nhóm |
+| MS Excel | Cần khi file nhóm input là `.xlsx`/`.xls`; CSV không cần Excel |
 
 ### 2. Clone repo & config
 
@@ -135,6 +135,7 @@ LaunchZaloIfMissing=1
 StartupDelayMs=3000
 EnableHotkeys=0         ; 0 = không cần Ctrl+Shift+… (Ctrl+Shift+K vẫn dừng khẩn cấp)
 RequireAdmin=0          ; 1 = bot tự nâng quyền Admin khi mở
+ShowStopButton=1        ; nút đỏ nổi trên cùng để dừng bot an toàn
 ```
 
 Nếu Zalo cài ở path lạ, ghi `[Zalo] ExePath=C:\path\to\Zalo.exe`.
@@ -145,8 +146,8 @@ Nếu Zalo cài ở path lạ, ghi `[Zalo] ExePath=C:\path\to\Zalo.exe`.
 & "$env:LOCALAPPDATA\Programs\AutoHotkey\v2\AutoHotkey64.exe" windows\src\Bot.ahk
 ```
 
-Lần đầu: kiểm tra 5 tên output trong `[Groups] OutputGroups`. Bot tự đọc các
-nhóm input từ Zalo; không dùng `groups.csv`.
+Lần đầu: kiểm tra 5 tên output trong `[Groups] OutputGroups`, rồi chọn file
+CSV/XLSX nhóm input trong popup. File cần cột `group_name` (mỗi dòng một nhóm).
 
 ### 5. Test (không cần Zalo)
 
@@ -170,6 +171,9 @@ Mặc định `[Startup] EnableHotkeys=0` — bot chạy **hoàn toàn tự đ�
 |------|-----------|
 | `Ctrl+Shift+K` | **Luôn bật** ở chế độ tự động — dừng watch/publish khẩn cấp |
 
+Ngoài hotkey, cửa sổ điều khiển nổi ở góc trên phải có nút **DỪNG BOT**.
+Nút dừng thời gian chờ ngay và kết thúc sau thao tác nhóm hiện tại để giữ queue an toàn.
+
 Khi `EnableHotkeys=1`:
 
 | Phím | Hành động |
@@ -188,26 +192,26 @@ Khi `EnableHotkeys=1`:
 
 ### Danh sách nhóm Zalo
 
-Bot mở `Alt+3`, đọc tên Nhóm + Cộng đồng qua Windows accessibility (không
-`Ctrl+A/C` giao diện), rồi lưu bản chụp chẩn đoán tại
-`data/zalo-groups-capture.txt`. Ở `Alt+1`, nhóm unread đang hiện được click
-trực tiếp; tìm kiếm tên chỉ là fallback.
+Bot lấy nhóm input từ file CSV/XLSX được chọn khi khởi động. Có thể kéo-thả
+file vào popup hoặc bấm **Chọn file**. Bot xử lý tuần tự từ dòng đầu đến cuối,
+nghỉ theo `[Watch] IntervalMs`, rồi quay lại dòng đầu. State/hash hiện tại chỉ
+lưu các listing mới nên việc quét lại không gửi trùng.
 
 ```ini
 [Groups]
+SourceFile=
+PromptSourceFileOnStart=1
+SourceSheet=
+SourceColumn=group_name
+ReloadSourceFileEachCycle=1
 OutputGroups=Giỏ hàng cao thiên ⏏️ 6tr Phú Nhuận Bình Thạnh|Giỏ hàng cao thiên ⬇️ 5tr9 Phú Nhuận Bình Thạnh|Giỏ Hàng "Quận Ngoại Thành" Cao Thiên|Giỏ hàng Quận số Cao Thiên|Giỏ hàng NNC Cao Thiên.
-ListTabHotkey=!3
-DiscoveryMode=accessibility
-ListScanPages=80
-RefreshEveryCycles=12
-PreferAccessibleConversationClick=1
-ManualListFile=config\groups-manual.txt
 ```
 
-Tên trong `OutputGroups` được phân cách bằng `|`. Mọi nhóm Zalo còn lại là input.
-`groups.csv` không còn được đọc.
-Nếu Zalo không expose accessibility, tạo `groups-manual.txt` với một tên
-Nhóm/Cộng đồng mỗi dòng và đặt `DiscoveryMode=manual`.
+Tên trong `OutputGroups` được phân cách bằng `|` và tự động bị loại nếu xuất
+hiện trong file input. CSV mẫu: `windows/config/source-groups.example.csv`.
+Các cột `type` (`source`/`input`) và `enabled` (`1`/`true`) là tùy chọn;
+dòng `main` hoặc `enabled=0` bị bỏ qua. Excel dùng sheet đầu tiên khi
+`SourceSheet` để trống.
 
 ### `windows/config/blocklist.csv`
 

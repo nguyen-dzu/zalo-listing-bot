@@ -112,13 +112,12 @@ Added to `blocklist.example.csv` + tests:
 **Risk:** Some Zalo builds may not expose unread state through MSAA. The
 oldest-first audit shard still provides eventual coverage.
 
-### 8. Accessibility discovery — IMPLEMENTED / NEEDS WINDOWS E2E
+### 8. CSV/XLSX source groups — IMPLEMENTED / NEEDS WINDOWS E2E
 
-- Vendored Acc-v2 (MIT) activates Chromium/Electron accessibility.
-- Alt+3 names are read from MSAA; no UI-wide Ctrl+A/C.
-- Nhóm and Cộng đồng tabs are scanned; Alt+1 unread entries can be clicked
-  directly by accessible name.
-- `groups-manual.txt` remains the deterministic fallback.
+- Startup popup accepts drag/drop or file selection.
+- `group_name` rows are deduplicated in file order; configured outputs are excluded.
+- Every watch cycle searches all file rows sequentially, then waits and restarts.
+- Acc-v2 remains available for conversation text/image elements, not source discovery.
 
 ---
 

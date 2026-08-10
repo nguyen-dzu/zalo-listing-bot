@@ -39,8 +39,8 @@ Each post is tagged `[SAVED]`, `[BLOCKED]`, `[DUPLICATE]`, or `[INVALID]`.
 2. Create `windows\tests\samples\<Group name>.txt` and paste
 3. Re-run `Simulate.ahk`
 
-The simulator injects sample groups. Runtime group discovery is an E2E concern:
-the bot copies Zalo's `Alt+3` group list, excludes configured outputs, and treats
+The simulator injects sample groups. Runtime source loading is an E2E concern:
+the bot reads the selected CSV/XLSX, excludes configured outputs, and treats
 the remainder as inputs. `blocklist.csv` still supplies banned keywords.
 
 ---

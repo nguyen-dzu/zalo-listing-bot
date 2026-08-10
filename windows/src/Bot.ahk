@@ -32,6 +32,8 @@ Persistent
 #Include Config.ahk
 #Include TableLoader.ahk
 #Include GroupRegistry.ahk
+#Include SourceGroupFile.ahk
+#Include BotControlWindow.ahk
 #Include BlockList.ahk
 #Include Parser.ahk
 #Include Storage.ahk
@@ -52,12 +54,14 @@ class ListingBotService {
         this.operation := ""
         this.watchRunning := false
         this.watchStopRequested := false
+        this.emergencyStopped := false
         this._Build()
     }
 
     _Build() {
         this.registry := GroupRegistry(this.config)
         this.groupsDiscovered := false
+        this._LoadSourceGroups()
         this.blockList := BlockList(this.config)
         this.state := HarvestStateStore(this.config)
         this.queue := PublishQueueStore(this.config)
@@ -122,7 +126,9 @@ class ListingBotService {
     Reload() {
         if this._RejectIfBusy("reload")
             return false
+        sourceFile := this.config.SourceGroupFilePath
         this.config.Reload()
+        this.config.SourceGroupFilePath := sourceFile
         this._Build()
         this._Notify("Đã nạp lại cấu hình",
             this.registry.SourceGroups().Length " nhóm nguồn, "
@@ -363,6 +369,8 @@ class ListingBotService {
     AutoStart() {
         if !this.config.StartupAutoRunWatch
             return false
+        if this.emergencyStopped
+            return false
         if this.watchRunning || this.operation != ""
             return false
         try {
@@ -399,49 +407,33 @@ class ListingBotService {
     }
 
     _EnsureGroupsDiscovered() {
-        if this.groupsDiscovered
-            return true
-        if !this.ui.IsRunning()
-            this._WaitForZaloReady()
-        return this._RefreshGroupsFromZalo()
+        if !this.groupsDiscovered
+            return this._LoadSourceGroups()
+        return true
     }
 
-    _RefreshGroupsFromZalo() {
-        manualUsed := this.config.GroupDiscoveryMode = "manual"
-        raw := manualUsed ? "" : this.ui.CaptureAllGroupListText()
-        if Trim(raw) = "" {
-            manualNames := GroupRegistry.LoadManualNames(
-                this.config.GroupListManualFile)
-            if manualNames.Length {
-                raw := StrJoin(manualNames, "`n")
-                manualUsed := true
-            }
-        }
-        this.lastGroupListRaw := raw
-        WriteTextFile(this.config.GroupListCaptureFile, raw)
-        names := GroupRegistry.ParseCapturedNames(
-            raw, this.config.GroupListIgnoredLabels)
-        count := this.registry.SetDiscovered(names)
+    _LoadSourceGroups() {
+        path := this.config.SourceGroupFilePath
+        if path = ""
+            throw Error("Chua chon file CSV/Excel nhom input.")
+        names := SourceGroupFile.LoadNames(
+            path, this.config.SourceGroupSheet,
+            this.config.SourceGroupColumn)
+        count := this.registry.SetSourceNames(names, path)
         sources := this.registry.SourceGroups().Length
         if !count {
-            throw Error(
-                "Khong doc duoc danh sach nhom/cong dong tu Zalo (clipboard rong).`n"
-                . "1) Mo Zalo tab Alt+3, thu chinh [Groups] ListPaneClickX/Y trong config.ini`n"
-                . "2) Hoac tao file " this.config.GroupListManualFile
-                . " (1 ten/dong)`n"
-                . "Raw da luu: " this.config.GroupListCaptureFile)
+            throw Error("File input khong co nhom nao: " path)
         }
         if !sources {
             throw Error(
-                "Doc duoc " count " muc nhung 0 nhom nguon (tat ca trung output?).`n"
+                "Doc duoc " count " dong nhung 0 nhom nguon (tat ca trung output?).`n"
                 . "Kiem tra [Groups] OutputGroups trong config.ini.`n"
-                . "Raw: " this.config.GroupListCaptureFile)
+                . "File: " path)
         }
         this.groupsDiscovered := true
-        suffix := manualUsed ? " (manual list)" : ""
-        this._Notify("Da doc nhom tu Zalo",
+        this._Notify("Da nap file nhom input",
             count " tong | " sources " input | "
-            . this.registry.MainGroups().Length " output" suffix, 1)
+            . this.registry.MainGroups().Length " output", 1)
         return true
     }
 
@@ -472,6 +464,8 @@ class ListingBotService {
     }
 
     RunWatchLoop() {
+        if this.emergencyStopped
+            return false
         this.watchRunning := true
         this.watchStopRequested := false
         cycles := 0
@@ -487,29 +481,23 @@ class ListingBotService {
                 if this.watchStopRequested
                     break
                 if !this._WithinWatchHours() {
-                    Sleep 60000
+                    this._WatchSleep(60000)
                     continue
                 }
 
                 cycles++
                 try {
-                    ; Cycle 1 establishes a full baseline. Later cycles select
-                    ; textual unread groups plus a small oldest-first audit shard.
-                    if cycles = 1
-                        || Mod(cycles - 1,
-                            this.config.GroupRefreshEveryCycles) = 0
+                    ; Preserve spreadsheet order. Every completed cycle starts
+                    ; again at row 1; state/hash dedupe keeps only new listings.
+                    if this.config.SourceGroupReloadEachCycle
                         || !this.groupsDiscovered
-                        this._RefreshGroupsFromZalo()
+                        this._LoadSourceGroups()
                     sources := this.registry.SourceGroups()
-                    unreadRaw := cycles > 1
-                        ? this.ui.CaptureUnreadConversationText() : ""
-                    unread := cycles > 1
-                        ? GroupActivityDetector.DetectUnread(
-                            unreadRaw, sources,
-                            this.config.GroupUnreadMarkerPattern)
-                        : []
-                    plan := this.harvestScheduler.BuildPlan(
-                        sources, this.state, unread)
+                    plan := Map(
+                        "mode", "source_file",
+                        "groups", sources,
+                        "unread", 0,
+                        "audit", 0)
                     this.watchPublishBatchesRemaining :=
                         this.config.PublishBatchesPerWatchCycle
                     harvest := this.harvester.HarvestGroups(
@@ -520,7 +508,7 @@ class ListingBotService {
                     this._Notify("Watch harvest lỗi", err.Message, 3)
                     if this.watchStopRequested
                         break
-                    Sleep this.config.WatchIntervalMs
+                    this._WatchSleep(this.config.WatchIntervalMs)
                     continue
                 }
 
@@ -541,7 +529,7 @@ class ListingBotService {
                         mediaRepair["captured"],
                         harvest["media_failed"] + mediaRepair["failed"],
                         Round(this.config.WatchIntervalMs / 60000)), 1)
-                Sleep this.config.WatchIntervalMs
+                this._WatchSleep(this.config.WatchIntervalMs)
             }
         } finally {
             this.watchRunning := false
@@ -552,12 +540,25 @@ class ListingBotService {
         return true
     }
 
+    _WatchSleep(milliseconds) {
+        remaining := Max(0, milliseconds)
+        while remaining > 0 && !this.watchStopRequested {
+            slice := Min(250, remaining)
+            Sleep slice
+            remaining -= slice
+        }
+        return !this.watchStopRequested
+    }
+
     _AfterWatchGroup(index, group, result, summary) {
+        if this.watchStopRequested
+            return false
         if !this.config.WatchDrainQueueEachCycle
-            return
+            return true
         if Mod(index, this.config.HarvestPublishAfterGroups) != 0
-            return
+            return true
         this._WatchPublishAvailable(1)
+        return !this.watchStopRequested
     }
 
     _WatchPublishAvailable(maxBatches := 0) {
@@ -628,6 +629,16 @@ class ListingBotService {
         this.publisher.Stop()
         this._Notify("Đang dừng publish",
             "Bot sẽ checkpoint và trả lease chưa xử lý về queue.", 2)
+        return true
+    }
+
+    EmergencyStop() {
+        this.emergencyStopped := true
+        this.watchStopRequested := true
+        if this.publisher.running
+            this.publisher.Stop()
+        this._Notify("Lenh dung bot",
+            "Dang ket thuc thao tac hien tai va luu trang thai an toan.", 2)
         return true
     }
 
@@ -743,7 +754,18 @@ OnError(Startup_OnError)
 
 try {
     cfg := AppConfig.Instance()
+    if cfg.SourceGroupPromptOnStart {
+        selectedSourceFile := SourceGroupFilePicker.Select(cfg)
+        if selectedSourceFile = ""
+            ExitApp 0
+        cfg.SourceGroupFilePath := selectedSourceFile
+    } else if cfg.SourceGroupFilePath = "" {
+        throw Error(
+            "Chua cau hinh [Groups] SourceFile va popup chon file dang tat.")
+    }
     bot := ListingBotService(cfg)
+    botControl := BotControlWindow(bot, cfg)
+    botControl.Show()
 
     if cfg.StartupEnableHotkeys {
         Hotkey cfg.HotkeyHarvest,
@@ -757,7 +779,7 @@ try {
         Hotkey cfg.HotkeyArchiveMedia,
             (*) => bot.RunExclusive("archive ảnh", ObjBindMethod(bot, "ArchiveMedia"))
         Hotkey cfg.HotkeyPausePublish, (*) => bot.TogglePublishPause()
-        Hotkey cfg.HotkeyStopPublish, (*) => bot.StopPublish()
+        Hotkey cfg.HotkeyStopPublish, (*) => bot.EmergencyStop()
         Hotkey cfg.HotkeyResolveUncertain,
             (*) => bot.RunExclusive("resolve uncertain", ObjBindMethod(bot, "ResolveUncertain"))
         Hotkey cfg.HotkeyForward,
@@ -769,7 +791,7 @@ try {
         Hotkey cfg.HotkeyToggleWatch,
             (*) => bot.ToggleWatch()
     } else if cfg.StartupAutoRunWatch {
-        Hotkey cfg.HotkeyStopPublish, (*) => bot.StopPublish()
+        Hotkey cfg.HotkeyStopPublish, (*) => bot.EmergencyStop()
     }
 
     _autoMode := cfg.StartupAutoRunWatch ? "tu dong" : "thu cong (hotkey)"

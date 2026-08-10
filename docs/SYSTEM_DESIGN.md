@@ -6,7 +6,7 @@ The bot collects room listings from **multiple source groups** on Zalo PC, filte
 
 | Aspect | Description |
 |--------|-------------|
-| **Input** | Groups discovered from Zalo Alt+3, excluding configured outputs. Each post may include images, address, phone, room code, price, electric/water/service fees, and room details. |
+| **Input** | Ordered group names from an operator-selected CSV/XLSX file, excluding configured outputs. Each post may include images, address, phone, room code, price, electric/water/service fees, and room details. |
 | **Output** | Main group receives **images first**, then a text message cluster of sale listings. |
 | **Storage** | Each harvested post → one JSON file under `windows/data/listings/`; publish state uses a queue journal/snapshot. |
 | **Separation** | Each source group is separated by `------------Group Name------------`. |
@@ -21,7 +21,7 @@ Windows only. The entire project is AutoHotkey v2 controlling Zalo PC — no oth
 
 ```
                     ┌──────────────────────────┐
-                    │ Zalo Alt+3 group list    │
+                    │ CSV/XLSX source groups  │
                     │ + blocklist Excel / CSV  │
                     └────────────┬─────────────┘
                                  │
@@ -71,26 +71,22 @@ For each selected source group:
 TouchHarvest() + Save state
 ```
 
-### Flow W — Incremental watch
+### Flow W — Ordered file watch
 
 ```
-First cycle:
-  sequential full scan → baseline last_harvest_at
-
-Cycle 2+:
-  capture Alt+3 group-list text
-  detect textual unread markers
-  add a small oldest-first audit shard
-  cap to MaxGroupsPerCycle
-  process each group sequentially; save state after each group
+Every cycle:
+  reload selected CSV/XLSX
+  process each group sequentially in row order
+  search → copy → parse/filter → queue
+  save state after each group
   after each 5 groups, attempt one publish batch
   stop at MaxBatchesPerWatchCycle
   sleep Watch.IntervalMs
+  restart at the first file row
 ```
 
-The watch path deliberately does not re-open every source group after publish.
-If Zalo does not expose textual unread markers, the rotating audit shard provides
-eventual coverage with bounded GUI work.
+Conversation and listing hashes prevent duplicate queue entries when the same
+group content is copied on a later cycle.
 
 ### Flow P — Durable publish session (`Ctrl+Shift+G`)
 
@@ -149,11 +145,13 @@ Each Zalo text message contains at most five room blocks separated by
 
 Excel is tried first (via COM, requires MS Excel); on failure, CSV is used as fallback.
 
-**Group discovery**
+**Source-group loading**
 
-At startup, `ZaloUIAdapter` opens Zalo's group-list tab (`Alt+3`) and captures
-the list. `GroupRegistry` excludes the exact names in `[Groups] OutputGroups`;
-every remaining discovered group is a source. No group CSV/Excel is loaded.
+At startup, the operator selects or drops a CSV/XLSX file. `SourceGroupFile`
+loads the `group_name` column, preserves row order, removes duplicates and
+configured output groups, then the watch loop searches every listed group.
+After the last row, the bot waits for `Watch.IntervalMs` and starts again at
+the first row; per-group hashes prevent duplicate listings.
 
 **Sheet `Blocklist`** — `windows/config/blocklist.csv`
 

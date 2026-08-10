@@ -7,6 +7,7 @@
 #Include ../src/JSON.ahk
 #Include ../src/TableLoader.ahk
 #Include ../src/GroupRegistry.ahk
+#Include ../src/SourceGroupFile.ahk
 #Include ../src/BlockList.ahk
 #Include ../src/Parser.ahk
 #Include ../src/Composer.ahk
@@ -462,6 +463,31 @@ Check("manual list fallback",
     manualNames.Length = 2 && manualNames[1] = "Nhóm Manual A")
 if FileExist(manualPath)
     FileDelete manualPath
+
+sourceCsvPath := A_Temp "\zalo-source-groups-test.csv"
+WriteTextFile(sourceCsvPath,
+    "group_name,type,enabled,note`n"
+    . "Nhóm CSV A,source,1,first`n"
+    . "Nhóm CSV B,input,true,second`n"
+    . "Nhóm CSV A,source,1,duplicate`n"
+    . "Nhóm Tắt,source,0,disabled`n"
+    . "Nhóm Main,main,1,not-input`n")
+sourceCsvNames := SourceGroupFile.LoadNames(sourceCsvPath)
+Check("load source CSV theo thu tu, bo trung/disabled/main",
+    sourceCsvNames.Length = 2
+    && sourceCsvNames[1] = "Nhóm CSV A"
+    && sourceCsvNames[2] = "Nhóm CSV B")
+if FileExist(sourceCsvPath)
+    FileDelete sourceCsvPath
+
+headerlessCsvPath := A_Temp "\zalo-source-groups-headerless-test.csv"
+WriteTextFile(headerlessCsvPath, "Nhóm Không Header A`nNhóm Không Header B`n")
+headerlessCsvNames := SourceGroupFile.LoadNames(headerlessCsvPath)
+Check("load source groups CSV mot cot khong header",
+    headerlessCsvNames.Length = 2
+    && headerlessCsvNames[1] = "Nhóm Không Header A")
+if FileExist(headerlessCsvPath)
+    FileDelete headerlessCsvPath
 
 Section("incremental harvest scheduler")
 schedulerGroups := [

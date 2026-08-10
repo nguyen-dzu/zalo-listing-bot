@@ -75,6 +75,8 @@ EnablePerMonitorDpiAwareness() {
         return
     try {
         DllCall("user32\SetProcessDPIAware")
+    } catch {
+        return
     }
 }
 

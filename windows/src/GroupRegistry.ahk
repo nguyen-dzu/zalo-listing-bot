@@ -1,14 +1,16 @@
 #Requires AutoHotkey v2.0
-; GroupRegistry.ahk — Repository: groups discovered from Zalo PC at runtime
+; GroupRegistry.ahk — Repository: source groups loaded from CSV/XLSX
 
 class GroupRegistry {
     __New(config) {
         this.config := config
         this.discoveredNames := []
+        this.sourceFile := ""
     }
 
-    SetDiscovered(names) {
+    SetSourceNames(names, sourceFile := "") {
         this.discoveredNames := []
+        this.sourceFile := sourceFile
         seen := Map()
         for name in names {
             clean := Trim(name)
@@ -21,6 +23,10 @@ class GroupRegistry {
         return this.discoveredNames.Length
     }
 
+    SetDiscovered(names) {
+        return this.SetSourceNames(names)
+    }
+
     SourceGroups() {
         result := []
         outputs := this._OutputLookup()
@@ -30,7 +36,9 @@ class GroupRegistry {
             result.Push(Map(
                 "group_name", name,
                 "type", "source",
-                "note", "Discovered from Zalo PC"
+                "note", this.sourceFile != ""
+                    ? "Loaded from " this.sourceFile
+                    : "Configured source"
             ))
         }
         return result

@@ -2,6 +2,15 @@
 ; TableLoader.ahk — Strategy: read a header/row table from .xlsx (Excel COM) or .csv fallback
 
 class TableLoader {
+    static LoadFile(path, sheetName := "") {
+        extension := StrLower(RegExReplace(path, "^.*\."))
+        if extension = "csv"
+            return TableLoader._FromCsv(path)
+        if extension = "xlsx" || extension = "xls"
+            return TableLoader._FromExcel(path, sheetName)
+        throw Error("Unsupported table file: " path)
+    }
+
     ; Returns array of Map(header -> value). Header keys are lower-cased and trimmed.
     static Load(xlsxPath, sheetName, csvPath) {
         if xlsxPath != "" && FileExist(xlsxPath) {

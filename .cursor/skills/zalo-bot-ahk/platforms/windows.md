@@ -22,17 +22,17 @@ On first run the bot creates from example files:
 - `windows\config\config.ini`
 - `windows\config\blocklist.csv`
 
-The bot reads the complete Zalo group list through `Alt+3`. Verify the five
-`[Groups] OutputGroups`; every remaining group is an input.
+At startup, choose or drop the CSV/XLSX source list (`group_name` column).
+Verify the five `[Groups] OutputGroups`; matching rows are excluded from input.
 
 ## Daily operation
 
 ```
-1. Open Zalo PC, open a source group
-2. Select new posts              (Capture Method=manual)
-3. Ctrl+Shift+H                  harvest + save objects
-4. Select posts with images → Ctrl+Shift+I   relay images to main group
-5. Ctrl+Shift+G                  send text message cluster
+1. Open Zalo PC and start Bot.ahk
+2. Drop/select the source-group CSV/XLSX
+3. Bot searches each row, copies/parses new posts and queues them
+4. Bot publishes ready text/media batches to output groups
+5. After Watch.IntervalMs, bot restarts at row 1
 ```
 
 Use `[Capture] Method=accessibility` to avoid clipboard selection caching the

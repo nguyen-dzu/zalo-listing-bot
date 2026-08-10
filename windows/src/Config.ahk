@@ -62,7 +62,7 @@ class AppConfig {
         EnsureDir(this.QueueDir)
         EnsureDir(this.HarvestStateDir)
 
-        ; ── Groups discovered from Zalo + configured output groups ──
+        ; ── Source groups from operator-selected CSV/XLSX + output groups ──
         this.OutputGroupNames := this._PipeList(this._Read(
             ini, "Groups", "OutputGroups",
             'Giỏ hàng cao thiên ⏏️ 6tr Phú Nhuận Bình Thạnh'
@@ -70,6 +70,16 @@ class AppConfig {
             . '|Giỏ Hàng "Quận Ngoại Thành" Cao Thiên'
             . '|Giỏ hàng Quận số Cao Thiên'
             . '|Giỏ hàng NNC Cao Thiên.'))
+        this.SourceGroupFilePath := this._ResolveOptional(this._Read(
+            ini, "Groups", "SourceFile", ""))
+        this.SourceGroupPromptOnStart := this._Bool(
+            ini, "Groups", "PromptSourceFileOnStart", true)
+        this.SourceGroupSheet := this._Read(
+            ini, "Groups", "SourceSheet", "")
+        this.SourceGroupColumn := this._Read(
+            ini, "Groups", "SourceColumn", "group_name")
+        this.SourceGroupReloadEachCycle := this._Bool(
+            ini, "Groups", "ReloadSourceFileEachCycle", true)
         this.GroupListTabHotkey := this._Read(
             ini, "Groups", "ListTabHotkey", "!3")
         this.GroupDiscoveryMode := StrLower(this._Read(
@@ -205,6 +215,8 @@ class AppConfig {
             this._Int(ini, "Startup", "StartupDelayMs", 3000))
         this.StartupRequireAdmin := this._Bool(ini, "Startup", "RequireAdmin", false)
         this.StartupEnableHotkeys := this._Bool(ini, "Startup", "EnableHotkeys", false)
+        this.StartupShowStopButton := this._Bool(
+            ini, "Startup", "ShowStopButton", true)
 
         ; ── Timing ──
         this.SearchDelayMs := this._Int(ini, "Timing", "SearchDelayMs", 400)
@@ -344,5 +356,9 @@ class AppConfig {
         if RegExMatch(path, "^[A-Za-z]:\\") || SubStr(path, 1, 2) = "\\"
             return path
         return this.Root "\" path
+    }
+
+    _ResolveOptional(path) {
+        return Trim(path) = "" ? "" : this._Resolve(path)
     }
 }

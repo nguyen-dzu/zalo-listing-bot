@@ -55,10 +55,15 @@ class MessageHarvester {
             if this.config.HarvestSaveStateEachGroup
                 this.state.Save()
             if afterGroupFn {
-                try afterGroupFn.Call(index, group, result, summary)
-                catch as err
+                shouldContinue := true
+                try shouldContinue := afterGroupFn.Call(
+                    index, group, result, summary)
+                catch as err {
                     summary["errors"].Push(
                         "after-group " group["group_name"] ": " err.Message)
+                }
+                if shouldContinue = false
+                    break
             }
             this._SequentialGroupDelay()
         }

@@ -13,6 +13,7 @@ windows/data/queue/
 windows/config/config.ini
 windows/config/blocklist.csv
 windows/config/groups-manual.txt
+windows/config/source-groups.csv
 windows/config/*.xlsx
 !windows/config/*.example.*
 
