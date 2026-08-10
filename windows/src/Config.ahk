@@ -245,7 +245,7 @@ class AppConfig {
         this.HarvestAuditGroupsPerCycle := Max(0,
             this._Int(ini, "Harvest", "AuditGroupsPerCycle", 10))
         this.HarvestPublishAfterGroups := Max(1,
-            this._Int(ini, "Harvest", "PublishAfterGroups", 5))
+            this._Int(ini, "Harvest", "PublishAfterGroups", 1))
         this.HarvestSaveStateEachGroup := this._Bool(
             ini, "Harvest", "SaveStateEachGroup", true)
 

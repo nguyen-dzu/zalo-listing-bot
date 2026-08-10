@@ -67,6 +67,9 @@ class ZaloUIAdapter {
             Sleep 150
             Send "^f"
             Sleep this.config.SearchDelayMs
+            ; Clear stale search text (clipboard/history) before typing group name.
+            Send "^a{Backspace}"
+            Sleep 80
             SendText groupName
             Sleep this.config.SearchDelayMs + 300
             Send "{Enter}"
@@ -611,7 +614,7 @@ class ZaloUIAdapter {
     ; Zalo PC: after search/open chat, focus must be in the compose box before Ctrl+V.
     _FocusComposeBox() {
         this.Activate()
-        if this._FocusAccRegion(["Edit", "Document"], 0.36, 0.96, 0.78, 0.98)
+        if this._FocusAccRegion(["Text", "ComboBox", "Document"], 0.36, 0.96, 0.78, 0.98)
             return
         if !this.config.UiUseRatioClicks {
             Send "{Tab}"
@@ -625,6 +628,16 @@ class ZaloUIAdapter {
         Sleep this.config.PasteDelayMs + 100
     }
 
+    _ResolveAccRole(roleName) {
+        if roleName = "Edit" || roleName = "TextEdit" || roleName = "Editable"
+            return Acc.Role.Text
+        try {
+            return Acc.Role.%roleName%
+        } catch {
+            return 0
+        }
+    }
+
     _FocusAccRegion(roleNames, minXRatio, maxXRatio, minYRatio, maxYRatio) {
         root := this._AccessibleRoot()
         if !root
@@ -635,8 +648,13 @@ class ZaloUIAdapter {
         minY := win["y"] + Round(win["h"] * minYRatio)
         maxY := win["y"] + Round(win["h"] * maxYRatio)
         criteria := []
-        for roleName in roleNames
-            criteria.Push({Role: Acc.Role.%roleName%})
+        for roleName in roleNames {
+            role := this._ResolveAccRole(roleName)
+            if role
+                criteria.Push({Role: role})
+        }
+        if !criteria.Length
+            return false
         try elements := root.FindElements(
             criteria, Acc.TreeScope.Descendants, 0,
             this.config.GroupAccessibilityDepth)

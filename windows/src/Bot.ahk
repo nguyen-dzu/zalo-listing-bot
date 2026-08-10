@@ -581,9 +581,21 @@ class ListingBotService {
             return false
         if !this.config.WatchDrainQueueEachCycle
             return true
+        if !result || result["saved"] <= 0
+            return true
         if Mod(index, this.config.HarvestPublishAfterGroups) != 0
             return true
-        this._WatchPublishAvailable(1)
+        ; Publish newly harvested listings to every main group before next source.
+        batchesNeeded := Max(1, Ceil(result["saved"] / this.config.LeaseSize))
+        Loop batchesNeeded {
+            if this.watchStopRequested
+                break
+            status := this.publisher.Status()
+            if !status["remaining_batches"]
+                break
+            if !this._WatchPublishAvailable(1)
+                break
+        }
         return !this.watchStopRequested
     }
 
