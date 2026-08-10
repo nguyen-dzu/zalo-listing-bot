@@ -23,13 +23,23 @@ if (-not (Test-Path $srcBot)) {
 $stamp = if ($OutName) { $OutName } else { Get-Date -Format "yyyyMMdd" }
 $releaseName = "ZaloListingBot-$stamp"
 $releaseDir = Join-Path $distRoot $releaseName
+
+if (Test-Path $releaseDir) {
+    try {
+        Remove-Item $releaseDir -Recurse -Force -ErrorAction Stop
+    } catch {
+        Write-Warning "Cannot remove $releaseDir"
+        Write-Warning "Close ZaloListingBot.exe / Launch-Bot.cmd (AutoHotkey) then rebuild."
+        $altStamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        $releaseName = "ZaloListingBot-$altStamp"
+        $releaseDir = Join-Path $distRoot $releaseName
+        Write-Host "Using alternate output folder: $releaseDir"
+    }
+}
+
 $configDir = Join-Path $releaseDir "config"
 $dataDir = Join-Path $releaseDir "data"
 $setupOut = Join-Path $releaseDir "setup"
-
-if (Test-Path $releaseDir) {
-    Remove-Item $releaseDir -Recurse -Force
-}
 New-Item -ItemType Directory -Force -Path $configDir, $setupOut,
     (Join-Path $dataDir "listings"),
     (Join-Path $dataDir "media"),
@@ -100,7 +110,13 @@ if (-not (Test-Path $distRoot)) {
     New-Item -ItemType Directory -Force -Path $distRoot | Out-Null
 }
 $zipPath = Join-Path $distRoot "$releaseName.zip"
-if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+if (Test-Path $zipPath) {
+    try {
+        Remove-Item $zipPath -Force -ErrorAction Stop
+    } catch {
+        Write-Warning "Cannot remove old zip: $zipPath (file may be open). Zip will be overwritten if possible."
+    }
+}
 Compress-Archive -Path $releaseDir -DestinationPath $zipPath -Force
 
 Write-Host ""
