@@ -151,9 +151,12 @@ class AppConfig {
         this.MaxMessageChars := this._Int(ini, "Output", "MaxMessageChars", 1800)
         this.MaskPhone := this._Bool(ini, "Output", "MaskPhone", true)
         this.PhoneHint := this._Read(ini, "Output", "PhoneHint", 'Nhắn bot "SĐT {room_code}" để lấy số')
-        this.OneMessagePerListing := this._Bool(ini, "Output", "OneMessagePerListing", false)
-        this.ListingsPerMessage := Max(1, this._Int(ini, "Output", "ListingsPerMessage", 5))
+        this.OneMessagePerListing := this._Bool(ini, "Output", "OneMessagePerListing", true)
+        this.ListingsPerMessage := Max(1, this._Int(ini, "Output", "ListingsPerMessage", 1))
         this.ListingSeparator := this._Read(ini, "Output", "ListingSeparator", "=======================")
+        ; After each room text, send ListingSeparator as its own Zalo message.
+        this.SendSeparatorAsMessage := this._Bool(
+            ini, "Output", "SendSeparatorAsMessage", true)
         this.IncludeGroupHeader := this._Bool(ini, "Output", "IncludeGroupHeader", false)
 
         ; ── Images ──
@@ -199,11 +202,9 @@ class AppConfig {
         this.FindInChatHotkey := this._Read(ini, "Images", "FindInChatHotkey", "^f")
 
         ; ── Relay mode ──
-        ; Text-only is the safe/default workflow. It deliberately overrides old
-        ; runtime config.ini files that still have AutoCapture/MediaRequired=1,
-        ; so copied listing text can never be used as an in-chat search query.
+        ; TextOnly=1 disables image archive (debug). Default 0 = images then text.
         this.TextOnlyRelay := this._Bool(
-            ini, "Relay", "TextOnly", true)
+            ini, "Relay", "TextOnly", false)
         if this.TextOnlyRelay {
             this.MediaRequired := false
             this.AutoCapture := false

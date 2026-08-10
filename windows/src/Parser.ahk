@@ -267,8 +267,40 @@ class ListingParser {
         listing["image_count"] := ListingParser.CountMatches(listing["raw_text"], marker)
         ListingParser._InferFields(listing)
         listing["room_code"] := ListingParser.NormalizeRoomCode(listing, "")
+        ListingParser._DedupExtraInfo(listing)
 
         return listing
+    }
+
+    ; Drop Khác lines that only repeat address/info/price already shown.
+    static _DedupExtraInfo(listing) {
+        extra := listing.Has("extra_info") ? Trim(listing["extra_info"]) : ""
+        if extra = ""
+            return
+        info := listing.Has("info") ? Trim(listing["info"]) : ""
+        if info != "" && (extra = info || InStr(extra, info) = 1)
+            listing["extra_info"] := ""
+        else if info != "" && InStr(info, extra)
+            listing["extra_info"] := ""
+
+        kept := []
+        for part in StrSplit(listing["extra_info"], " | ") {
+            piece := Trim(part)
+            if piece = ""
+                continue
+            skip := false
+            for key in ["address", "price", "room_code", "info", "electric_price",
+                "water_price", "utility_price", "service_price", "owner_phone"] {
+                value := listing.Has(key) ? Trim(listing[key]) : ""
+                if value != "" && (piece = value || InStr(piece, value) || InStr(value, piece)) {
+                    skip := true
+                    break
+                }
+            }
+            if !skip
+                kept.Push(piece)
+        }
+        listing["extra_info"] := StrJoin(kept, " | ")
     }
 
     ; Reject price strings; prefer labeled codes; prefix P for numeric rooms (P102).
@@ -353,7 +385,14 @@ class ListingParser {
         }
 
         if listing["address"] = "" {
-            if RegExMatch(text, "i)\(\s*([^)]{8,120})\)", &found) {
+            if RegExMatch(text, "i)(?:tại|tai)\s+(\d[^\n]{5,100})", &found) {
+                addr := Trim(found[1])
+                addr := RegExReplace(addr, "i)\s*(?:giá|sđt|lh|điện|nước|full|,?\s*có\s).*$")
+                addr := Trim(addr, " .,;|-")
+                if StrLen(addr) >= 6
+                    listing["address"] := addr
+            }
+            if listing["address"] = "" && RegExMatch(text, "i)\(\s*([^)]{8,120})\)", &found) {
                 candidate := Trim(found[1])
                 if RegExMatch(candidate, "i)(?:\d|quang|đường|phố|q\.?\s*\d+|quận|phường)", &_)
                     listing["address"] := candidate
@@ -510,6 +549,7 @@ class ListingParser {
     }
 
     static FormatBlock(listing, maskPhone := true, phoneHint := "") {
+        ListingParser._DedupExtraInfo(listing)
         lines := []
         ListingParser._AddLine(lines, "📍 Địa chỉ", listing, "address")
         ListingParser._AddLine(lines, "🔑 Số phòng", listing, "room_code")

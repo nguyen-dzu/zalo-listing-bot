@@ -276,20 +276,33 @@ class MessageHarvester {
         }
 
         captureHash := FnvHash(normalized)
+        previousHash := this.state.GetCaptureHash(groupName)
+        ; Conversation unchanged → already-read messages; skip re-copy/re-parse.
+        if previousHash != "" && previousHash = captureHash {
+            this.state.MarkNeedsRevisit(groupName, false)
+            this.state.TouchHarvest(groupName)
+            return result
+        }
+
         this.state.SetCaptureHash(groupName, captureHash)
         this.state.MarkNeedsRevisit(groupName, false)
-        count := 0
-
-        for block in blocks {
-            if count >= this.config.MaxMessagesPerGroup
-                break
-            count++
+        newCount := 0
+        ; Newest first so MaxMessagesPerGroup does not starve fresh listings
+        ; behind a long history of already-read posts.
+        index := blocks.Length
+        while index >= 1 {
+            block := blocks[index]
+            index--
 
             hash := FnvHash(block)
             if this.state.IsSeen(groupName, hash) {
                 result["duplicate"]++
                 continue
             }
+
+            if newCount >= this.config.MaxMessagesPerGroup
+                break
+            newCount++
 
             keyword := this.blockList.Match(block)
             if keyword != "" {

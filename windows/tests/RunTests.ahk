@@ -86,6 +86,9 @@ class QueueTestConfig {
     SessionCooldownMs := 0
     BetweenBatchesMs := 0
     ImagesBeforeText := true
+    OneMessagePerListing := false
+    SendSeparatorAsMessage := false
+    ListingSeparator := "======================="
     PublishActiveHoursStart := ""
     PublishActiveHoursEnd := ""
     MaxMessageChars := 1800
@@ -355,6 +358,16 @@ s := ListingParser.Parse(sang)
 Check("Sang CHDV giá", s["price"] = "58tr", s["price"])
 Check("Sang CHDV SĐT chấm", s["owner_phone"] = "0377785784", s["owner_phone"])
 Check("Sang CHDV validate", ListingParser.Validate(s, []).Length = 0)
+
+taiAddr := ListingParser.Parse(
+    "Phòng 301 lầu 3, tại 17 đường số 7, P.10, Gò Vấp`nGiá: 7tr`nSĐT: 0913766133")
+Check("suy luận địa chỉ từ 'tại'", InStr(taiAddr["address"], "17 đường số 7") > 0,
+    taiAddr["address"])
+dupListing := ListingParser.Parse(
+    "Cho thuê studio`nĐịa chỉ: 1 Lê Lợi Q1`nGiá: 5tr`nFull nội thất, có gác`nLh 0901234567")
+dupOut := ListingParser.FormatBlock(dupListing, true, cfg.PhoneHint)
+Check("FormatBlock không trùng Khác với Thông tin",
+    InStr(dupOut, "ℹ️ Thông tin:") > 0 && !InStr(dupOut, "📝 Khác:"))
 
 ; ── "Giá điện" không được nuốt "Giá" ─────────────────────
 Section("thứ tự luật parse")
@@ -952,6 +965,37 @@ Check("checkpoint đủ hai output groups",
     publisherQueue.Get("q0101")["deliveries"]["Main A"]["text_sent"] = 1
     && publisherQueue.Get("q0101")["deliveries"]["Main B"]["text_sent"] = 1)
 
+; One room per message: images → text → separator → next room.
+oneRoot := A_Temp "\zalo-publisher-one-room-tests"
+if DirExist(oneRoot)
+    DirDelete oneRoot, true
+oneCfg := QueueTestConfig(oneRoot)
+oneCfg.OneMessagePerListing := true
+oneCfg.LeaseSize := 1
+oneCfg.SendSeparatorAsMessage := true
+oneCfg.ListingSeparator := "======================="
+oneQueue := PublishQueueStore(oneCfg)
+oneRecords := []
+Loop 2 {
+    record := MakePublisherRecord(700 + A_Index, 1)
+    oneRecords.Push(record)
+    oneQueue.Enqueue(record)
+    oneQueue.AttachMedia(record["id"], [record["id"] "\bundle.clip"])
+}
+oneUi := FakePublisherUI()
+oneComposer := MessageComposer(cfg)
+oneComposer.config.OneMessagePerListing := true
+oneComposer.config.ListingSeparator := "======================="
+oneSvc := DurableListingPublisher(
+    oneCfg, oneUi, FakePublisherRegistry(), oneComposer,
+    oneQueue, FakePublisherRepository(oneRecords), FakePublisherMedia())
+oneSummary := oneSvc.RunSession(2)
+oneTrace := StrJoin(oneUi.events, "|")
+Check("one-room session gửi 2 phòng",
+    oneSummary["rooms"] = 2, oneSummary["rooms"])
+Check("one-room: ảnh rồi text rồi separator",
+    RegExMatch(oneTrace, "restore:.*paste:text.*paste:text"))
+
 ; ImagesBeforeText=false sends the same media after text instead of dropping it.
 afterRoot := A_Temp "\zalo-publisher-after-text-tests"
 if DirExist(afterRoot)
@@ -1103,7 +1147,7 @@ Check("watch hours qua nửa đêm",
 
 for tempDir in [queueRoot, corruptRoot, retryRoot, legacyIntentRoot,
     supersedeRoot, reclaimRoot, migrateRoot,
-    publisherRoot, afterRoot, uncertainRoot, missingRoot, oversizeRoot,
+    publisherRoot, oneRoot, afterRoot, uncertainRoot, missingRoot, oversizeRoot,
     cooldownRoot] {
     if DirExist(tempDir)
         DirDelete tempDir, true

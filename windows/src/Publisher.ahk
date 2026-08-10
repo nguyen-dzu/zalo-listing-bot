@@ -165,6 +165,13 @@ class DurableListingPublisher {
                 throw Error("Lease ownership đã thay đổi cho listing " id)
         }
 
+        ; One room = images → text → separator message → next room.
+        if this.config.OneMessagePerListing || this.config.LeaseSize = 1 {
+            for record in records
+                this._SendOneRoom(record, groupName, true)
+            return
+        }
+
         if this.config.ImagesBeforeText {
             for record in records
                 this._SendRecordMedia(record, groupName)
@@ -194,6 +201,38 @@ class DurableListingPublisher {
         if !this.config.ImagesBeforeText {
             for record in records
                 this._SendRecordMedia(record, groupName)
+        }
+    }
+
+    ; Per room: archive images first, then formatted text, then separator bubble.
+    _SendOneRoom(record, groupName, sendSeparatorAfter := true) {
+        id := record["id"]
+        entry := this.queue.Get(id)
+        delivery := this._DeliveryOrDefault(entry, groupName)
+
+        if this.config.ImagesBeforeText && !delivery["text_sent"]
+            this._SendRecordMedia(record, groupName)
+
+        if !delivery["text_sent"] {
+            message := this.composer.ComposeOne(record)
+            if StrLen(message) > this.config.MaxMessageChars
+                throw Error("Room text vượt MaxMessageChars ("
+                    . StrLen(message) "/" this.config.MaxMessageChars ")")
+            beforeSend := ObjBindMethod(
+                this.queue, "MarkDeliveryIntent", [id], groupName, "text")
+            this.ui.SendTextInSession(message, beforeSend)
+            this.queue.CheckpointText([id], groupName)
+        }
+
+        if !this.config.ImagesBeforeText
+            this._SendRecordMedia(record, groupName)
+
+        if sendSeparatorAfter
+            && this.config.HasProp("SendSeparatorAsMessage")
+            && this.config.SendSeparatorAsMessage {
+            sep := this.composer.ListingSeparator()
+            if Trim(sep) != ""
+                this.ui.SendTextInSession(sep)
         }
     }
 

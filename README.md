@@ -237,20 +237,22 @@ Size=5
 RecheckAfterPublish=0
 
 [Output]
-ListingsPerMessage=5
+OneMessagePerListing=1
+ListingsPerMessage=1
 ListingSeparator=======================
+SendSeparatorAsMessage=1
 MaskPhone=1
 
 [Images]
-MediaRequired=0             ; text relay không chờ ảnh
-AutoCapture=0               ; không dùng text phòng để Ctrl+F trong chat
+MediaRequired=1             ; có marker ảnh → archive trước khi ready
+AutoCapture=1               ; archive ảnh gần mã phòng khi harvest
 AutoCaptureMode=accessibility
 AutoCaptureProbeImages=1    ; vẫn dò graphic khi text copy không có marker ảnh
 AutoCaptureRepairPerCycle=3 ; retry media_pending ở các watch cycle sau
 ImagesBeforeText=1
 
 [Relay]
-TextOnly=1                  ; khóa AutoCapture/MediaRequired, kể cả config.ini cũ
+TextOnly=0                  ; 0 = ảnh + text; 1 = chỉ text (debug)
 
 [Watch]
 IntervalMs=300000           ; 5 phút giữa các vòng
@@ -270,7 +272,7 @@ SendDelayMinMs=3000
 SendDelayMaxMs=7000
 
 [PublishQueue]
-LeaseSize=5
+LeaseSize=1
 MaxBatchesPerSession=20
 LeaseTimeoutMs=7200000
 MaxAttempts=3
@@ -299,6 +301,7 @@ OpenGroup(read) → CaptureConversationText → SplitBlocks
 3. Thêm một audit shard nhỏ theo nhóm lâu chưa kiểm tra để tránh bỏ sót unread.
 4. Xử lý tuần tự, lưu state; nhóm có phòng mới được publish trước khi sang nhóm nguồn tiếp theo.
 5. Mỗi chu kỳ có giới hạn nhóm và publish, sau đó nghỉ `[Watch] IntervalMs`.
+6. Conversation không đổi (hash cũ) → bỏ qua, không copy lại tin đã đọc.
 
 Watch không còn recheck toàn bộ nhóm sau publish.
 
@@ -316,13 +319,11 @@ Chỉ giữ block pass `LooksLikeListing()`.
 
 ```text
 Harvest hợp lệ → lưu listing JSON → enqueue
-  → nếu có ảnh và MediaRequired=1: media_pending
-  → AutoCapture=1: bot archive ảnh trong harvest → ready
-  → (fallback) Ctrl+Shift+M archive thủ công
-  → lease 5 phòng
-  → mở từng nhóm output đúng một lần/session
-  → restore + paste media theo thứ tự phòng
-  → gửi 1 text chứa 5 phòng, ngăn cách =======================
+  → AutoCapture=1: archive ảnh gần mã phòng
+  → lease 1 phòng
+  → mở từng nhóm output
+  → paste ảnh → gửi text 1 phòng → gửi ngăn cách =======================
+  → phòng tiếp theo
   → checkpoint theo nhóm → completed
 ```
 
@@ -394,6 +395,7 @@ nếu muốn quét lại từ đầu.
 | Extension AHK không resolve exe | Sửa interpreter path; **không** mở `.exe` như file text |
 | Test fail "Đã chốt" | Đã fix case-insensitive trong `BlockList.ahk` — pull code mới |
 | Bot không thấy nhóm | Tên phải khớp 100% (kể cả emoji, dấu ngoặc kép trong tên) |
+| Không có ảnh khi publish | `Relay TextOnly=0`, `AutoCapture=1`, copy lại `config.example.ini` → `config.ini` |
 
 ---
 

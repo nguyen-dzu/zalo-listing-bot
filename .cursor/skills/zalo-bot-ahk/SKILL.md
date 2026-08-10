@@ -65,7 +65,7 @@ Chỉ commit khi user yêu cầu. Không commit private runtime data/config.
 
 | # | Issue | Status |
 |---|--------|--------|
-| 1 | **5 phòng = 1 message** + `=======` separator | Done — `ListingsPerMessage=5` |
+| 1 | **1 phòng = ảnh → text → separator** | Done — `OneMessagePerListing=1` |
 | 2 | **Phone paste on Zalo** | Partial — normalize + focus fix |
 | 3 | **Copy ảnh trước text** | Archive `.clip` once; Windows E2E pending |
 | 4 | **Room code format** | Done — `NormalizeRoomCode()` |

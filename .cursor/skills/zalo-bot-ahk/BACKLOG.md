@@ -6,21 +6,18 @@ Updated: Aug 2026. Agent **must read this file** before changing publish/parser/
 
 ## P0 — Required (operational)
 
-### 1. Output format — 5 rooms per Zalo message (Aug 2026)
+### 1. Output format — 1 room per cycle: images → text → separator (Aug 2026)
 
-**Default:** `[Output] ListingsPerMessage=5`, `ListingSeparator=======================`
+**Default:** `[Output] OneMessagePerListing=1`, `SendSeparatorAsMessage=1`, `LeaseSize=1`
 
-One Zalo text message:
+Per room in each main group:
 
-```text
-📍 Địa chỉ: phòng 1 …
-…
-=======================
-📍 Địa chỉ: phòng 2 …
-…
-```
+1. Paste archived images
+2. Send formatted text for that room
+3. Send `=======================` as its own message
+4. Next room
 
-Set `OneMessagePerListing=1` for one room per message (old P0.1 mode).
+Set `OneMessagePerListing=0` + `ListingsPerMessage=5` for the old multi-room text blob.
 
 ---
 
@@ -108,9 +105,9 @@ Added to `blocklist.example.csv` + tests:
 - `MaxGroupsPerCycle` and `MaxBatchesPerWatchCycle` bound GUI/send work.
 - State saves after each group; a group with new rooms is published before the next source.
 - Publish delays use configurable jitter; watch no longer rechecks all groups.
-- `[Relay] TextOnly=1` overrides stale image settings so harvested text is never
-  reused as an in-chat Ctrl+F query. Output names are decoded directly as UTF-8
-  and pasted through the clipboard to preserve Vietnamese and emoji.
+- `[Relay] TextOnly=0` keeps AutoCapture on so publish can send images before text.
+  Set `TextOnly=1` only for text-debug. Output names stay UTF-8 clipboard paste.
+- Unchanged conversation hash skips re-copy; newest unseen listings are processed first.
 
 **Risk:** Some Zalo builds may not expose unread state through MSAA. The
 oldest-first audit shard still provides eventual coverage.
