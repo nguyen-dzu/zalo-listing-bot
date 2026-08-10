@@ -82,23 +82,12 @@ if ($compiler) {
 }
 
 if (-not $compiled) {
-    # Fallback: copy script + launcher (cần AHK trên máy đích)
+    # Fallback: copy script + launcher (can AutoHotkey tren may dich)
     $fallbackDir = Join-Path $releaseDir "src"
     New-Item -ItemType Directory -Force -Path $fallbackDir | Out-Null
     Get-ChildItem (Join-Path $windowsRoot "src\*.ahk") | Copy-Item -Destination $fallbackDir
-    @"
-@echo off
-setlocal
-cd /d "%~dp0"
-set "AHK=%LOCALAPPDATA%\Programs\AutoHotkey\v2\AutoHotkey64.exe"
-if not exist "%AHK%" set "AHK=C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe"
-if not exist "%AHK%" (
-  echo Cai AutoHotkey v2 hoac chay build-release.ps1 tren may co Ahk2Exe.
-  pause
-  exit /b 1
-)
-start "" "%AHK%" "%~dp0src\Bot.ahk"
-"@ | Set-Content -Encoding ASCII (Join-Path $releaseDir "Launch-Bot.cmd")
+    Copy-Item (Join-Path $setupDir "package-template\Launch-Bot.cmd") `
+        (Join-Path $releaseDir "Launch-Bot.cmd")
     Write-Host "Fallback: Launch-Bot.cmd + src\ (can AutoHotkey tren may dich)"
 }
 
