@@ -1,12 +1,9 @@
 @echo off
 setlocal EnableExtensions
 cd /d "%~dp0"
-
-set "ROOT=%~dp0"
-if not exist "%ROOT%config\config.ini" if exist "%ROOT%..\config\config.ini" (
-  set "ROOT=%ROOT%..\"
-  cd /d "%ROOT%"
-)
+call "%~dp0_bot-launch.inc.cmd" :InitRoot
+call "%~dp0_bot-launch.inc.cmd" :DetectPortableExe
+call "%~dp0_bot-launch.inc.cmd" :ResolveBotScript
 
 echo.
 echo  Zalo Listing Bot - DEBUG mode
@@ -14,54 +11,49 @@ echo  =============================
 echo  Thu muc: %CD%
 echo.
 
-if exist "ZaloListingBot.exe" (
-  echo Chay ZaloListingBot.exe (neu crash se co MsgBox + startup-error.log)
+if "%HAS_PORTABLE_EXE%"=="1" (
+  echo [OK] Tim thay ZaloListingBot.exe
   echo.
   "%CD%\ZaloListingBot.exe"
-  if errorlevel 1 (
-    echo.
-    echo  Bot thoat voi ma loi %errorlevel%
-  )
-  if exist "data\startup-error.log" (
-    echo.
-    echo  === startup-error.log ===
-    type "data\startup-error.log"
-  )
+  goto :AfterRun
+)
+
+echo [CANH BAO] Khong co ZaloListingBot.exe hop le trong folder nay.
+echo   - Neu build khong co Ahk2Exe, package chi co Launch-Bot.cmd + src\
+echo   - Chay qua AutoHotkey v2 thay cho exe
+echo.
+
+if not exist "%BOT_AHK%" (
+  echo [LOI] Khong tim thay src\Bot.ahk tai: %BOT_AHK%
+  echo Hay chay build-release.ps1 tren Windows co Ahk2Exe, hoac giai nen dung folder portable.
+  pause
+  exit /b 1
+)
+
+call "%~dp0_bot-launch.inc.cmd" :FindAhk
+if not defined AHK_EXE (
+  echo [LOI] Khong tim thay AutoHotkey64.exe
+  echo Cai AutoHotkey v2: https://www.autohotkey.com/
+  echo Sau do chay lai Run-Bot-Debug.cmd
+  pause
+  exit /b 1
+)
+
+echo Chay qua AutoHotkey:
+echo   %AHK_EXE%
+echo   %BOT_AHK%
+echo.
+"%AHK_EXE%" "%BOT_AHK%"
+
+:AfterRun
+if errorlevel 1 (
   echo.
-  pause
-  exit /b 0
+  echo  Bot thoat voi ma loi %errorlevel%
 )
-
-set "BOT=%CD%\src\Bot.ahk"
-if not exist "%BOT%" (
-  echo Khong tim thay ZaloListingBot.exe hoac src\Bot.ahk
-  pause
-  exit /b 1
-)
-
-set "AHK="
-for %%P in (
-  "%LOCALAPPDATA%\Programs\AutoHotkey\v2\AutoHotkey64.exe"
-  "%ProgramFiles%\AutoHotkey\v2\AutoHotkey64.exe"
-  "%ProgramFiles(x86)%\AutoHotkey\v2\AutoHotkey64.exe"
-) do (
-  if not defined AHK if exist %%~P set "AHK=%%~P"
-)
-
-if not defined AHK (
-  echo Khong tim thay AutoHotkey64.exe
-  pause
-  exit /b 1
-)
-
-echo Chay qua AutoHotkey (cua so nay giu loi neu co):
-echo   %AHK%
-echo   %BOT%
-echo.
-"%AHK%" "%BOT%"
-echo.
 if exist "data\startup-error.log" (
-  echo === startup-error.log ===
+  echo.
+  echo  === startup-error.log ===
   type "data\startup-error.log"
 )
+echo.
 pause

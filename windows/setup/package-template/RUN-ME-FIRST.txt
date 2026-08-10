@@ -16,9 +16,10 @@ Zalo Listing Bot — Portable (Windows)
    - 5 nhom output duoc khai bao tai [Groups] OutputGroups trong config.ini
    - Tat ca nhom con lai tu dong la input; khong dung groups.csv
 
-4. Chay ZaloListingBot.exe
-   - Bot tu cho Zalo, tu harvest + publish (AutoRunWatch=1)
-   - Dung khan cap: Ctrl+Shift+K
+4. Chay bot
+   - Co ZaloListingBot.exe: chay exe
+   - Khong co exe (build khong co Ahk2Exe): cai AutoHotkey v2, chay Launch-Bot.cmd
+   - Debug loi: Run-Bot-Debug.cmd
 
 5. (Tuy chon) Tu mo khi dang nhap Windows:
    setup\install-startup.cmd
