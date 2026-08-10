@@ -22,7 +22,7 @@ Chỉ từ khóa cấm còn đọc từ `blocklist.csv`/Excel.
 |-----------|--------|
 | Harvest batch | `Ctrl+Shift+J`: harvest → publish một session |
 | Watch loop | Tự chạy khi mở script (`[Startup] AutoRunWatch=1`) — không cần hotkey |
-| Auto archive ảnh | `[Images] AutoCapture=1`: bot tìm bubble theo mã phòng, copy `.clip` khi harvest |
+| Auto archive ảnh | Accessibility tìm graphic bubble gần mã phòng, copy từng bitmap vào `.clip` riêng |
 | Parser linh hoạt | Nhận tin không có label chuẩn: *cho thuê*, *giá 5tr7*, *Nc/Dv/PDV*, link Google Maps, SĐT dạng `0377.785.784` |
 | Heuristic | `LooksLikeListing()` — không bắt buộc `Địa chỉ:` / `Giá:` / `SĐT:` nếu `RequiredFields` để trống |
 | Blocklist | `LOCK`, `Chốt`, `Đã chốt`, … — so khớp không phân biệt hoa thường |
@@ -37,7 +37,8 @@ Chỉ từ khóa cấm còn đọc từ `blocklist.csv`/Excel.
 
 > Chi tiết triển khai và quy tắc sửa: [`.cursor/skills/zalo-bot-ahk/SKILL.md`](.cursor/skills/zalo-bot-ahk/SKILL.md) và [`BACKLOG.md`](.cursor/skills/zalo-bot-ahk/BACKLOG.md).
 
-1. Auto archive dùng find-in-chat + chọn bubble — cần calibrate `FindInChatHotkey` / `ImageSelectMode` trên Zalo PC thật.
+1. Zalo PC phải expose MSAA accessibility. Nếu discovery/capture trống, chạy
+   `dump-groups.ahk` và chỉnh các tọa độ/giới hạn accessibility trong `config.ini`.
 2. Delivery bị crash ngay sau phím Enter được đánh dấu `uncertain`; phải chọn Retry hoặc Skip để tránh gửi trùng.
 3. Clipboard archive và focus compose chỉ xác minh đầy đủ được trên Windows + Zalo PC thật.
 
@@ -73,6 +74,14 @@ Kiểm tra danh sách nhóm đã load:
 ```powershell
 & "$env:LOCALAPPDATA\Programs\AutoHotkey\v2\AutoHotkey64.exe" windows\src\dump-groups.ahk
 ```
+
+Nếu `sources=0`, tạo accessibility dump để hiệu chỉnh Zalo PC:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\AutoHotkey\v2\AutoHotkey64.exe" windows\src\dump-accessibility.ahk
+```
+
+Kết quả: `windows\data\zalo-accessibility-dump.txt`.
 
 ### 3. Cursor / VS Code
 
@@ -179,18 +188,26 @@ Khi `EnableHotkeys=1`:
 
 ### Danh sách nhóm Zalo
 
-Bot mở tab `Alt+3`, scan danh sách nhóm và lưu bản chụp chẩn đoán tại
-`data/zalo-groups-capture.txt`.
+Bot mở `Alt+3`, đọc tên Nhóm + Cộng đồng qua Windows accessibility (không
+`Ctrl+A/C` giao diện), rồi lưu bản chụp chẩn đoán tại
+`data/zalo-groups-capture.txt`. Ở `Alt+1`, nhóm unread đang hiện được click
+trực tiếp; tìm kiếm tên chỉ là fallback.
 
 ```ini
 [Groups]
 OutputGroups=Giỏ hàng cao thiên ⏏️ 6tr Phú Nhuận Bình Thạnh|Giỏ hàng cao thiên ⬇️ 5tr9 Phú Nhuận Bình Thạnh|Giỏ Hàng "Quận Ngoại Thành" Cao Thiên|Giỏ hàng Quận số Cao Thiên|Giỏ hàng NNC Cao Thiên.
 ListTabHotkey=!3
+DiscoveryMode=accessibility
 ListScanPages=80
+RefreshEveryCycles=12
+PreferAccessibleConversationClick=1
+ManualListFile=config\groups-manual.txt
 ```
 
 Tên trong `OutputGroups` được phân cách bằng `|`. Mọi nhóm Zalo còn lại là input.
 `groups.csv` không còn được đọc.
+Nếu Zalo không expose accessibility, tạo `groups-manual.txt` với một tên
+Nhóm/Cộng đồng mỗi dòng và đặt `DiscoveryMode=manual`.
 
 ### `windows/config/blocklist.csv`
 
@@ -204,7 +221,8 @@ Tên trong `OutputGroups` được phân cách bằng `|`. Mọi nhóm Zalo còn
 
 ```ini
 [Capture]
-Method=selectall          ; selectall | manual
+Method=accessibility     ; accessibility | selectall | manual
+AccessibilityFallback=selectall
 RequiredFields=             ; để trống = heuristic LooksLikeListing
 
 [Batch]
@@ -219,6 +237,9 @@ MaskPhone=1
 [Images]
 MediaRequired=1             ; có marker ảnh → phải archive trước khi ready
 AutoCapture=1               ; tự archive khi harvest (không cần M)
+AutoCaptureMode=accessibility
+AutoCaptureProbeImages=1    ; vẫn dò graphic khi text copy không có marker ảnh
+AutoCaptureRepairPerCycle=3 ; retry media_pending ở các watch cycle sau
 ImagesBeforeText=1
 
 [Watch]

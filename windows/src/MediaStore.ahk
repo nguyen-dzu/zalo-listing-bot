@@ -130,6 +130,37 @@ class ListingMediaStore {
         return this.FilesFor(listingId).Length > 0
     }
 
+    ManifestPath(listingId) {
+        return this.ListingDir(listingId) "\manifest.json"
+    }
+
+    WriteManifest(listingId, manifest) {
+        WriteTextFile(this.ManifestPath(listingId), JSON.Stringify(manifest))
+        return manifest
+    }
+
+    ReadManifest(listingId) {
+        path := this.ManifestPath(listingId)
+        if !FileExist(path)
+            return 0
+        try {
+            parsed := JSON.Parse(ReadTextFile(path))
+            return parsed is Map ? parsed : 0
+        } catch {
+            return 0
+        }
+    }
+
+    IsTrusted(listingId) {
+        manifest := this.ReadManifest(listingId)
+        return this.HasMedia(listingId)
+            && manifest
+            && manifest.Has("capture_version")
+            && manifest["capture_version"] >= 2
+            && manifest.Has("validated_bitmap")
+            && manifest["validated_bitmap"]
+    }
+
     RelativePaths(listingId) {
         result := []
         prefix := this.root "\"
@@ -163,6 +194,8 @@ class ListingMediaStore {
             FileDelete A_LoopFileFullPath
         if FileExist(dir "\current.txt")
             FileDelete dir "\current.txt"
+        if FileExist(dir "\manifest.json")
+            FileDelete dir "\manifest.json"
         if DirExist(dir "\generations")
             DirDelete dir "\generations", true
     }

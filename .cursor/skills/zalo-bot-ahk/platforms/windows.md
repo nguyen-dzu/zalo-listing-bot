@@ -35,7 +35,8 @@ The bot reads the complete Zalo group list through `Alt+3`. Verify the five
 5. Ctrl+Shift+G                  send text message cluster
 ```
 
-For fewer steps: set `[Capture] Method=selectall` and use `Ctrl+Shift+J` (harvest + publish in one action).
+Use `[Capture] Method=accessibility` to avoid clipboard selection caching the
+group avatar. `selectall` remains a compatibility fallback.
 
 ## Compile to EXE
 

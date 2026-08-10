@@ -20,14 +20,29 @@ class GroupActivityDetector {
         seen := Map()
         for index, line in lines {
             key := GroupRegistry._Key(line)
-            if !lookup.Has(key)
+            matchedKey := ""
+            for candidateKey, candidateName in lookup {
+                if key = candidateKey || InStr(key, candidateKey) {
+                    if matchedKey = "" || StrLen(candidateKey) > StrLen(matchedKey)
+                        matchedKey := candidateKey
+                }
+            }
+            if matchedKey = ""
                 continue
 
-            context := ""
+            context := line
             finish := Min(lines.Length, index + 4)
             cursor := index + 1
             while cursor <= finish {
-                if lookup.Has(GroupRegistry._Key(lines[cursor]))
+                nextKey := GroupRegistry._Key(lines[cursor])
+                startsNextGroup := false
+                for candidateKey, candidateName in lookup {
+                    if nextKey = candidateKey || InStr(nextKey, candidateKey) {
+                        startsNextGroup := true
+                        break
+                    }
+                }
+                if startsNextGroup
                     break
                 context .= (context = "" ? "" : "`n") lines[cursor]
                 cursor++
@@ -35,7 +50,7 @@ class GroupActivityDetector {
             if context = "" || !RegExMatch(context, markerPattern)
                 continue
 
-            name := lookup[key]
+            name := lookup[matchedKey]
             nameKey := GroupRegistry._Key(name)
             if seen.Has(nameKey)
                 continue

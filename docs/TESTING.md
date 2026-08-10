@@ -118,8 +118,18 @@ Incremental watch tests cover:
 - publish jitter is disabled in fake publisher configs for deterministic tests.
 
 Windows E2E must additionally verify that the installed Zalo version exposes
-`tin nhắn mới` / `chưa đọc` text in `data\zalo-groups-capture.txt`. If it does
-not, only the audit shard can detect activity until UIA/OCR support is added.
+group/community names and `tin nhắn mới` / `chưa đọc` state through MSAA.
+Run `dump-groups.ahk`, then inspect `data\zalo-groups-capture.txt`.
+If unread state is unavailable, the audit shard still provides coverage.
+
+Media E2E:
+
+1. Open one source listing with text and 1–3 images immediately above it.
+2. Confirm `data\media\<listing>\manifest.json` has
+   `capture_version: 2` and `validated_bitmap: 1`.
+3. Confirm each `.clip` pastes an actual room image, never the group avatar.
+4. Delete/rename the manifest and restart: the cache must be invalidated and
+   must not be published until recaptured.
 
 ---
 

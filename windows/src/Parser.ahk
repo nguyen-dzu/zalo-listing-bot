@@ -446,6 +446,8 @@ class ListingParser {
     }
 
     static CountMatches(text, pattern) {
+        if Trim(pattern) = ""
+            return 0
         count := 0
         pos := 1
         while RegExMatch(text, pattern, &found, pos) {

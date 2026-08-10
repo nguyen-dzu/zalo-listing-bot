@@ -202,6 +202,9 @@ class DurableListingPublisher {
         entry := this.queue.Get(id)
         files := entry && entry.Has("media_files") ? entry["media_files"] : []
         imageCount := record.Has("image_count") ? record["image_count"] : 0
+        if files.Length && !this.media.IsTrusted(id)
+            throw Error("Phòng " record["room_code"]
+                . " có image cache cũ/chưa xác thực; cần capture lại.")
 
         if imageCount > 0 && this.config.MediaRequired && !files.Length
             throw Error("Phòng " record["room_code"] " chưa archive ảnh.")

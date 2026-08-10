@@ -96,10 +96,12 @@ class ListingRepository {
 
     ; Persist one harvested listing. Returns the stored record.
     SaveListing(listing, sourceGroup := "", hash := "") {
-        id := hash != "" ? hash : FnvHash(listing["raw_text"])
+        contentHash := hash != "" ? hash : FnvHash(listing["raw_text"])
+        id := ListingRepository.BuildListingId(sourceGroup, contentHash)
         roomCode := ListingParser.NormalizeRoomCode(listing, id)
         record := Map(
             "id", id,
+            "content_hash", contentHash,
             "source_group", sourceGroup,
             "captured_at", NowStamp(),
             "address", listing["address"],
@@ -128,6 +130,13 @@ class ListingRepository {
         if this.queue
             this.queue.Enqueue(record)
         return record
+    }
+
+    static BuildListingId(sourceGroup, contentHash) {
+        sourceKey := StrLower(Trim(sourceGroup))
+        sourceKey := StrReplace(sourceKey, Chr(0xFE0F), "")
+        sourceKey := RegExReplace(sourceKey, "\s+", " ")
+        return FnvHash(sourceKey "|" contentHash)
     }
 
     _IndexOf(id) {

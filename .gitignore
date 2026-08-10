@@ -4,6 +4,7 @@ windows/data/access_log.json
 windows/data/harvest_state.json
 windows/data/harvest_state/
 windows/data/zalo-groups-capture.txt
+windows/data/zalo-accessibility-dump.txt
 windows/data/listings/
 windows/data/media/
 windows/data/queue/

@@ -223,7 +223,7 @@ zalo-listing-bot/
 | Crash after issuing Enter has ambiguous delivery | Mark `uncertain`; operator chooses Retry or Skip |
 | 5,000 rooms = 1,000 text messages per group | Bounded sessions, cooldown, TTL and superseding; watch bypasses cooldown between drain passes |
 | Continuous monitoring | `[Watch] IntervalMs` loop: harvest → publish → sleep |
-| Zalo has no standard "select all messages" | `[Capture] Method=selectall` for watch; `manual` still supported |
+| Zalo clipboard can include avatars/cache | `[Capture] Method=accessibility`; `selectall` is fallback only |
 | Posts not matching format (missing "Địa chỉ:") | Skipped; adjust `ListingStartPattern` for your groups |
 | Zalo UI changes | Tune `[Timing]` first, then edit `ZaloUI.ahk` |
 | Excel requires MS Excel installed | Use CSV fallback |

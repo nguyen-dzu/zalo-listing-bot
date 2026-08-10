@@ -1,4 +1,5 @@
 #Requires AutoHotkey v2.0
+#Include Acc.ahk
 ; ZaloUI.ahk — Adapter: every Zalo PC keystroke lives here. Calibrate delays in config.ini.
 
 class ZaloUIAdapter {
@@ -23,14 +24,21 @@ class ZaloUIAdapter {
     ; focus: "read" = message pane for copy; "send" = compose box for paste
     OpenGroup(groupName, focus := "read") {
         this.Activate()
-        Send "{Esc}"
-        Sleep 150
-        Send "^f"
-        Sleep this.config.SearchDelayMs
-        SendText groupName
-        Sleep this.config.SearchDelayMs + 300
-        Send "{Enter}"
-        Sleep this.config.OpenChatDelayMs
+        opened := this.config.PreferAccessibleConversationClick
+            && this._ClickAccessibleConversation(groupName)
+        if !opened {
+            Send "{Esc}"
+            Sleep 150
+            Send "^f"
+            Sleep this.config.SearchDelayMs
+            SendText groupName
+            Sleep this.config.SearchDelayMs + 300
+            Send "{Enter}"
+            Sleep this.config.OpenChatDelayMs
+        }
+        if this.config.VerifyActiveConversation
+            && !this._ActiveConversationMatches(groupName)
+            throw Error("Zalo opened a different conversation than: " groupName)
         Send "{Esc}"
         Sleep 150
         if focus = "send"
@@ -40,12 +48,96 @@ class ZaloUIAdapter {
         return true
     }
 
+    _ClickAccessibleConversation(groupName) {
+        Send "{Esc}"
+        Sleep 100
+        Send "!1"
+        Sleep this.config.GroupListSettleMs
+        root := this._AccessibleRoot()
+        if !root
+            return false
+        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
+        maxX := x + Round(w * this.config.GroupAccessibilityLeftRatio)
+        targetKey := GroupRegistry._Key(groupName)
+        try elements := root.FindElements([
+            {Role: Acc.Role.ListItem},
+            {Role: Acc.Role.OutlineItem},
+            {Role: Acc.Role.StaticText},
+            {Role: Acc.Role.Text}
+        ], Acc.TreeScope.Descendants, 0, this.config.GroupAccessibilityDepth)
+        catch
+            return false
+        for element in elements {
+            name := ""
+            try name := element.Name
+            if name = ""
+                continue
+            nameKey := GroupRegistry._Key(name)
+            if nameKey != targetKey && !InStr(nameKey, targetKey)
+                continue
+            try location := element.Location
+            catch
+                continue
+            if location.w <= 0 || location.h <= 0
+                || location.x < x || location.x >= maxX
+                || location.y < y || location.y >= y + h
+                continue
+            Click(location.x + Round(location.w / 2),
+                location.y + Round(location.h / 2))
+            Sleep this.config.OpenChatDelayMs
+            return true
+        }
+        return false
+    }
+
+    _ActiveConversationMatches(groupName) {
+        root := this._AccessibleRoot()
+        if !root
+            return true
+        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
+        minX := x + Round(w * 0.32)
+        maxY := y + Round(h * 0.20)
+        targetKey := GroupRegistry._Key(groupName)
+        inspected := 0
+        try elements := root.FindElements([
+            {Role: Acc.Role.StaticText},
+            {Role: Acc.Role.Text}
+        ], Acc.TreeScope.Descendants, 0, this.config.GroupAccessibilityDepth)
+        catch
+            return true
+        for element in elements {
+            try location := element.Location
+            catch
+                continue
+            if location.x < minX || location.y < y || location.y > maxY
+                continue
+            name := ""
+            try name := element.Name
+            if name = ""
+                continue
+            inspected++
+            nameKey := GroupRegistry._Key(name)
+            if nameKey = targetKey || InStr(nameKey, targetKey)
+                return true
+        }
+        ; If Zalo exposes no header text, keep compatibility. If it does expose
+        ; a header but the target is absent, stop before reading/sending wrong chat.
+        return inspected = 0
+    }
+
     ; Copy the conversation text of the currently open chat.
     ; manual    — the operator already highlighted the messages
     ; selectall — click the message pane, then Ctrl+A / Ctrl+C
     CaptureConversationText(method := "") {
         mode := method != "" ? method : this.config.CaptureMethod
         this.Activate()
+
+        if mode = "accessibility" {
+            captured := this._CaptureAccessibleConversationText()
+            if Trim(captured) != ""
+                return captured
+            mode := this.config.CaptureAccessibilityFallback
+        }
 
         if mode = "selectall" {
             this._ClickMessagePane()
@@ -59,6 +151,73 @@ class ZaloUIAdapter {
         captured := ClipWait(this.config.ClipWaitSeconds) ? A_Clipboard : ""
         A_Clipboard := old
         return captured
+    }
+
+    _CaptureAccessibleConversationText() {
+        root := this._AccessibleRoot()
+        if !root
+            return ""
+        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
+        minX := x + Round(w * 0.36)
+        maxX := x + Round(w * 0.96)
+        minY := y + Round(h * 0.12)
+        maxY := y + Round(h * 0.87)
+        rows := []
+        try elements := root.FindElements([
+            {Role: Acc.Role.StaticText},
+            {Role: Acc.Role.Text}
+        ], Acc.TreeScope.Descendants, 0, this.config.GroupAccessibilityDepth)
+        catch
+            return ""
+        for element in elements {
+            try location := element.Location
+            catch
+                continue
+            if location.w <= 0 || location.h <= 0
+                || location.x < minX || location.x > maxX
+                || location.y < minY || location.y > maxY
+                continue
+            value := ""
+            try value := element.Name
+            if value = ""
+                try value := element.Value
+            value := Trim(NormalizeNewlines(value))
+            if value = ""
+                continue
+            rows.Push(Map(
+                "x", location.x,
+                "y", location.y,
+                "value", value
+            ))
+        }
+        this._SortAccessibleRows(rows)
+        result := []
+        previous := ""
+        for row in rows {
+            value := row["value"]
+            if value = previous
+                continue
+            result.Push(value)
+            previous := value
+        }
+        return StrJoin(result, "`n")
+    }
+
+    _SortAccessibleRows(rows) {
+        index := 2
+        while index <= rows.Length {
+            current := rows[index]
+            cursor := index - 1
+            while cursor >= 1
+                && (rows[cursor]["y"] > current["y"]
+                    || (rows[cursor]["y"] = current["y"]
+                        && rows[cursor]["x"] > current["x"])) {
+                rows[cursor + 1] := rows[cursor]
+                cursor--
+            }
+            rows[cursor + 1] := current
+            index++
+        }
     }
 
     ; Open Zalo's group + community lists (Alt+3), scroll the left pane, copy text.
@@ -110,12 +269,17 @@ class ZaloUIAdapter {
         repeated := 0
         try {
             Loop this.config.GroupListScanPages {
-                A_Clipboard := ""
-                Send "^a"
-                Sleep this.config.PasteDelayMs
-                Send "^c"
-                page := ClipWait(this.config.ClipWaitSeconds)
-                    ? String(A_Clipboard) : ""
+                page := ""
+                if this.config.GroupDiscoveryMode != "clipboard"
+                    page := this._CaptureAccessiblePaneText(false)
+                if page = "" && this.config.GroupDiscoveryMode != "accessibility" {
+                    A_Clipboard := ""
+                    Send "^a"
+                    Sleep this.config.PasteDelayMs
+                    Send "^c"
+                    page := ClipWait(this.config.ClipWaitSeconds)
+                        ? String(A_Clipboard) : ""
+                }
                 page := Trim(NormalizeNewlines(page))
                 if page != ""
                     combined := this._MergeCapturedText(combined, page)
@@ -135,6 +299,209 @@ class ZaloUIAdapter {
             A_Clipboard := old
         }
         return combined
+    }
+
+    ; Read Chromium/Electron accessibility names instead of selecting/copying
+    ; the Zalo UI. This avoids caching the group avatar as clipboard media.
+    _CaptureAccessiblePaneText(includeState := false) {
+        root := this._AccessibleRoot()
+        if !root
+            return ""
+        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
+        maxX := x + Round(w * this.config.GroupAccessibilityLeftRatio)
+        result := []
+        seen := Map()
+        try elements := root.FindElements([
+            {Role: Acc.Role.ListItem},
+            {Role: Acc.Role.OutlineItem}
+        ], Acc.TreeScope.Descendants, 0, this.config.GroupAccessibilityDepth)
+        catch
+            return ""
+        this._AppendAccessiblePaneElements(
+            elements, result, seen, includeState, x, y, w, h, maxX)
+        if result.Length
+            return StrJoin(result, "`n")
+        try elements := root.FindElements([
+            {Role: Acc.Role.StaticText},
+            {Role: Acc.Role.Text}
+        ], Acc.TreeScope.Descendants, 0,
+            this.config.GroupAccessibilityDepth)
+        catch
+            return ""
+        this._AppendAccessiblePaneElements(
+            elements, result, seen, includeState, x, y, w, h, maxX)
+        return StrJoin(result, "`n")
+    }
+
+    _AppendAccessiblePaneElements(
+        elements, result, seen, includeState, x, y, w, h, maxX
+    ) {
+        for element in elements {
+            try location := element.Location
+            catch
+                continue
+            if location.w <= 0 || location.h <= 0
+                || location.x < x || location.x >= maxX
+                || location.y < y || location.y >= y + h
+                continue
+            for value in this._AccessibleElementStrings(element, includeState) {
+                clean := Trim(RegExReplace(value, "\s+", " "))
+                if clean = "" || seen.Has(clean)
+                    continue
+                seen[clean] := true
+                result.Push(clean)
+            }
+        }
+    }
+
+    CaptureUnreadConversationText() {
+        this.Activate()
+        Send "{Esc}"
+        Sleep 100
+        Send "!1"
+        Sleep this.config.GroupListSettleMs
+        return this._CaptureAccessiblePaneText(true)
+    }
+
+    _AccessibleRoot() {
+        hwnd := WinExist("ahk_exe " this.config.ExeName)
+        if !hwnd
+            return 0
+        try return Acc.ElementFromHandle(hwnd)
+        catch
+            return 0
+    }
+
+    _AccessibleElementStrings(element, includeState := true) {
+        values := []
+        properties := includeState
+            ? ["Name", "Value", "Description", "StateText"]
+            : ["Name", "Value"]
+        for property in properties {
+            try {
+                value := element.%property%
+                if value != ""
+                    values.Push(String(value))
+            }
+        }
+        return values
+    }
+
+    ; Find actual message-pane graphics nearest the listing anchor. Group
+    ; avatars are excluded by pane and size/distance constraints.
+    FindImageBubblesNearMessage(anchor, maxImages := 6) {
+        if Trim(anchor) = ""
+            return []
+        this.FindMessageInConversation(anchor)
+        Sleep this.config.ImageViewerSettleMs
+        root := this._AccessibleRoot()
+        if !root
+            return []
+
+        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
+        paneMinX := x + Round(w * 0.36)
+        paneMaxX := x + Round(w * 0.94)
+        contentMinY := y + Round(h * 0.12)
+        contentMaxY := y + Round(h * 0.86)
+        anchorY := y + Round(h * 0.55)
+
+        try textElements := root.FindElements([
+            {Role: Acc.Role.StaticText},
+            {Role: Acc.Role.Text}
+        ], Acc.TreeScope.Descendants, 0, this.config.GroupAccessibilityDepth)
+        catch
+            textElements := []
+        for element in textElements {
+            matched := false
+            for value in this._AccessibleElementStrings(element) {
+                if InStr(value, anchor) {
+                    matched := true
+                    break
+                }
+            }
+            if !matched
+                continue
+            try location := element.Location
+            catch
+                continue
+            if location.x >= paneMinX && location.x <= paneMaxX {
+                anchorY := location.y
+                break
+            }
+        }
+
+        candidates := []
+        try graphics := root.FindElements(
+            {Role: Acc.Role.Graphic},
+            Acc.TreeScope.Descendants, 0, this.config.GroupAccessibilityDepth)
+        catch
+            return []
+        for graphic in graphics {
+            try location := graphic.Location
+            catch
+                continue
+            centerY := location.y + Round(location.h / 2)
+            distance := Abs(centerY - anchorY)
+            if this.config.ImageCandidateDirection = "above"
+                && centerY > anchorY
+                continue
+            if this.config.ImageCandidateDirection = "below"
+                && centerY < anchorY
+                continue
+            if location.x < paneMinX || location.x > paneMaxX
+                || location.y < contentMinY || location.y > contentMaxY
+                || location.w < this.config.ImageCandidateMinWidthPx
+                || location.h < this.config.ImageCandidateMinHeightPx
+                || distance > this.config.ImageCandidateMaxDistancePx
+                continue
+            candidates.Push(Map(
+                "x", location.x + Round(location.w / 2),
+                "y", centerY,
+                "distance", distance
+            ))
+        }
+
+        this._SortLocationsByDistance(candidates)
+        while candidates.Length > maxImages
+            candidates.Pop()
+        return candidates
+    }
+
+    _SortLocationsByDistance(items) {
+        index := 2
+        while index <= items.Length {
+            current := items[index]
+            cursor := index - 1
+            while cursor >= 1 && items[cursor]["distance"] > current["distance"] {
+                items[cursor + 1] := items[cursor]
+                cursor--
+            }
+            items[cursor + 1] := current
+            index++
+        }
+    }
+
+    CopyImageAt(location) {
+        this.Activate()
+        A_Clipboard := ""
+        Click(location["x"], location["y"])
+        Sleep this.config.ImageViewerSettleMs
+        Send this.config.ImageCopyHotkey
+        Sleep this.config.PasteDelayMs + 200
+        if ClipWait(this.config.ClipWaitSeconds) && this._ClipboardHasBitmapImage() {
+            Send "{Esc}"
+            return true
+        }
+
+        Send "{Esc}"
+        Sleep 150
+        A_Clipboard := ""
+        Click(location["x"], location["y"], "Right")
+        Sleep this.config.PasteDelayMs + 200
+        Send this.config.ImageContextCopyKey
+        Sleep this.config.PasteDelayMs + 200
+        return ClipWait(this.config.ClipWaitSeconds)
+            && this._ClipboardHasBitmapImage()
     }
 
     _AdvanceGroupListScroll() {
@@ -271,13 +638,15 @@ class ZaloUIAdapter {
     }
 
     _ClipboardHasImage() {
+        return this._ClipboardHasBitmapImage()
+    }
+
+    _ClipboardHasBitmapImage() {
         if DllCall("IsClipboardFormatAvailable", "UInt", 2)   ; CF_BITMAP
             return true
         if DllCall("IsClipboardFormatAvailable", "UInt", 8)   ; CF_DIB
             return true
         if DllCall("IsClipboardFormatAvailable", "UInt", 17)  ; CF_DIBV5
-            return true
-        if DllCall("IsClipboardFormatAvailable", "UInt", 15)  ; CF_HDROP
             return true
         pngFormat := DllCall("RegisterClipboardFormat", "Str", "PNG", "UInt")
         if pngFormat && DllCall("IsClipboardFormatAvailable", "UInt", pngFormat)

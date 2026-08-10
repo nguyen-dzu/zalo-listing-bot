@@ -58,6 +58,7 @@ Copy-Item (Join-Path $setupDir "install-startup.ps1") $setupOut
 Copy-Item (Join-Path $setupDir "install-startup.cmd") $setupOut
 Copy-Item (Join-Path $setupDir "package-template\Install.cmd") (Join-Path $releaseDir "Install.cmd")
 Copy-Item (Join-Path $setupDir "package-template\RUN-ME-FIRST.txt") (Join-Path $releaseDir "RUN-ME-FIRST.txt")
+Copy-Item (Join-Path $windowsRoot "src\Acc.LICENSE.txt") (Join-Path $releaseDir "Acc.LICENSE.txt")
 
 function Find-Ahk2Exe {
     $candidates = @(
@@ -95,6 +96,7 @@ if (-not $compiled) {
     $fallbackDir = Join-Path $releaseDir "src"
     New-Item -ItemType Directory -Force -Path $fallbackDir | Out-Null
     Get-ChildItem (Join-Path $windowsRoot "src\*.ahk") | Copy-Item -Destination $fallbackDir
+    Copy-Item (Join-Path $windowsRoot "src\Acc.LICENSE.txt") $fallbackDir
     Copy-Item (Join-Path $setupDir "package-template\Launch-Bot.cmd") (Join-Path $releaseDir "Launch-Bot.cmd")
     Write-Host "Fallback: Launch-Bot.cmd + src folder (requires AutoHotkey on target PC)"
 }

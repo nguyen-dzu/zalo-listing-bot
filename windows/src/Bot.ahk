@@ -81,6 +81,18 @@ class ListingBotService {
         for entry in this.queue.AllEntries() {
             if !this.media.HasMedia(entry["id"])
                 continue
+            if !this.media.IsTrusted(entry["id"]) {
+                record := this.repo.Get(entry["id"])
+                required := record
+                    && record.Has("image_count")
+                    && record["image_count"] > 0
+                    && this.config.MediaRequired
+                this.queue.InvalidateMedia(
+                    entry["id"], "Legacy/unvalidated image cache ignored.", required)
+                if this.config.AutoCaptureReplaceUntrusted
+                    this.media.DeleteFor(entry["id"])
+                continue
+            }
             files := this.media.RelativePaths(entry["id"])
             metadata := this.media.MetadataFor(entry["id"])
             if this._MediaMetadataMatches(entry, metadata)
@@ -392,8 +404,8 @@ class ListingBotService {
     }
 
     _RefreshGroupsFromZalo() {
-        raw := this.ui.CaptureAllGroupListText()
-        manualUsed := false
+        manualUsed := this.config.GroupDiscoveryMode = "manual"
+        raw := manualUsed ? "" : this.ui.CaptureAllGroupListText()
         if Trim(raw) = "" {
             manualNames := GroupRegistry.LoadManualNames(
                 this.config.GroupListManualFile)
@@ -480,11 +492,17 @@ class ListingBotService {
                 try {
                     ; Cycle 1 establishes a full baseline. Later cycles select
                     ; textual unread groups plus a small oldest-first audit shard.
-                    this._RefreshGroupsFromZalo()
+                    if cycles = 1
+                        || Mod(cycles - 1,
+                            this.config.GroupRefreshEveryCycles) = 0
+                        || !this.groupsDiscovered
+                        this._RefreshGroupsFromZalo()
                     sources := this.registry.SourceGroups()
+                    unreadRaw := cycles > 1
+                        ? this.ui.CaptureUnreadConversationText() : ""
                     unread := cycles > 1
                         ? GroupActivityDetector.DetectUnread(
-                            this.lastGroupListRaw, sources,
+                            unreadRaw, sources,
                             this.config.GroupUnreadMarkerPattern)
                         : []
                     plan := this.harvestScheduler.BuildPlan(
@@ -493,6 +511,8 @@ class ListingBotService {
                         this.config.PublishBatchesPerWatchCycle
                     harvest := this.harvester.HarvestGroups(
                         plan["groups"], ObjBindMethod(this, "_AfterWatchGroup"))
+                    mediaRepair := this.mediaCapturer.RepairPending(
+                        this.repo, this.config.AutoCaptureRepairPerCycle)
                 } catch as err {
                     this._Notify("Watch harvest lỗi", err.Message, 3)
                     if this.watchStopRequested
@@ -512,10 +532,11 @@ class ListingBotService {
                     break
 
                 this._Notify("Watch vòng " cycles " xong",
-                    Format("{1}: {2} nhóm | unread: {3}`nMới: {4} | Ảnh OK: {5} | Ảnh lỗi: {6}`nNghỉ {7} phút…",
+                    Format("{1}: {2} nhóm | unread: {3}`nMới: {4} | Ảnh OK: {5} | sửa cache: {6} | lỗi: {7}`nNghỉ {8} phút…",
                         plan["mode"], plan["groups"].Length, plan["unread"],
                         harvest["saved"], harvest["media_captured"],
-                        harvest["media_failed"],
+                        mediaRepair["captured"],
+                        harvest["media_failed"] + mediaRepair["failed"],
                         Round(this.config.WatchIntervalMs / 60000)), 1)
                 Sleep this.config.WatchIntervalMs
             }

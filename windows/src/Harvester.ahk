@@ -289,8 +289,9 @@ class MessageHarvester {
             result["saved"]++
             result["saved_records"].Push(record)
             if this.mediaCapturer
-                && record.Has("image_count") && record["image_count"] > 0
-                && this.config.AutoCapture {
+                && this.config.AutoCapture
+                && ((record.Has("image_count") && record["image_count"] > 0)
+                    || this.config.AutoCaptureProbeImages) {
                 if this.mediaCapturer.CaptureForRecord(groupName, record)
                     result["media_captured"]++
                 else

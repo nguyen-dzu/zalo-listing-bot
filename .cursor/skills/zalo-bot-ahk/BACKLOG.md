@@ -38,17 +38,24 @@ Set `OneMessagePerListing=1` for one room per message (old P0.1 mode).
 
 ---
 
-### 3. Images — auto archive during harvest — IMPLEMENTED / NEEDS WINDOWS E2E
+### 3. Images — accessibility capture v2 — IMPLEMENTED / NEEDS WINDOWS E2E
 
 **Flow:**
 
 1. Harvest stores the room and queues it as `media_pending` when `MediaRequired=1`.
-2. With `[Images] AutoCapture=1`, bot finds the listing bubble by room code (or address), selects image bubbles above, copies to `.clip`, and attaches media — no `M` hotkey needed.
+2. With `[Images] AutoCapture=1`, bot finds the listing anchor, locates nearby
+   accessibility `Graphic` elements, and copies each bitmap to a separate `.clip`.
+   This avoids `Ctrl+A` selection caching the group avatar.
 3. Publisher restores the local archive for every output group, then sends one five-room text (`ImagesBeforeText=1`).
+4. A v2 manifest marks validated bitmap caches. Legacy/unvalidated media is
+   invalidated and never published; `media_pending` items are retried each cycle.
+5. Listing IDs include normalized source group + content hash, preventing
+   cross-group posts from sharing the same media directory.
 
 **Manual fallback:** `Ctrl+Shift+M` (archive by room code) or `Ctrl+Shift+I` (RelayImages).
 
-**Calibrate on real Zalo:** `[Images] FindInChatHotkey`, `ImageSelectMode` (`shift_up` | `shift_click`).
+**Calibrate on real Zalo:** `FindInChatHotkey`, `ImageCandidateDirection`,
+`ImageCandidateMaxDistancePx`, minimum graphic width/height.
 
 ---
 
@@ -102,8 +109,16 @@ Added to `blocklist.example.csv` + tests:
 - State saves after each group; publish is attempted every five groups.
 - Publish delays use configurable jitter; watch no longer rechecks all groups.
 
-**Risk:** Zalo may not expose unread text in copied Alt+3 content. Audit shard
-provides eventual coverage; Windows UIA/OCR remains a future stronger detector.
+**Risk:** Some Zalo builds may not expose unread state through MSAA. The
+oldest-first audit shard still provides eventual coverage.
+
+### 8. Accessibility discovery — IMPLEMENTED / NEEDS WINDOWS E2E
+
+- Vendored Acc-v2 (MIT) activates Chromium/Electron accessibility.
+- Alt+3 names are read from MSAA; no UI-wide Ctrl+A/C.
+- Nhóm and Cộng đồng tabs are scanned; Alt+1 unread entries can be clicked
+  directly by accessible name.
+- `groups-manual.txt` remains the deterministic fallback.
 
 ---
 

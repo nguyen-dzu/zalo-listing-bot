@@ -72,10 +72,14 @@ class AppConfig {
             . '|Giỏ hàng NNC Cao Thiên.'))
         this.GroupListTabHotkey := this._Read(
             ini, "Groups", "ListTabHotkey", "!3")
+        this.GroupDiscoveryMode := StrLower(this._Read(
+            ini, "Groups", "DiscoveryMode", "accessibility"))
         this.GroupListSettleMs := Max(500,
             this._Int(ini, "Groups", "ListSettleMs", 1500))
         this.GroupListScanPages := Max(1,
             this._Int(ini, "Groups", "ListScanPages", 80))
+        this.GroupRefreshEveryCycles := Max(1,
+            this._Int(ini, "Groups", "RefreshEveryCycles", 12))
         this.GroupListPaneClickXRatio := this._Float(
             ini, "Groups", "ListPaneClickX", 0.20)
         this.GroupListPaneClickYRatio := this._Float(
@@ -90,6 +94,14 @@ class AppConfig {
             ini, "Groups", "ListScrollMode", "wheel"))
         this.GroupListWheelSteps := Max(1,
             this._Int(ini, "Groups", "ListWheelSteps", 8))
+        this.GroupAccessibilityDepth := Max(3,
+            this._Int(ini, "Groups", "AccessibilityDepth", 18))
+        this.GroupAccessibilityLeftRatio := this._Float(
+            ini, "Groups", "AccessibilityLeftRatio", 0.52)
+        this.PreferAccessibleConversationClick := this._Bool(
+            ini, "Groups", "PreferAccessibleConversationClick", true)
+        this.VerifyActiveConversation := this._Bool(
+            ini, "Groups", "VerifyActiveConversation", true)
         this.GroupListManualFile := this._Resolve(this._Read(
             ini, "Groups", "ManualListFile", "config\groups-manual.txt"))
         this.GroupListIgnoredLabels := this._PipeList(this._Read(
@@ -107,7 +119,10 @@ class AppConfig {
         this.BlocklistCsv := this._Resolve(this._Read(ini, "Groups", "BlocklistCsv", "config\blocklist.csv"))
 
         ; ── Capture ──
-        this.CaptureMethod := StrLower(this._Read(ini, "Capture", "Method", "manual"))
+        this.CaptureMethod := StrLower(this._Read(
+            ini, "Capture", "Method", "accessibility"))
+        this.CaptureAccessibilityFallback := StrLower(this._Read(
+            ini, "Capture", "AccessibilityFallback", "selectall"))
         this.ListingStartPattern := this._Read(ini, "Capture", "ListingStartPattern", "")
         this.ImageMarkerPattern := this._Read(ini, "Capture", "ImageMarkerPattern", "")
         this.MaxMessagesPerGroup := this._Int(ini, "Capture", "MaxMessagesPerGroup", 50)
@@ -137,6 +152,28 @@ class AppConfig {
             this._Read(ini, "Images", "AutoCaptureAnchor", "room_code"))
         this.AutoCaptureMaxRetries := Max(0,
             this._Int(ini, "Images", "AutoCaptureMaxRetries", 2))
+        this.AutoCaptureMode := StrLower(
+            this._Read(ini, "Images", "AutoCaptureMode", "accessibility"))
+        this.AutoCaptureProbeImages := this._Bool(
+            ini, "Images", "AutoCaptureProbeImages", true)
+        this.AutoCaptureProbeMaxImages := Max(1,
+            this._Int(ini, "Images", "AutoCaptureProbeMaxImages", 6))
+        this.AutoCaptureReplaceUntrusted := this._Bool(
+            ini, "Images", "AutoCaptureReplaceUntrusted", true)
+        this.AutoCaptureRepairPerCycle := Max(0,
+            this._Int(ini, "Images", "AutoCaptureRepairPerCycle", 3))
+        this.ImageCandidateMaxDistancePx := Max(100,
+            this._Int(ini, "Images", "ImageCandidateMaxDistancePx", 900))
+        this.ImageCandidateDirection := StrLower(this._Read(
+            ini, "Images", "ImageCandidateDirection", "above"))
+        this.ImageCandidateMinWidthPx := Max(16,
+            this._Int(ini, "Images", "ImageCandidateMinWidthPx", 60))
+        this.ImageCandidateMinHeightPx := Max(16,
+            this._Int(ini, "Images", "ImageCandidateMinHeightPx", 60))
+        this.ImageViewerSettleMs := Max(200,
+            this._Int(ini, "Images", "ImageViewerSettleMs", 700))
+        this.ImageContextCopyKey := this._Read(
+            ini, "Images", "ImageContextCopyKey", "c")
         this.ImageSelectMode := StrLower(
             this._Read(ini, "Images", "ImageSelectMode", "shift_up"))
         this.ImageSelectStepPx := Max(40,
@@ -270,7 +307,7 @@ class AppConfig {
     _Float(ini, section, key, default) {
         value := this._Read(ini, section, key, default)
         if IsNumber(value)
-            return Number(value)
+            return value + 0
         return default
     }
 

@@ -63,7 +63,9 @@ class GroupRegistry {
             "tất cả", "tìm kiếm", "tìm kiếm nhóm", "tìm kiếm cộng đồng",
             "nhóm đang tham gia", "nhóm của tôi", "cộng đồng đang tham gia",
             "cộng đồng của tôi", "tạo nhóm", "tạo cộng đồng", "phân loại",
-            "tin nhắn", "danh bạ", "community", "communities"
+            "tin nhắn", "danh bạ", "community", "communities",
+            "focusable", "selectable", "selected", "offscreen",
+            "read only", "linked", "normal"
         ]
         for label in defaults
             ignored[GroupRegistry._Key(label)] := true
@@ -78,6 +80,8 @@ class GroupRegistry {
             line := Trim(RegExReplace(rawLine, "\s+", " "))
             line := Trim(RegExReplace(
                 line, "i)\s+\d+\s*(?:thành viên|members?)$", ""))
+            line := Trim(RegExReplace(
+                line, "i)\s+\d+\s*(?:tin nhắn mới|tin chưa đọc|unread|new messages?).*$", ""))
             line := Trim(RegExReplace(
                 line, "i)\s*·\s*\d+\s*(?:online|trực tuyến).*$", ""))
             if line = ""

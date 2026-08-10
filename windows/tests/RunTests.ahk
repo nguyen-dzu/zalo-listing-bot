@@ -203,6 +203,10 @@ class FakePublisherMedia {
     Resolve(path) {
         return path
     }
+
+    IsTrusted(id) {
+        return true
+    }
 }
 
 MakeQueueRecord(index, imageCount := 0) {
@@ -262,6 +266,8 @@ Check("LooksLikeListing tin tự do", ListingParser.LooksLikeListing(freeform))
 Check("whitelist regex trạng thái + giá + liên hệ",
     ListingParser.LooksLikeListing(
         "Sẵn studio`nĐường Nguyễn Xí, Bình Thạnh`nGiá 4500k`nLH 0901234567"))
+Check("image marker rỗng không đếm mọi ký tự",
+    ListingParser.CountMatches("tin có nội dung", "") = 0)
 listing := ListingParser.Parse(freeform)
 Check("suy luận giá", listing["price"] != "", listing["price"])
 Check("suy luận SĐT", listing["owner_phone"] = "0901234567", listing["owner_phone"])
@@ -443,6 +449,11 @@ Check("parse ca nhom va cong dong",
     communityNames.Length = 2
     && communityNames[1] = "Nhóm Cho Thuê Q1"
     && communityNames[2] = "Cộng đồng BĐS Sài Gòn")
+accessibleCombined := GroupRegistry.ParseCapturedNames(
+    "Nhóm Accessibility 4 tin nhắn mới")
+Check("strip unread suffix khỏi accessible group name",
+    accessibleCombined.Length = 1
+    && accessibleCombined[1] = "Nhóm Accessibility")
 
 manualPath := A_Temp "\zalo-groups-manual-test.txt"
 WriteTextFile(manualPath, "# comment`nNhóm Manual A`n;skip`nNhóm Manual B`n")
@@ -492,6 +503,11 @@ unreadGroups := GroupActivityDetector.DetectUnread(
     "i)(?:tin nhắn mới|tin chưa đọc|chưa đọc)")
 Check("detect unread từ group-list context",
     unreadGroups.Length = 1 && unreadGroups[1] = "Nhóm A")
+sameLineUnread := GroupActivityDetector.DetectUnread(
+    "Nhóm B 3 tin nhắn mới", schedulerGroups,
+    "i)(?:tin nhắn mới|tin chưa đọc|chưa đọc)")
+Check("detect unread accessibility cùng dòng",
+    sameLineUnread.Length = 1 && sameLineUnread[1] = "Nhóm B")
 
 ; ── Composer ──────────────────────────────────────────────
 Section("composer")
@@ -556,6 +572,12 @@ b := FnvHash("Địa chỉ: X`n Giá:  5 triệu ")
 c := FnvHash("Địa chỉ: Y`nGiá: 5 triệu")
 Check("hash bỏ qua khoảng trắng", a = b, a " vs " b)
 Check("hash khác nội dung thì khác", a != c)
+Check("listing id tách theo nhóm nguồn",
+    ListingRepository.BuildListingId("Nhóm A", a)
+    != ListingRepository.BuildListingId("Nhóm B", a))
+Check("listing id chuẩn hóa hoa thường tên nhóm",
+    ListingRepository.BuildListingId("NHÓM A", a)
+    = ListingRepository.BuildListingId("nhóm a", a))
 
 ; ── Harvest state (capture snapshot + revisit) ────────────
 Section("harvest state")
@@ -734,6 +756,14 @@ Check("attach media chuyển ready",
 mediaStore := ListingMediaStore(qcfg)
 WriteTextFile(mediaStore.BundlePath("q0010"), "bundle")
 WriteTextFile(mediaStore.NumberedPath("q0010", 1), "second")
+Check("media cũ không manifest là untrusted",
+    !mediaStore.IsTrusted("q0010"))
+mediaStore.WriteManifest("q0010", Map(
+    "capture_version", 2,
+    "validated_bitmap", 1
+))
+Check("media bitmap có manifest v2 là trusted",
+    mediaStore.IsTrusted("q0010"))
 Check("media store giữ bundle + numbered",
     mediaStore.FilesFor("q0010").Length = 2)
 Check("media paths lưu relative",
@@ -753,6 +783,10 @@ WriteTextFile(appendGeneration["temp_path"], "appended")
 mediaStore.CommitGeneration(appendGeneration)
 Check("media append tạo generation đầy đủ mới",
     mediaStore.FilesFor("q0010").Length = 2)
+queueReloaded.InvalidateMedia("q0010", "bad cache", true)
+Check("invalidate media đưa listing về pending",
+    queueReloaded.Get("q0010")["status"] = "media_pending"
+    && queueReloaded.Get("q0010")["media_files"].Length = 0)
 
 supersedeRoot := A_Temp "\zalo-queue-supersede-tests"
 if DirExist(supersedeRoot)

@@ -158,6 +158,18 @@ class PublishQueueStore {
         return this.records[id]
     }
 
+    InvalidateMedia(id, reason := "", required := true) {
+        if !this.records.Has(id)
+            return false
+        this._Append(Map(
+            "type", "media_invalidated",
+            "id", id,
+            "reason", reason,
+            "required", required ? 1 : 0
+        ))
+        return true
+    }
+
     LeaseNext(limit := 5) {
         this.ActivateDeferred()
         selected := []
@@ -524,6 +536,21 @@ class PublishQueueStore {
         return result
     }
 
+    MediaPendingEntries(limit := 0) {
+        result := []
+        for id in this.order {
+            if !this.records.Has(id)
+                continue
+            entry := this.records[id]
+            if entry["status"] != "media_pending"
+                continue
+            result.Push(entry)
+            if limit > 0 && result.Length >= limit
+                break
+        }
+        return result
+    }
+
     Compact() {
         records := []
         for id in this.order {
@@ -591,6 +618,23 @@ class PublishQueueStore {
                     entry["desired_status"] := "ready"
                     if entry["status"] = "media_pending"
                         this._SetStatus(entry, "ready")
+                }
+
+            case "media_invalidated":
+                if this.records.Has(event["id"]) {
+                    entry := this.records[event["id"]]
+                    entry["media_files"] := []
+                    entry["media_metadata"] := []
+                    required := !event.Has("required") || event["required"]
+                    entry["media_status"] := required ? "pending" : "none"
+                    entry["desired_status"] := required ? "media_pending" : "ready"
+                    entry["last_error"] := event.Has("reason")
+                        ? event["reason"] : ""
+                    if entry["status"] = "ready"
+                        || entry["status"] = "retry_wait"
+                        || entry["status"] = "media_pending"
+                        this._SetStatus(entry,
+                            required ? "media_pending" : "ready")
                 }
 
             case "lease":
