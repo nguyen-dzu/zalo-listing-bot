@@ -30,7 +30,7 @@ echo [CANH BAO] Khong co ZaloListingBot.exe hop le.
 echo   Se chay qua AutoHotkey v2 + Bot.ahk
 echo.
 
-rem Repo src (git pull) truoc — dist\src thuong cu/thieu file sau khi pull.
+rem Chon Bot.ahk co DU cac file #Include — thieu 1 file => AHK thoat ma 2.
 set "BOT_AHK="
 set "BOT_SOURCE="
 for %%C in (
@@ -39,31 +39,42 @@ for %%C in (
   "%CD%\src\Bot.ahk"
 ) do (
   if not defined BOT_AHK if exist %%~C (
-    set "BOT_AHK=%%~C"
-    if "%%~C"=="%CD%\..\..\src\Bot.ahk" set "BOT_SOURCE=repo windows\src"
-    if "%%~C"=="%CD%\..\src\Bot.ahk" set "BOT_SOURCE=parent src"
-    if "%%~C"=="%CD%\src\Bot.ahk" set "BOT_SOURCE=portable dist\src"
+    set "SRC_DIR=%%~dpC"
+    set "SRC_OK=1"
+    for %%F in (
+      Util.ahk JSON.ahk Config.ahk TableLoader.ahk GroupRegistry.ahk
+      SourceGroupFile.ahk BotControlWindow.ahk BlockList.ahk Parser.ahk
+      Storage.ahk StateStore.ahk QueueStore.ahk MediaStore.ahk Composer.ahk
+      ZaloUI.ahk Acc.ahk GroupActivity.ahk MediaCapturer.ahk Harvester.ahk
+      Publisher.ahk
+    ) do (
+      if not exist "!SRC_DIR!%%F" set "SRC_OK=0"
+    )
+    if "!SRC_OK!"=="1" (
+      set "BOT_AHK=%%~C"
+      if "%%~C"=="%CD%\..\..\src\Bot.ahk" set "BOT_SOURCE=repo windows\src"
+      if "%%~C"=="%CD%\..\src\Bot.ahk" set "BOT_SOURCE=parent src"
+      if "%%~C"=="%CD%\src\Bot.ahk" set "BOT_SOURCE=portable dist\src"
+    ) else (
+      echo [CANH BAO] Bo src thieu file include — bo qua: %%~C
+      for %%F in (
+        Util.ahk JSON.ahk Config.ahk TableLoader.ahk GroupRegistry.ahk
+        SourceGroupFile.ahk BotControlWindow.ahk BlockList.ahk Parser.ahk
+        Storage.ahk StateStore.ahk QueueStore.ahk MediaStore.ahk Composer.ahk
+        ZaloUI.ahk Acc.ahk GroupActivity.ahk MediaCapturer.ahk Harvester.ahk
+        Publisher.ahk
+      ) do if not exist "!SRC_DIR!%%F" echo     thieu: !SRC_DIR!%%F
+    )
   )
 )
 
 if not defined BOT_AHK (
-  echo [LOI] Khong tim thay Bot.ahk
-  echo   Thu lai: powershell -File windows\setup\build-release.ps1
-  echo   Hoac:    windows\setup\Launch-Bot-Dev.cmd
-  pause
-  exit /b 1
-)
-
-rem Acc.ahk bat buoc — neu thieu thi AHK thoat ma 2 khong ro loi.
-set "ACC_AHK=%BOT_AHK:\Bot.ahk=\Acc.ahk%"
-if not exist "!ACC_AHK!" (
-  echo [LOI] Thieu Acc.ahk cung folder voi Bot.ahk:
-  echo   !ACC_AHK!
   echo.
-  echo dist\src co the cu. Chay:
-  echo   git pull
-  echo   powershell -File windows\setup\build-release.ps1
-  echo hoac dung Launch-Bot-Dev.cmd tu repo.
+  echo [LOI] Khong co bo src\Bot.ahk day du include.
+  echo   Thu lai:
+  echo     git pull origin main
+  echo     powershell -File windows\setup\build-release.ps1
+  echo   Hoac chay truc tiep: windows\setup\Run-Bot-Debug.cmd
   pause
   exit /b 1
 )

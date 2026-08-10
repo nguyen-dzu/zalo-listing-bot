@@ -6,7 +6,6 @@ title Zalo Listing Bot - DEBUG (repo)
 set "SETUP=%~dp0"
 set "WIN=%SETUP%.."
 set "BOT=%WIN%\src\Bot.ahk"
-set "ACC=%WIN%\src\Acc.ahk"
 
 echo.
 echo  Zalo Listing Bot - DEBUG (repo source)
@@ -20,8 +19,16 @@ if not exist "%BOT%" (
   pause
   exit /b 1
 )
-if not exist "%ACC%" (
-  echo [LOI] Thieu Acc.ahk: %ACC%
+set "MISSING="
+for %%F in (
+  Util.ahk JSON.ahk Config.ahk TableLoader.ahk GroupRegistry.ahk
+  SourceGroupFile.ahk BotControlWindow.ahk BlockList.ahk Parser.ahk
+  Storage.ahk StateStore.ahk QueueStore.ahk MediaStore.ahk Composer.ahk
+  ZaloUI.ahk Acc.ahk GroupActivity.ahk MediaCapturer.ahk Harvester.ahk
+  Publisher.ahk
+) do if not exist "%WIN%\src\%%F" set "MISSING=%%F"
+if defined MISSING (
+  echo [LOI] Thieu file include: %WIN%\src\%MISSING%
   echo Chay: git pull origin main
   pause
   exit /b 1
