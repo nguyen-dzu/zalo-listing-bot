@@ -100,9 +100,15 @@ class AppConfig {
             ini, "Groups", "ListPaneClickY", 0.42)
         ; Top of left chat list — conversation search box (not Ctrl+F in-chat).
         this.GroupSearchBoxClickXRatio := this._Float(
-            ini, "Groups", "SearchBoxClickX", 0.18)
+            ini, "Groups", "SearchBoxClickX", 0.14)
         this.GroupSearchBoxClickYRatio := this._Float(
-            ini, "Groups", "SearchBoxClickY", 0.06)
+            ini, "Groups", "SearchBoxClickY", 0.10)
+        ; Skip far-left icon rail when locating sidebar search via Acc/ratio.
+        this.GroupSidebarMinXRatio := this._Float(
+            ini, "Groups", "SidebarMinX", 0.07)
+        ; Ctrl+F opens sidebar search when focus is on chat list (not message pane).
+        this.GroupSearchHotkey := this._Read(
+            ini, "Groups", "SearchHotkey", "^f")
         this.GroupCommunityTabClickXRatio := this._Float(
             ini, "Groups", "CommunityTabClickX", 0.28)
         this.GroupCommunityTabClickYRatio := this._Float(

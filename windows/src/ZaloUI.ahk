@@ -77,8 +77,7 @@ class ZaloUIAdapter {
     }
 
     ; focus: "read" = message pane for copy; "send" = compose box for paste.
-    ; Never use Ctrl+F here — on current Zalo PC that opens find-in-chat and
-    ; searches already-copied messages instead of switching conversations.
+    ; Sidebar search uses Acc / Ctrl+F on chat list — not Ctrl+F while message pane focused.
     OpenGroup(groupName, focus := "read") {
         this.Activate()
         this._DismissOverlayUi(1)
@@ -131,45 +130,117 @@ class ZaloUIAdapter {
         return true
     }
 
-    ; Top of left chat list — small Edit/Text field, not in-chat Ctrl+F.
+    ; Top of left chat list. Prefer Acc label / Ctrl+F after sidebar focus.
     _FocusConversationSearchBox() {
-        win := this._WindowRect()
-        maxX := win["x"] + Round(win["w"] * this.config.GroupAccessibilityLeftRatio)
-        maxY := win["y"] + Round(win["h"] * 0.16)
-        root := this._AccessibleRoot()
-        if root {
-            try elements := root.FindElements([
-                {Role: Acc.Role.Text}
-            ], Acc.TreeScope.Descendants, 0, this.config.GroupAccessibilityDepth)
-            catch
-                elements := []
-            best := 0
-            bestArea := 999999999
-            for element in elements {
-                try location := element.Location
-                catch
-                    continue
-                if location.w <= 0 || location.h <= 0
-                    || location.x < win["x"] || location.x >= maxX
-                    || location.y < win["y"] || location.y > maxY
-                    || location.h > 64 || location.w < 72
-                    continue
-                area := location.w * location.h
-                if area < bestArea {
-                    bestArea := area
-                    best := element
-                }
-            }
-            if best && this._ElementClick(best)
-                return true
-        }
+        if this._FocusAccConversationSearch()
+            return true
 
+        win := this._WindowRect()
+        ; Steal focus from message pane — click upper sidebar (conversation list).
+        listPt := this._RatioPoint(win,
+            this.config.GroupListPaneClickXRatio,
+            Max(this.config.GroupSearchBoxClickYRatio + 0.06, 0.16))
+        this._ScreenClick(listPt[1], listPt[2])
+        Sleep this.config.PasteDelayMs + 80
+
+        ; Zalo PC: Ctrl+F = sidebar search when chat list has focus (not in-chat).
+        Send this.config.GroupSearchHotkey
+        Sleep this.config.SearchDelayMs + 150
+        if this._FocusedControlLooksLikeSearch()
+            return true
+
+        ; Last resort: direct ratio click into the search row (skip icon rail).
         pt := this._RatioPoint(win,
             this.config.GroupSearchBoxClickXRatio,
             this.config.GroupSearchBoxClickYRatio)
         this._ScreenClick(pt[1], pt[2])
         Sleep this.config.PasteDelayMs + 100
         return true
+    }
+
+    _FocusAccConversationSearch() {
+        root := this._AccessibleRoot()
+        if !root
+            return false
+        win := this._WindowRect()
+        minX := win["x"] + Round(win["w"] * this.config.GroupSidebarMinXRatio)
+        maxX := win["x"] + Round(win["w"] * this.config.GroupAccessibilityLeftRatio)
+        minY := win["y"] + Round(win["h"] * 0.02)
+        maxY := win["y"] + Round(win["h"] * 0.16)
+
+        labelNeedle := "i)(?:tìm kiếm|tim kiem|search|tìm tin|tim tin|tìm tên|tim ten)"
+        try labeled := root.FindElements({
+            or: [
+                {Name: "Tìm kiếm", matchmode: "SubString", casesensitive: false},
+                {Name: "Search", matchmode: "SubString", casesensitive: false},
+                {Value: "Tìm kiếm", matchmode: "SubString", casesensitive: false},
+                {Description: "Tìm kiếm", matchmode: "SubString", casesensitive: false}
+            ]
+        }, Acc.TreeScope.Descendants, 0, this.config.GroupAccessibilityDepth)
+        catch
+            labeled := []
+
+        for element in labeled {
+            if !this._AccPointInRect(element, minX, maxX, minY, maxY)
+                continue
+            if this._ElementClick(element)
+                return true
+        }
+
+        try elements := root.FindElements([
+            {Role: Acc.Role.Text},
+            {Role: Acc.Role.ComboBox}
+        ], Acc.TreeScope.Descendants, 0, this.config.GroupAccessibilityDepth)
+        catch
+            return false
+
+        best := 0
+        bestScore := -1
+        for element in elements {
+            if !this._AccPointInRect(element, minX, maxX, minY, maxY)
+                continue
+            try location := element.Location
+            catch
+                continue
+            if location.h > 72 || location.w < 80
+                continue
+            score := 1000 - (location.w * location.h)
+            for value in this._AccessibleElementStrings(element) {
+                if RegExMatch(value, labelNeedle)
+                    score += 5000
+            }
+            if score > bestScore {
+                bestScore := score
+                best := element
+            }
+        }
+        if !best
+            return false
+        return this._ElementClick(best)
+    }
+
+    _AccPointInRect(element, minX, maxX, minY, maxY) {
+        try location := element.Location
+        catch
+            return false
+        if location.w <= 0 || location.h <= 0
+            return false
+        cx := location.x + Round(location.w / 2)
+        cy := location.y + Round(location.h / 2)
+        return cx >= minX && cx <= maxX && cy >= minY && cy <= maxY
+    }
+
+    _FocusedControlLooksLikeSearch() {
+        try focused := ControlGetFocus("ahk_exe " this.config.ExeName)
+        catch
+            return false
+        if focused = ""
+            return false
+        cls := "", caption := ""
+        try cls := ControlGetClass(focused)
+        try caption := ControlGetText(focused)
+        combined := cls " " caption
+        return RegExMatch(combined, "i)(?:edit|search|tìm|tim)")
     }
 
     _ClickAccessibleConversation(groupName, prepareList := true) {
