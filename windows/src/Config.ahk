@@ -102,7 +102,7 @@ class AppConfig {
         this.GroupSearchBoxClickXRatio := this._Float(
             ini, "Groups", "SearchBoxClickX", 0.18)
         this.GroupSearchBoxClickYRatio := this._Float(
-            ini, "Groups", "SearchBoxClickY", 0.08)
+            ini, "Groups", "SearchBoxClickY", 0.06)
         this.GroupCommunityTabClickXRatio := this._Float(
             ini, "Groups", "CommunityTabClickX", 0.28)
         this.GroupCommunityTabClickYRatio := this._Float(

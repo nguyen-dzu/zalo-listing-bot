@@ -15,6 +15,10 @@ class ZaloUIAdapter {
     ; options: "" | WhichButton ("Left","Right",...) | "D"/"U" (mouse down/up for drag)
     _ScreenClick(x, y, options := "") {
         CoordMode("Mouse", "Screen")
+        x := Round(x), y := Round(y)
+        ; Move before click so Electron/Zalo sees a real hover, not a stale cursor.
+        MouseMove(x, y, 0)
+        Sleep 35
         if options = "D" || options = "U"
             Click(x, y, , , options)
         else if options != ""
@@ -30,6 +34,8 @@ class ZaloUIAdapter {
         } catch {
             try {
                 loc := element.Location
+                if loc.w <= 0 || loc.h <= 0
+                    return false
                 this._ScreenClick(
                     loc.x + Round(loc.w / 2),
                     loc.y + Round(loc.h / 2))
@@ -40,9 +46,21 @@ class ZaloUIAdapter {
         }
     }
 
+    ; Client-area screen rect — ratios must use this, not WinGetPos (title bar skews Y).
     _WindowRect() {
-        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
+        try {
+            WinGetClientPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
+        } catch {
+            WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
+        }
         return Map("x", x, "y", y, "w", w, "h", h)
+    }
+
+    _RatioPoint(win, xRatio, yRatio) {
+        return [
+            win["x"] + Round(win["w"] * xRatio),
+            win["y"] + Round(win["h"] * yRatio)
+        ]
     }
 
     IsRunning() {
@@ -63,7 +81,7 @@ class ZaloUIAdapter {
     ; searches already-copied messages instead of switching conversations.
     OpenGroup(groupName, focus := "read") {
         this.Activate()
-        this._DismissOverlayUi()
+        this._DismissOverlayUi(1)
 
         opened := this._ClickAccessibleConversation(groupName)
         if !opened
@@ -72,11 +90,11 @@ class ZaloUIAdapter {
         matched := !this.config.VerifyActiveConversation
             || this._ActiveConversationMatches(groupName)
         if !opened || !matched {
-            this._DismissOverlayUi()
+            this._DismissOverlayUi(2)
             throw Error("Không tìm thấy nhóm: " groupName)
         }
 
-        this._DismissOverlayUi()
+        this._DismissOverlayUi(1)
         if focus = "send"
             this._FocusComposeBox()
         else
@@ -84,47 +102,83 @@ class ZaloUIAdapter {
         return true
     }
 
-    ; Close find-in-chat / search popups so the next group open starts clean.
-    _DismissOverlayUi() {
-        Loop 2 {
+    _DismissOverlayUi(times := 1) {
+        Loop Max(1, times) {
             Send "{Esc}"
             Sleep 120
         }
     }
 
-    ; Left-pane conversation search (Alt+1), NOT Ctrl+F message search.
     _OpenGroupViaSidebarSearch(groupName) {
         this.Activate()
         Send "!1"
         Sleep this.config.GroupListSettleMs
 
-        focused := this._FocusAccRegion(
-            ["Edit", "Text", "ComboBox"], 0.02, 0.42, 0.02, 0.20)
-        if !focused {
-            ; Always allow search-box ratio click for group open (independent of
-            ; UiUseRatioClicks, which is meant for community-list discovery).
-            win := this._WindowRect()
-            this._ScreenClick(
-                win["x"] + Round(win["w"] * this.config.GroupSearchBoxClickXRatio),
-                win["y"] + Round(win["h"] * this.config.GroupSearchBoxClickYRatio))
-            Sleep this.config.PasteDelayMs + 100
-        }
+        if !this._FocusConversationSearchBox()
+            return false
 
         this._ReplaceFocusedText(groupName)
         Sleep this.config.SearchDelayMs + 300
+
+        ; Filtered sidebar: Acc click is more reliable than Enter alone.
+        if this._ClickAccessibleConversation(groupName, false)
+            return true
+
         Send "{Enter}"
         Sleep this.config.OpenChatDelayMs
-        ; Leave filtered search results so later opens see the full list.
         Send "{Esc}"
         Sleep 120
         return true
     }
 
-    _ClickAccessibleConversation(groupName) {
-        Send "{Esc}"
-        Sleep 100
-        Send "!1"
-        Sleep this.config.GroupListSettleMs
+    ; Top of left chat list — small Edit/Text field, not in-chat Ctrl+F.
+    _FocusConversationSearchBox() {
+        win := this._WindowRect()
+        maxX := win["x"] + Round(win["w"] * this.config.GroupAccessibilityLeftRatio)
+        maxY := win["y"] + Round(win["h"] * 0.16)
+        root := this._AccessibleRoot()
+        if root {
+            try elements := root.FindElements([
+                {Role: Acc.Role.Text}
+            ], Acc.TreeScope.Descendants, 0, this.config.GroupAccessibilityDepth)
+            catch
+                elements := []
+            best := 0
+            bestArea := 999999999
+            for element in elements {
+                try location := element.Location
+                catch
+                    continue
+                if location.w <= 0 || location.h <= 0
+                    || location.x < win["x"] || location.x >= maxX
+                    || location.y < win["y"] || location.y > maxY
+                    || location.h > 64 || location.w < 72
+                    continue
+                area := location.w * location.h
+                if area < bestArea {
+                    bestArea := area
+                    best := element
+                }
+            }
+            if best && this._ElementClick(best)
+                return true
+        }
+
+        pt := this._RatioPoint(win,
+            this.config.GroupSearchBoxClickXRatio,
+            this.config.GroupSearchBoxClickYRatio)
+        this._ScreenClick(pt[1], pt[2])
+        Sleep this.config.PasteDelayMs + 100
+        return true
+    }
+
+    _ClickAccessibleConversation(groupName, prepareList := true) {
+        if prepareList {
+            Send "{Esc}"
+            Sleep 100
+            Send "!1"
+            Sleep this.config.GroupListSettleMs
+        }
         root := this._AccessibleRoot()
         if !root
             return false
@@ -176,9 +230,9 @@ class ZaloUIAdapter {
         root := this._AccessibleRoot()
         if !root
             return true
-        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
-        minX := x + Round(w * 0.32)
-        maxY := y + Round(h * 0.20)
+        win := this._WindowRect()
+        minX := win["x"] + Round(win["w"] * 0.32)
+        maxY := win["y"] + Round(win["h"] * 0.20)
         targetKey := GroupRegistry._Key(groupName)
         inspected := 0
         try elements := root.FindElements([
@@ -191,7 +245,7 @@ class ZaloUIAdapter {
             try location := element.Location
             catch
                 continue
-            if location.x < minX || location.y < y || location.y > maxY
+            if location.x < minX || location.y < win["y"] || location.y > maxY
                 continue
             name := ""
             try name := element.Name
@@ -240,9 +294,8 @@ class ZaloUIAdapter {
 
     _ClickConversationTextArea() {
         win := this._WindowRect()
-        this._ScreenClick(
-            win["x"] + Round(win["w"] * 0.68),
-            win["y"] + Round(win["h"] * 0.48))
+        pt := this._RatioPoint(win, 0.68, 0.48)
+        this._ScreenClick(pt[1], pt[2])
         Sleep this.config.PasteDelayMs
     }
 
@@ -250,11 +303,11 @@ class ZaloUIAdapter {
         root := this._AccessibleRoot()
         if !root
             return ""
-        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
-        minX := x + Round(w * 0.36)
-        maxX := x + Round(w * 0.96)
-        minY := y + Round(h * 0.12)
-        maxY := y + Round(h * 0.87)
+        win := this._WindowRect()
+        minX := win["x"] + Round(win["w"] * 0.36)
+        maxX := win["x"] + Round(win["w"] * 0.96)
+        minY := win["y"] + Round(win["h"] * 0.12)
+        maxY := win["y"] + Round(win["h"] * 0.87)
         rows := []
         try elements := root.FindElements([
             {Role: Acc.Role.StaticText},
@@ -388,9 +441,10 @@ class ZaloUIAdapter {
     }
 
     _FocusGroupListPaneByRatio(win) {
-        paneX := win["x"] + Round(win["w"] * this.config.GroupListPaneClickXRatio)
-        paneY := win["y"] + Round(win["h"] * this.config.GroupListPaneClickYRatio)
-        this._ScreenClick(paneX, paneY)
+        pt := this._RatioPoint(win,
+            this.config.GroupListPaneClickXRatio,
+            this.config.GroupListPaneClickYRatio)
+        this._ScreenClick(pt[1], pt[2])
         Sleep this.config.PasteDelayMs
         Send "{Home}"
         Sleep this.config.GroupListSettleMs
@@ -436,8 +490,8 @@ class ZaloUIAdapter {
         root := this._AccessibleRoot()
         if !root
             return ""
-        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
-        maxX := x + Round(w * this.config.GroupAccessibilityLeftRatio)
+        win := this._WindowRect()
+        maxX := win["x"] + Round(win["w"] * this.config.GroupAccessibilityLeftRatio)
         result := []
         seen := Map()
         try elements := root.FindElements([
@@ -447,7 +501,8 @@ class ZaloUIAdapter {
         catch
             return ""
         this._AppendAccessiblePaneElements(
-            elements, result, seen, includeState, x, y, w, h, maxX)
+            elements, result, seen, includeState,
+            win["x"], win["y"], win["w"], win["h"], maxX)
         if result.Length
             return StrJoin(result, "`n")
         try elements := root.FindElements([
@@ -458,7 +513,8 @@ class ZaloUIAdapter {
         catch
             return ""
         this._AppendAccessiblePaneElements(
-            elements, result, seen, includeState, x, y, w, h, maxX)
+            elements, result, seen, includeState,
+            win["x"], win["y"], win["w"], win["h"], maxX)
         return StrJoin(result, "`n")
     }
 
@@ -517,8 +573,8 @@ class ZaloUIAdapter {
         root := this._AccessibleRoot()
         if !root
             return []
-        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
-        maxX := x + Round(w * this.config.GroupAccessibilityLeftRatio)
+        win := this._WindowRect()
+        maxX := win["x"] + Round(win["w"] * this.config.GroupAccessibilityLeftRatio)
         items := []
         try elements := root.FindElements([
             {Role: Acc.Role.ListItem},
@@ -532,8 +588,8 @@ class ZaloUIAdapter {
             catch
                 continue
             if location.w <= 0 || location.h <= 0
-                || location.x < x || location.x >= maxX
-                || location.y < y || location.y >= y + h
+                || location.x < win["x"] || location.x >= maxX
+                || location.y < win["y"] || location.y >= win["y"] + win["h"]
                 continue
 
             parts := []
@@ -614,13 +670,13 @@ class ZaloUIAdapter {
         if Trim(anchor) = ""
             return []
 
-        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
-        paneMinX := x + Round(w * 0.36)
-        paneMaxX := x + Round(w * 0.94)
-        contentMinY := y + Round(h * 0.12)
-        contentMaxY := y + Round(h * 0.86)
-        anchorY := y + Round(h * 0.55)
-        anchorX := x + Round(w * 0.65)
+        win := this._WindowRect()
+        paneMinX := win["x"] + Round(win["w"] * 0.36)
+        paneMaxX := win["x"] + Round(win["w"] * 0.94)
+        contentMinY := win["y"] + Round(win["h"] * 0.12)
+        contentMaxY := win["y"] + Round(win["h"] * 0.86)
+        anchorY := win["y"] + Round(win["h"] * 0.55)
+        anchorX := win["x"] + Round(win["w"] * 0.65)
         foundText := false
 
         ; Prefer Acc text match in the already-open chat before Ctrl+F.
@@ -953,12 +1009,9 @@ class ZaloUIAdapter {
     _ClickMessagePane() {
         if this._FocusAccRegion(["Document", "Pane"], 0.36, 0.96, 0.12, 0.87)
             return
-        if !this.config.UiUseRatioClicks
-            return
         win := this._WindowRect()
-        this._ScreenClick(
-            win["x"] + Round(win["w"] * 0.65),
-            win["y"] + Round(win["h"] * 0.45))
+        pt := this._RatioPoint(win, 0.65, 0.45)
+        this._ScreenClick(pt[1], pt[2])
         Sleep this.config.PasteDelayMs
     }
 
@@ -967,15 +1020,9 @@ class ZaloUIAdapter {
         this.Activate()
         if this._FocusAccRegion(["Text", "ComboBox", "Document"], 0.36, 0.96, 0.78, 0.98)
             return
-        if !this.config.UiUseRatioClicks {
-            Send "{Tab}"
-            Sleep this.config.PasteDelayMs
-            return
-        }
         win := this._WindowRect()
-        this._ScreenClick(
-            win["x"] + Round(win["w"] * 0.65),
-            win["y"] + win["h"] - 90)
+        pt := this._RatioPoint(win, 0.65, 0.92)
+        this._ScreenClick(pt[1], pt[2])
         Sleep this.config.PasteDelayMs + 100
     }
 

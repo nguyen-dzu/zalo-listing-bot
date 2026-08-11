@@ -59,8 +59,9 @@ Ahk2Exe /in windows\src\Bot.ahk /out windows\dist\ZaloListingBot.exe
 
 1. `WinActivate` on `ahk_exe Zalo.exe`
 2. Open group: Acc ListItem click → left-pane conversation search (never `Ctrl+F`; that is find-in-chat)
-3. On miss / wrong chat: throw → harvester skips to the next group
-4. `Ctrl+C` to copy conversation, `Ctrl+V` + `Enter` to send
-5. `[Images] ForwardHotkey` (default `^q`) to open the Forward dialog; `FindInChatHotkey` only for in-chat image anchors
+3. Ratio clicks (`SearchBoxClickX/Y`, message pane) use **client area** coordinates — recalibrate if the mouse misses
+4. On miss / wrong chat: throw → harvester skips to the next group
+5. `Ctrl+C` to copy conversation, `Ctrl+V` + `Enter` to send
+6. `[Images] ForwardHotkey` (default `^q`) to open the Forward dialog; `FindInChatHotkey` only for in-chat image anchors
 
 When Zalo updates its UI: tune `[Timing]` / `SearchBoxClickX/Y` first, then edit `ZaloUI.ahk`. The `ForwardHotkey` must match the Forward shortcut in your Zalo version.
