@@ -327,6 +327,7 @@ Check("UNIHOMES giá 7tr7", u["price"] = "7tr7", u["price"])
 Check("UNIHOMES địa chỉ", InStr(u["address"], "414/1/17") > 0, u["address"])
 Check("UNIHOMES SĐT", u["owner_phone"] = "0772988525", u["owner_phone"])
 Check("UNIHOMES PDV", u["service_price"] != "", u["service_price"])
+Check("UNIHOMES đếm marker Hình ảnh", u["image_count"] >= 1, u["image_count"])
 
 myhouse := "
 (

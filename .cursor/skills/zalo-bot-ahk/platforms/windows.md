@@ -58,8 +58,9 @@ Ahk2Exe /in windows\src\Bot.ahk /out windows\dist\ZaloListingBot.exe
 `ZaloUIAdapter` only uses:
 
 1. `WinActivate` on `ahk_exe Zalo.exe`
-2. `Ctrl+F` → type group name → `Enter`
-3. `Ctrl+C` to copy conversation, `Ctrl+V` + `Enter` to send
-4. `[Images] ForwardHotkey` (default `^q`) to open the Forward dialog
+2. Open group: Acc ListItem click → left-pane conversation search (never `Ctrl+F`; that is find-in-chat)
+3. On miss / wrong chat: throw → harvester skips to the next group
+4. `Ctrl+C` to copy conversation, `Ctrl+V` + `Enter` to send
+5. `[Images] ForwardHotkey` (default `^q`) to open the Forward dialog; `FindInChatHotkey` only for in-chat image anchors
 
-When Zalo updates its UI: tune `[Timing]` first, then edit `ZaloUI.ahk`. The `ForwardHotkey` must match the Forward shortcut in your Zalo version.
+When Zalo updates its UI: tune `[Timing]` / `SearchBoxClickX/Y` first, then edit `ZaloUI.ahk`. The `ForwardHotkey` must match the Forward shortcut in your Zalo version.

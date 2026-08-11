@@ -204,7 +204,7 @@ PromptSourceFileOnStart=1
 SourceSheet=
 SourceColumn=group_name
 ReloadSourceFileEachCycle=1
-OutputGroups=Giỏ hàng cao thiên ⏏️ 6tr Phú Nhuận Bình Thạnh|Giỏ hàng cao thiên ⬇️ 5tr9 Phú Nhuận Bình Thạnh|Giỏ Hàng "Quận Ngoại Thành" Cao Thiên|Giỏ hàng Quận số Cao Thiên|Giỏ hàng NNC Cao Thiên.
+OutputGroups=Giỏ Hàng NNC Cao Thiên|Giỏ hàng “QUẬN Ngoại Thành ” Cao Thiên|Giỏ hàng QUẬN SỐ Cao Thiên|Giỏ hàng Cao Thiên 6Triệu Phú Nhuận, Bình Thạnh|Giỏ Hàng Cao Thiên Dưới 5TR9 Phú Nhuận Bình Thạnh
 
 [Watch]
 OnlyUnreadAfterFirstCycle=1

@@ -61,6 +61,11 @@ Per room in each main group:
 **Calibrate on real Zalo:** `ImageContextCopyKeys`, `FindInChatHotkey`,
 `ImageCandidateDirection`, `ImageCandidateMaxDistancePx`, min graphic size.
 
+**Capture order (Aug 2026):** Acc text near room → Acc Graphic/Document/Pane →
+(if `image_count>0`) heuristic slots above caption → **BitBlt screen region first**,
+then context-menu / viewer. Accept CF_HDROP on clipboard. Logs: `data/queue` log
+lines prefixed `image `.
+
 ---
 
 ### 4. Room code format — DONE (Aug 2026)

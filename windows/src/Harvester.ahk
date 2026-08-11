@@ -41,7 +41,9 @@ class MessageHarvester {
                 summary["media_captured"] += result["media_captured"]
                 summary["media_failed"] += result["media_failed"]
             } catch as err {
-                summary["errors"].Push(group["group_name"] ": " err.Message)
+                ; OpenGroup miss / wrong chat → skip this group, try the next.
+                summary["errors"].Push(
+                    "skip " group["group_name"] ": " err.Message)
             }
             if this.config.HarvestSaveStateEachGroup
                 this.state.Save()

@@ -69,11 +69,11 @@ class AppConfig {
         ; ── Source groups from operator-selected CSV/XLSX + output groups ──
         this.OutputGroupNames := this._PipeList(this._Read(
             ini, "Groups", "OutputGroups",
-            'Giỏ hàng cao thiên ⏏️ 6tr Phú Nhuận Bình Thạnh'
-            . '|Giỏ hàng cao thiên ⬇️ 5tr9 Phú Nhuận Bình Thạnh'
-            . '|Giỏ Hàng "Quận Ngoại Thành" Cao Thiên'
-            . '|Giỏ hàng Quận số Cao Thiên'
-            . '|Giỏ hàng NNC Cao Thiên.'))
+            'Giỏ Hàng NNC Cao Thiên'
+            . '|Giỏ hàng “QUẬN Ngoại Thành ” Cao Thiên'
+            . '|Giỏ hàng QUẬN SỐ Cao Thiên'
+            . '|Giỏ hàng Cao Thiên 6Triệu Phú Nhuận, Bình Thạnh'
+            . '|Giỏ Hàng Cao Thiên Dưới 5TR9 Phú Nhuận Bình Thạnh'))
         this.SourceGroupFilePath := this._ResolveOptional(this._Read(
             ini, "Groups", "SourceFile", ""))
         this.SourceGroupPromptOnStart := this._Bool(
@@ -98,6 +98,11 @@ class AppConfig {
             ini, "Groups", "ListPaneClickX", 0.20)
         this.GroupListPaneClickYRatio := this._Float(
             ini, "Groups", "ListPaneClickY", 0.42)
+        ; Top of left chat list — conversation search box (not Ctrl+F in-chat).
+        this.GroupSearchBoxClickXRatio := this._Float(
+            ini, "Groups", "SearchBoxClickX", 0.18)
+        this.GroupSearchBoxClickYRatio := this._Float(
+            ini, "Groups", "SearchBoxClickY", 0.08)
         this.GroupCommunityTabClickXRatio := this._Float(
             ini, "Groups", "CommunityTabClickX", 0.28)
         this.GroupCommunityTabClickYRatio := this._Float(
@@ -116,8 +121,9 @@ class AppConfig {
             this._Int(ini, "Groups", "AccessibilityDepth", 18))
         this.GroupAccessibilityLeftRatio := this._Float(
             ini, "Groups", "AccessibilityLeftRatio", 0.52)
+        ; Kept for ini compatibility; OpenGroup always tries Acc ListItem first.
         this.PreferAccessibleConversationClick := this._Bool(
-            ini, "Groups", "PreferAccessibleConversationClick", false)
+            ini, "Groups", "PreferAccessibleConversationClick", true)
         this.VerifyActiveConversation := this._Bool(
             ini, "Groups", "VerifyActiveConversation", true)
         this.GroupListManualFile := this._Resolve(this._Read(
@@ -189,9 +195,9 @@ class AppConfig {
         this.ImageCandidateDirection := StrLower(this._Read(
             ini, "Images", "ImageCandidateDirection", "above"))
         this.ImageCandidateMinWidthPx := Max(16,
-            this._Int(ini, "Images", "ImageCandidateMinWidthPx", 60))
+            this._Int(ini, "Images", "ImageCandidateMinWidthPx", 40))
         this.ImageCandidateMinHeightPx := Max(16,
-            this._Int(ini, "Images", "ImageCandidateMinHeightPx", 60))
+            this._Int(ini, "Images", "ImageCandidateMinHeightPx", 40))
         this.ImageViewerSettleMs := Max(200,
             this._Int(ini, "Images", "ImageViewerSettleMs", 700))
         this.ImageContextCopyKey := this._Read(
@@ -202,7 +208,7 @@ class AppConfig {
         this.ImageSelectMode := StrLower(
             this._Read(ini, "Images", "ImageSelectMode", "shift_up"))
         this.ImageSelectStepPx := Max(40,
-            this._Int(ini, "Images", "ImageSelectStepPx", 80))
+            this._Int(ini, "Images", "ImageSelectStepPx", 100))
         this.FindInChatHotkey := this._Read(ini, "Images", "FindInChatHotkey", "^f")
 
         ; ── Relay mode ──

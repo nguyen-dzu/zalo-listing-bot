@@ -63,13 +63,19 @@ class ListingMediaCapturer {
                 if this.config.AutoCaptureMode = "accessibility" {
                     limit := imageCount > 0
                         ? imageCount : this.config.AutoCaptureProbeMaxImages
-                    locations := this.ui.FindImageBubblesNearMessage(anchor, limit)
+                    ; Heuristic click slots only when text markers already say
+                    ; there are photos (image_count > 0).
+                    locations := this.ui.FindImageBubblesNearMessage(
+                        anchor, limit, imageCount > 0)
                     if !locations.Length {
                         if imageCount > 0
                             throw Error("Không tìm thấy image bubble gần listing.")
                         return true
                     }
-                    this._ArchiveLocations(groupName, record, anchor, locations)
+                    captured := this._ArchiveLocations(
+                        groupName, record, anchor, locations)
+                    if captured > 0 && imageCount <= 0
+                        record["image_count"] := captured
                 } else {
                     if imageCount <= 0
                         return true
@@ -80,7 +86,7 @@ class ListingMediaCapturer {
                 this._Log("auto_capture_ok group=" groupName
                     " id=" record["id"]
                     " room=" (record.Has("room_code") ? record["room_code"] : "")
-                    " images=" imageCount)
+                    " images=" (record.Has("image_count") ? record["image_count"] : 0))
                 return true
             } catch as err {
                 if A_Index > maxRetries {

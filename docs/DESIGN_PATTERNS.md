@@ -117,7 +117,7 @@ All `Send`, `Click`, and `WinActivate` calls live here only. When Zalo changes U
 
 | Method | Role |
 |--------|------|
-| `OpenGroup(name)` | Ctrl+F → type name → Enter |
+| `OpenGroup(name)` | Acc ListItem → left-pane search box → verify; never Ctrl+F (find-in-chat) |
 | `CaptureConversationText(method)` | Copy conversation (`manual` / `selectall`) |
 | `SendTextChunks(group, chunks)` | Send multiple messages in sequence |
 | `RelayClipboardImage(group)` | Paste image from clipboard |

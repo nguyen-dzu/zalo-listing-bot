@@ -58,32 +58,65 @@ class ZaloUIAdapter {
         Sleep 300
     }
 
-    ; focus: "read" = message pane for copy; "send" = compose box for paste
+    ; focus: "read" = message pane for copy; "send" = compose box for paste.
+    ; Never use Ctrl+F here — on current Zalo PC that opens find-in-chat and
+    ; searches already-copied messages instead of switching conversations.
     OpenGroup(groupName, focus := "read") {
         this.Activate()
-        opened := this.config.PreferAccessibleConversationClick
-            && this._ClickAccessibleConversation(groupName)
-        if !opened {
-            Send "{Esc}"
-            Sleep 150
-            Send "^f"
-            Sleep this.config.SearchDelayMs
-            ; Clipboard paste preserves Vietnamese/emoji group names more
-            ; reliably than simulated Unicode keyboard input in Zalo Electron.
-            this._ReplaceFocusedText(groupName)
-            Sleep this.config.SearchDelayMs + 300
-            Send "{Enter}"
-            Sleep this.config.OpenChatDelayMs
+        this._DismissOverlayUi()
+
+        opened := this._ClickAccessibleConversation(groupName)
+        if !opened
+            opened := this._OpenGroupViaSidebarSearch(groupName)
+
+        matched := !this.config.VerifyActiveConversation
+            || this._ActiveConversationMatches(groupName)
+        if !opened || !matched {
+            this._DismissOverlayUi()
+            throw Error("Không tìm thấy nhóm: " groupName)
         }
-        if this.config.VerifyActiveConversation
-            && !this._ActiveConversationMatches(groupName)
-            throw Error("Zalo opened a different conversation than: " groupName)
-        Send "{Esc}"
-        Sleep 150
+
+        this._DismissOverlayUi()
         if focus = "send"
             this._FocusComposeBox()
         else
             this._ClickMessagePane()
+        return true
+    }
+
+    ; Close find-in-chat / search popups so the next group open starts clean.
+    _DismissOverlayUi() {
+        Loop 2 {
+            Send "{Esc}"
+            Sleep 120
+        }
+    }
+
+    ; Left-pane conversation search (Alt+1), NOT Ctrl+F message search.
+    _OpenGroupViaSidebarSearch(groupName) {
+        this.Activate()
+        Send "!1"
+        Sleep this.config.GroupListSettleMs
+
+        focused := this._FocusAccRegion(
+            ["Edit", "Text", "ComboBox"], 0.02, 0.42, 0.02, 0.20)
+        if !focused {
+            ; Always allow search-box ratio click for group open (independent of
+            ; UiUseRatioClicks, which is meant for community-list discovery).
+            win := this._WindowRect()
+            this._ScreenClick(
+                win["x"] + Round(win["w"] * this.config.GroupSearchBoxClickXRatio),
+                win["y"] + Round(win["h"] * this.config.GroupSearchBoxClickYRatio))
+            Sleep this.config.PasteDelayMs + 100
+        }
+
+        this._ReplaceFocusedText(groupName)
+        Sleep this.config.SearchDelayMs + 300
+        Send "{Enter}"
+        Sleep this.config.OpenChatDelayMs
+        ; Leave filtered search results so later opens see the full list.
+        Send "{Esc}"
+        Sleep 120
         return true
     }
 
@@ -574,15 +607,11 @@ class ZaloUIAdapter {
         return values
     }
 
-    ; Find actual message-pane graphics nearest the listing anchor. Group
-    ; avatars are excluded by pane and size/distance constraints.
-    FindImageBubblesNearMessage(anchor, maxImages := 6) {
+    ; Find image bubbles near listing text. Zalo Electron often does NOT expose
+    ; chat photos as Acc.Role.Graphic — fall back to large panes + heuristic
+    ; positions above the message text.
+    FindImageBubblesNearMessage(anchor, maxImages := 6, allowHeuristic := false) {
         if Trim(anchor) = ""
-            return []
-        this.FindMessageInConversation(anchor)
-        Sleep this.config.ImageViewerSettleMs
-        root := this._AccessibleRoot()
-        if !root
             return []
 
         WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
@@ -591,13 +620,71 @@ class ZaloUIAdapter {
         contentMinY := y + Round(h * 0.12)
         contentMaxY := y + Round(h * 0.86)
         anchorY := y + Round(h * 0.55)
+        anchorX := x + Round(w * 0.65)
+        foundText := false
 
+        ; Prefer Acc text match in the already-open chat before Ctrl+F.
+        textLoc := this._FindMessageTextLocation(
+            anchor, paneMinX, paneMaxX, contentMinY, contentMaxY)
+        if textLoc {
+            anchorY := textLoc["y"]
+            anchorX := textLoc["x"]
+            foundText := true
+        } else {
+            this.FindMessageInConversation(anchor)
+            Sleep this.config.ImageViewerSettleMs
+            textLoc := this._FindMessageTextLocation(
+                anchor, paneMinX, paneMaxX, contentMinY, contentMaxY)
+            if textLoc {
+                anchorY := textLoc["y"]
+                anchorX := textLoc["x"]
+                foundText := true
+            }
+        }
+
+        candidates := this._CollectImageCandidateLocations(
+            paneMinX, paneMaxX, contentMinY, contentMaxY, anchorY)
+        this._SortLocationsByDistance(candidates)
+
+        ; Only invent click slots when caller knows the listing has photos.
+        if !candidates.Length && foundText && allowHeuristic {
+            step := this.config.ImageSelectStepPx
+            Loop maxImages {
+                clickY := Max(contentMinY + 20, anchorY - (A_Index * step))
+                clickX := anchorX
+                candidates.Push(Map(
+                    "x", clickX,
+                    "y", clickY,
+                    "left", clickX - 120,
+                    "top", clickY - 90,
+                    "w", 240,
+                    "h", 180,
+                    "distance", A_Index * step
+                ))
+            }
+            this._LogImage("heuristic_slots anchor=" anchor
+                " count=" candidates.Length)
+        }
+
+        while candidates.Length > maxImages
+            candidates.Pop()
+        this._LogImage("image_candidates anchor=" anchor
+            " found_text=" (foundText ? 1 : 0)
+            " heuristic=" (allowHeuristic ? 1 : 0)
+            " count=" candidates.Length)
+        return candidates
+    }
+
+    _FindMessageTextLocation(anchor, paneMinX, paneMaxX, contentMinY, contentMaxY) {
+        root := this._AccessibleRoot()
+        if !root
+            return 0
         try textElements := root.FindElements([
             {Role: Acc.Role.StaticText},
             {Role: Acc.Role.Text}
         ], Acc.TreeScope.Descendants, 0, this.config.GroupAccessibilityDepth)
         catch
-            textElements := []
+            return 0
         for element in textElements {
             matched := false
             for value in this._AccessibleElementStrings(element) {
@@ -611,29 +698,49 @@ class ZaloUIAdapter {
             try location := element.Location
             catch
                 continue
-            if location.x >= paneMinX && location.x <= paneMaxX {
-                anchorY := location.y
-                break
+            if location.x >= paneMinX && location.x <= paneMaxX
+                && location.y >= contentMinY && location.y <= contentMaxY {
+                return Map(
+                    "x", location.x + Round(location.w / 2),
+                    "y", location.y,
+                    "w", location.w,
+                    "h", location.h
+                )
             }
         }
+        return 0
+    }
 
-        candidates := []
-        try graphics := root.FindElements(
+    _CollectImageCandidateLocations(
+        paneMinX, paneMaxX, contentMinY, contentMaxY, anchorY
+    ) {
+        root := this._AccessibleRoot()
+        if !root
+            return []
+        roles := [
             {Role: Acc.Role.Graphic},
-            Acc.TreeScope.Descendants, 0, this.config.GroupAccessibilityDepth)
+            {Role: Acc.Role.Document},
+            {Role: Acc.Role.Pane},
+            {Role: Acc.Role.Animation}
+        ]
+        candidates := []
+        seen := Map()
+        try elements := root.FindElements(
+            roles, Acc.TreeScope.Descendants, 0,
+            this.config.GroupAccessibilityDepth)
         catch
             return []
-        for graphic in graphics {
-            try location := graphic.Location
+        for element in elements {
+            try location := element.Location
             catch
                 continue
             centerY := location.y + Round(location.h / 2)
             distance := Abs(centerY - anchorY)
             if this.config.ImageCandidateDirection = "above"
-                && centerY > anchorY
+                && centerY > anchorY + 40
                 continue
             if this.config.ImageCandidateDirection = "below"
-                && centerY < anchorY
+                && centerY < anchorY - 40
                 continue
             if location.x < paneMinX || location.x > paneMaxX
                 || location.y < contentMinY || location.y > contentMaxY
@@ -641,6 +748,13 @@ class ZaloUIAdapter {
                 || location.h < this.config.ImageCandidateMinHeightPx
                 || distance > this.config.ImageCandidateMaxDistancePx
                 continue
+            ; Skip ultra-wide chrome strips (header/footer).
+            if location.w > (paneMaxX - paneMinX) * 0.95 && location.h < 80
+                continue
+            key := location.x ":" location.y ":" location.w ":" location.h
+            if seen.Has(key)
+                continue
+            seen[key] := true
             candidates.Push(Map(
                 "x", location.x + Round(location.w / 2),
                 "y", centerY,
@@ -651,10 +765,6 @@ class ZaloUIAdapter {
                 "distance", distance
             ))
         }
-
-        this._SortLocationsByDistance(candidates)
-        while candidates.Length > maxImages
-            candidates.Pop()
         return candidates
     }
 
@@ -672,46 +782,71 @@ class ZaloUIAdapter {
         }
     }
 
-    ; Zalo Electron often ignores Ctrl+C for chat images. Prefer context-menu
-    ; "Copy hình ảnh", then viewer hotkey, then screen BitBlt of the Acc bounds.
+    ; Prefer on-screen BitBlt (Electron-safe), then context-menu / viewer copy.
+    ; Zalo often puts CF_HDROP or nothing on Ctrl+C.
     CopyImageAt(location) {
         this.Activate()
-        if this._CopyImageViaContextMenu(location["x"], location["y"])
+        if location.Has("left") && location.Has("top")
+            && location.Has("w") && location.Has("h")
+            && location["w"] >= 8 && location["h"] >= 8 {
+            ; Bring bubble into focus without relying on clipboard.
+            this._ScreenClick(location["x"], location["y"])
+            Sleep this.config.PasteDelayMs + 100
+            if this._CopyScreenRegionToClipboard(
+                location["left"], location["top"], location["w"], location["h"]) {
+                this._LogImage("copy_bitblt ok "
+                    . location["w"] "x" location["h"])
+                return true
+            }
+        }
+
+        if this._CopyImageViaContextMenu(location["x"], location["y"]) {
+            this._LogImage("copy_context_menu ok")
             return true
+        }
 
         A_Clipboard := ""
+        this._ScreenClick(location["x"], location["y"])
+        Sleep this.config.ImageViewerSettleMs
+        ; Some Zalo builds need double-click to open the image viewer.
         this._ScreenClick(location["x"], location["y"])
         Sleep this.config.ImageViewerSettleMs
         Send this.config.ImageCopyHotkey
         Sleep this.config.PasteDelayMs + 200
         if this._WaitForClipboardImage() {
             Send "{Esc}"
+            this._LogImage("copy_viewer_hotkey ok")
             return true
         }
         Send "{Esc}"
         Sleep 150
-
-        if location.Has("left") && location.Has("top")
-            && location.Has("w") && location.Has("h")
-            && location["w"] > 0 && location["h"] > 0 {
-            if this._CopyScreenRegionToClipboard(
-                location["left"], location["top"], location["w"], location["h"])
-                return true
-        }
+        this._LogImage("copy_failed at "
+            . location["x"] "," location["y"])
         return false
     }
 
     _CopyImageViaContextMenu(x, y) {
-        for key in this._ImageContextCopyKeys() {
+        ; Try accelerator keys, then arrow-navigate common Zalo menu rows.
+        sequences := []
+        for key in this._ImageContextCopyKeys()
+            sequences.Push(key)
+        sequences.Push("{Down}{Enter}")
+        sequences.Push("{Down}{Down}{Enter}")
+        sequences.Push("{Down}{Down}{Down}{Enter}")
+
+        for seq in sequences {
             A_Clipboard := ""
             this._ScreenClick(x, y, "Right")
-            Sleep this.config.PasteDelayMs + 250
-            Send key
-            Sleep this.config.PasteDelayMs + 250
+            Sleep this.config.PasteDelayMs + 350
+            Send seq
+            Sleep this.config.PasteDelayMs + 350
             if this._WaitForClipboardImage()
                 return true
+            ; "Lưu hình ảnh" / Save As may open a dialog — cancel it.
             Send "{Esc}"
             Sleep 120
+            Send "{Esc}"
+            Sleep 80
         }
         return false
     }
@@ -744,10 +879,10 @@ class ZaloUIAdapter {
     }
 
     ; ClipWait without WaitForAnyData only waits for text — Zalo image copy
-    ; puts CF_DIB/PNG and would always time out.
+    ; puts CF_DIB/PNG/HDROP and would always time out.
     _WaitForClipboardImage() {
         ClipWait(this.config.ClipWaitSeconds, 1)
-        return this._ClipboardHasBitmapImage()
+        return this._ClipboardHasImage()
     }
 
     ; Last-resort capture of the on-screen Acc Graphic rectangle (Electron-safe).
@@ -792,6 +927,17 @@ class ZaloUIAdapter {
         }
         DllCall("CloseClipboard")
         return this._WaitForClipboardImage()
+    }
+
+    _LogImage(message) {
+        try {
+            logPath := this.config.HasProp("QueueLogFile")
+                ? this.config.QueueLogFile : ""
+            if logPath != ""
+                FileAppend "[" NowStamp() "] image " message "`n",
+                    logPath, "UTF-8-RAW"
+        } catch {
+        }
     }
 
     _AdvanceGroupListScroll() {
@@ -913,22 +1059,21 @@ class ZaloUIAdapter {
         return true
     }
 
-    ; Search within the open conversation for a text anchor (room code, address, …).
+    ; Search within the already-open conversation only (images/anchors).
+    ; Do not call this to open a group — use OpenGroup instead.
     FindMessageInConversation(query) {
         if Trim(query) = ""
             throw Error("Anchor tìm tin rỗng.")
         this.Activate()
         this._ClickMessagePane()
-        Send "{Esc}"
-        Sleep 150
+        this._DismissOverlayUi()
         Send this.config.FindInChatHotkey
         Sleep this.config.SearchDelayMs + 100
-        SendText query
+        this._ReplaceFocusedText(query)
         Sleep this.config.SearchDelayMs + 200
         Send "{Enter}"
         Sleep this.config.CaptureSettleMs
-        Send "{Esc}"
-        Sleep 150
+        this._DismissOverlayUi()
         this._ClickMessagePane()
         return true
     }
@@ -972,17 +1117,23 @@ class ZaloUIAdapter {
     }
 
     ; Copy image from the bubble the operator selected.
-    ; Zalo: context-menu "Copy hình ảnh" first; Ctrl+C is usually text-only.
+    ; Prefer BitBlt of a small region around the cursor, then context menu / Ctrl+C.
     CopyImageFromSelection() {
         this.Activate()
         old := ClipboardAll()
 
+        ; Screen-capture around current mouse (Zalo bubble under cursor).
+        CoordMode("Mouse", "Screen")
+        MouseGetPos(&mx, &my)
+        if this._CopyScreenRegionToClipboard(mx - 120, my - 90, 240, 180)
+            return true
+
         for key in this._ImageContextCopyKeys() {
             A_Clipboard := ""
             Send "{AppsKey}"
-            Sleep 280
+            Sleep 350
             Send key
-            Sleep this.config.PasteDelayMs + 200
+            Sleep this.config.PasteDelayMs + 250
             if this._WaitForClipboardImage()
                 return true
             Send "{Esc}"
@@ -1000,7 +1151,12 @@ class ZaloUIAdapter {
     }
 
     _ClipboardHasImage() {
-        return this._ClipboardHasBitmapImage()
+        if this._ClipboardHasBitmapImage()
+            return true
+        ; Zalo "Copy hình ảnh" / Save sometimes puts a file path (CF_HDROP).
+        if DllCall("IsClipboardFormatAvailable", "UInt", 15)  ; CF_HDROP
+            return true
+        return false
     }
 
     _ClipboardHasBitmapImage() {

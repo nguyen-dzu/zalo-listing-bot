@@ -31,7 +31,7 @@ class ListingParser {
     static MAP_LINK_PATTERN := "i)(?:maps\.(?:app\.)?goo\.gl|google\.com/maps|goo\.gl/maps)"
     ; VN mobile: 0… or +84/84… with optional spaces/dots/dashes between digits.
     static PHONE_FRAGMENT_PATTERN := "(?:\+?84|0)(?:[\s.\-]*\d){9}"
-    static DEFAULT_IMAGE_MARKER := "i)\[(?:Hình ảnh|Ảnh|Image|Photo)\]"
+    static DEFAULT_IMAGE_MARKER := "i)(?:\[(?:Hình ảnh|Ảnh|Image|Photo)\]|👇\s*Hình\s*ảnh|📷|🖼️|(?:^|\s)Hình ảnh(?:\s|$))"
     static DEFAULT_MIN_LISTING_SCORE := 3
     ; "Minh Anh 18:05" — Zalo prints a sender/time header above each message
     static DEFAULT_NOISE_PATTERN := "i)^\S.{0,60}\s\d{1,2}:\d{2}(?:\s*(?:AM|PM|SA|CH))?$"
