@@ -66,7 +66,7 @@ the remainder as inputs. `blocklist.csv` still supplies banned keywords.
 | 4 | Check `windows\data\listings\` and `data\queue\` | Per-listing JSON and queue event exist |
 | 5 | Press `Ctrl+Shift+H` again on same posts | All counted as Duplicate, nothing new saved |
 | 6 | Select all images for P001 → `Ctrl+Shift+M` → enter P001 | A new media generation and `current.txt` exist; queue becomes ready |
-| 7 | `Ctrl+Shift+G` | Images arrive first; one text contains up to 5 rooms separated by `=======================` |
+| 7 | `Ctrl+Shift+G` | Per room: images first, then text, then a separate `=======` message |
 | 8 | Stop during a session (`Ctrl+Shift+K`) then publish again | Checkpointed groups are skipped; remaining leases resume |
 | 9 | Kill after a send intent, restart | Entry is `uncertain`; `Ctrl+Shift+U` offers Retry/Skip |
 | 10 | Type `SĐT P001`, select → `Ctrl+Shift+P` | Bot pastes phone, writes `access_log.json` |

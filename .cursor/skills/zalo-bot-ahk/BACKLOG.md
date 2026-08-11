@@ -8,30 +8,31 @@ Updated: Aug 2026. Agent **must read this file** before changing publish/parser/
 
 ### 1. Output format — 1 room per cycle: images → text → separator (Aug 2026)
 
-**Default:** `[Output] OneMessagePerListing=1`, `SendSeparatorAsMessage=1`, `LeaseSize=1`
+**Forced:** `OneMessagePerListing=1`, `SendSeparatorAsMessage=1`, `LeaseSize=1`,
+`PublishAfterGroups=1`. Multi-room blob / harvest batch-5 đã gỡ.
 
 Per room in each main group:
 
-1. Paste archived images
+1. Paste từng ảnh đã archive
 2. Send formatted text for that room
-3. Send `=======================` as its own message
+3. Send `=======` as its own message
 4. Next room
-
-Set `OneMessagePerListing=0` + `ListingsPerMessage=5` for the old multi-room text blob.
 
 ---
 
-### 2. Phone — copy / release — PARTIAL
+### 2. Phone — extract / classify / output — DONE (Aug 2026)
 
 **Done:**
 
-- `NormalizeRoomCode()` before save + lookup (`Storage.GetByRoomCode`, `ParsePhoneRequest`)
-- `ZaloUI.PasteToActiveChat()` focuses compose box before paste (`refocus=false` on second focus)
+- `ExtractPhoneNumbers` + `NormalizePhone` (`0` / `+84`, chấm/gạch/space → 10 số)
+- `ClassifyCarrier` (Viettel/Vina/Mobi/…)
+- Publish `MaskPhone=0`: `📞 Số chủ: 090… (Mobifone)`
+- `NormalizeRoomCode()` + `ParsePhoneRequest` + compose-focus paste for hotkey release
 
 **Still manual on real Zalo:**
 
-- Test harvest → publish masked → type `SĐT P102` → verify paste in main group chat
-- Tune `[Timing] PasteDelayMs` / `OpenChatDelayMs` if compose focus misses
+- Test harvest → publish shows Số chủ with carrier
+- Hotkey `SĐT P102` → paste phone in chat
 
 ---
 
@@ -41,18 +42,24 @@ Set `OneMessagePerListing=0` + `ListingsPerMessage=5` for the old multi-room tex
 
 1. Harvest stores the room and queues it as `media_pending` when `MediaRequired=1`.
 2. With `[Images] AutoCapture=1`, bot finds the listing anchor, locates nearby
-   accessibility `Graphic` elements, and copies each bitmap to a separate `.clip`.
-   This avoids `Ctrl+A` selection caching the group avatar.
-3. Publisher restores the local archive for every output group, then sends one five-room text (`ImagesBeforeText=1`).
-4. A v2 manifest marks validated bitmap caches. Legacy/unvalidated media is
+   accessibility `Graphic` elements, and archives each image to a separate `.clip`.
+3. **Copy path (Zalo Electron, Aug 2026):** không dựa vào `Ctrl+C` (Zalo thường
+   không đưa bitmap vào clipboard). Thứ tự:
+   1. Chuột phải → phím `c` / `i` ("Copy hình ảnh") + `ClipWait(timeout, 1)`
+   2. Fallback mở viewer + `ImageCopyHotkey`
+   3. Fallback BitBlt vùng Acc Graphic → `CF_BITMAP`
+4. Publisher restores the local archive for every output group, then sends
+   images before text (`ImagesBeforeText=1`). Helper `SetClipboardFile`
+   (CF_HDROP) sẵn sàng nếu cần dán dạng file.
+5. A v2 manifest marks validated bitmap caches. Legacy/unvalidated media is
    invalidated and never published; `media_pending` items are retried each cycle.
-5. Listing IDs include normalized source group + content hash, preventing
+6. Listing IDs include normalized source group + content hash, preventing
    cross-group posts from sharing the same media directory.
 
 **Manual fallback:** `Ctrl+Shift+M` (archive by room code) or `Ctrl+Shift+I` (RelayImages).
 
-**Calibrate on real Zalo:** `FindInChatHotkey`, `ImageCandidateDirection`,
-`ImageCandidateMaxDistancePx`, minimum graphic width/height.
+**Calibrate on real Zalo:** `ImageContextCopyKeys`, `FindInChatHotkey`,
+`ImageCandidateDirection`, `ImageCandidateMaxDistancePx`, min graphic size.
 
 ---
 
@@ -90,7 +97,7 @@ Added to `blocklist.example.csv` + tests:
 
 - Append-only `events.jsonl` + periodic `snapshot.json`
 - Per-listing JSON files; automatic migration from legacy `listings.json`
-- FIFO/priority lease of 5 rooms, bounded sessions, cooldown
+- FIFO/priority lease of 1 room, bounded sessions, cooldown
 - Per-output-group media/text checkpoints
 - Retry/backoff/dead-letter and expired-lease recovery
 - `uncertain` state for crash-after-Enter; `Ctrl+Shift+U` Retry/Skip
@@ -101,7 +108,10 @@ Added to `blocklist.example.csv` + tests:
 ### 7. Incremental large-group watch — IMPLEMENTED / NEEDS WINDOWS E2E
 
 - First-ever cycle scans all discovered groups sequentially to establish baseline.
-- Later cycles select textual unread groups plus an oldest-first audit shard.
+- Later cycles: Acc sidebar unread badges (`FindUnreadSidebarGroups`) →
+  `HarvestScheduler` (unread + oldest-first audit). Flat-text DetectUnread is fallback.
+- Badge numbers `1–999` count as unread even without “tin nhắn mới”.
+- In-chat: newest-first scan **breaks** on first seen hash (no full-history re-walk).
 - `MaxGroupsPerCycle` and `MaxBatchesPerWatchCycle` bound GUI/send work.
 - State saves after each group; a group with new rooms is published before the next source.
 - Publish delays use configurable jitter; watch no longer rechecks all groups.
@@ -109,7 +119,7 @@ Added to `blocklist.example.csv` + tests:
   Set `TextOnly=1` only for text-debug. Output names stay UTF-8 clipboard paste.
 - Unchanged conversation hash skips re-copy; newest unseen listings are processed first.
 
-**Risk:** Some Zalo builds may not expose unread state through MSAA. The
+**Risk:** Some Zalo builds may not expose unread badges through MSAA. The
 oldest-first audit shard still provides eventual coverage.
 
 ### 8. CSV/XLSX source groups — IMPLEMENTED / NEEDS WINDOWS E2E
@@ -135,7 +145,7 @@ oldest-first audit shard still provides eventual coverage.
 
 ## P2 — Ops & DX
 
-- [x] Update system design for durable lease-five flow
+- [x] Update system design for durable one-room lease flow
 - [x] `Simulate.ahk` includes a temporary 5,000-record queue stress test
 - [ ] New-machine setup script (check AHK path, Zalo process)
 

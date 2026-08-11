@@ -22,12 +22,12 @@ trong `config.ini`; từ khóa cấm đọc từ `blocklist.csv`/Excel.
 |-----------|--------|
 | Harvest batch | `Ctrl+Shift+J`: harvest → publish một session |
 | Watch loop | Tự chạy khi mở script (`[Startup] AutoRunWatch=1`) — không cần hotkey |
-| Auto archive ảnh | Accessibility tìm graphic bubble gần mã phòng, copy từng bitmap vào `.clip` riêng |
+| Auto archive ảnh | Acc tìm graphic gần mã phòng → chuột phải "Copy hình ảnh" (`ClipWait` binary) → BitBlt fallback → `.clip` |
 | Parser linh hoạt | Nhận tin không có label chuẩn: *cho thuê*, *giá 5tr7*, *Nc/Dv/PDV*, link Google Maps, SĐT dạng `0377.785.784` |
 | Heuristic | `LooksLikeListing()` — không bắt buộc `Địa chỉ:` / `Giá:` / `SĐT:` nếu `RequiredFields` để trống |
 | Blocklist | `LOCK`, `Chốt`, `Đã chốt`, … — so khớp không phân biệt hoa thường |
 | State | `harvest_state/`: shard theo nhóm cho hash trùng, capture snapshot, revisit |
-| Durable queue | Lease 5 phòng/lượt, checkpoint theo nhóm output, retry/dead-letter, resume sau restart |
+| Durable queue | Lease 1 phòng/lượt, checkpoint theo nhóm output, retry/dead-letter, resume sau restart |
 | Media archive | Lưu selection ảnh thành `.clip` một lần, tái sử dụng cho mọi nhóm output |
 | Storage | Mỗi listing một file JSON; migrate tự động từ `listings.json` cũ |
 | ZaloUI | Tách `OpenGroup(focus)` `"read"` vs `"send"`; delay có thể chỉnh trong `config.ini` |
@@ -233,15 +233,15 @@ AccessibilityFallback=selectall
 RequiredFields=             ; để trống = heuristic LooksLikeListing
 
 [Batch]
-Size=5
+Size=1
 RecheckAfterPublish=0
 
 [Output]
 OneMessagePerListing=1
 ListingsPerMessage=1
-ListingSeparator=======================
+ListingSeparator=======
 SendSeparatorAsMessage=1
-MaskPhone=1
+MaskPhone=0                  ; 0 = hiện SĐT + nhà mạng trên Số chủ
 
 [Images]
 MediaRequired=1             ; có marker ảnh → archive trước khi ready
@@ -297,8 +297,9 @@ OpenGroup(read) → CaptureConversationText → SplitBlocks
 **Watch loop incremental:**
 
 1. Vòng đầu quét tuần tự toàn bộ nhóm để tạo baseline `last_harvest_at`.
-2. Từ vòng hai, đọc marker unread từ tab nhóm; ưu tiên nhóm có tin mới.
-3. Thêm một audit shard nhỏ theo nhóm lâu chưa kiểm tra để tránh bỏ sót unread.
+2. Từ vòng hai: Acc sidebar badge chưa đọc (số 1–999 hoặc “tin nhắn mới”);
+   ưu tiên nhóm unread, kèm audit shard nhóm lâu chưa kiểm tra.
+3. Trong chat: duyệt tin mới nhất trước, dừng khi gặp hash đã thấy (không quét lại tin cũ).
 4. Xử lý tuần tự, lưu state; nhóm có phòng mới được publish trước khi sang nhóm nguồn tiếp theo.
 5. Mỗi chu kỳ có giới hạn nhóm và publish, sau đó nghỉ `[Watch] IntervalMs`.
 6. Conversation không đổi (hash cũ) → bỏ qua, không copy lại tin đã đọc.
@@ -322,7 +323,7 @@ Harvest hợp lệ → lưu listing JSON → enqueue
   → AutoCapture=1: archive ảnh gần mã phòng
   → lease 1 phòng
   → mở từng nhóm output
-  → paste ảnh → gửi text 1 phòng → gửi ngăn cách =======================
+  → paste từng ảnh → gửi text 1 phòng → gửi ngăn cách =======
   → phòng tiếp theo
   → checkpoint theo nhóm → completed
 ```
@@ -340,13 +341,13 @@ windows/
 ├── src/
 │   ├── Bot.ahk           # Entry + hotkeys
 │   ├── Parser.ahk        # Parse / heuristic / FormatBlock
-│   ├── Harvester.ahk     # Harvest + batch + revisit
+│   ├── Harvester.ahk     # Harvest tuần tự + revisit
 │   ├── GroupActivity.ahk # Unread detector + bounded scheduler
 │   ├── MediaCapturer.ahk # Auto archive ảnh khi harvest
-│   ├── Composer.ahk      # 5 phòng / message
+│   ├── Composer.ahk      # 1 phòng / message text
 │   ├── QueueStore.ahk    # Journal, snapshot, lease/retry/checkpoint
 │   ├── MediaStore.ahk    # ClipboardAll archive paths
-│   ├── Publisher.ahk     # Resumable publish service
+│   ├── Publisher.ahk     # One-room publish service
 │   ├── ZaloUI.ahk        # UI automation Zalo
 │   ├── BlockList.ahk
 │   ├── Config.ahk
@@ -395,7 +396,7 @@ nếu muốn quét lại từ đầu.
 | Extension AHK không resolve exe | Sửa interpreter path; **không** mở `.exe` như file text |
 | Test fail "Đã chốt" | Đã fix case-insensitive trong `BlockList.ahk` — pull code mới |
 | Bot không thấy nhóm | Tên phải khớp 100% (kể cả emoji, dấu ngoặc kép trong tên) |
-| Không có ảnh khi publish | `Relay TextOnly=0`, `AutoCapture=1`, copy lại `config.example.ini` → `config.ini` |
+| Không có ảnh khi publish | `Relay TextOnly=0`, `AutoCapture=1`, copy lại `config.example.ini` → `config.ini`; thử `ImageContextCopyKeys=c,i` |
 
 ---
 

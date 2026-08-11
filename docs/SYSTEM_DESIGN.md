@@ -98,13 +98,12 @@ group content is copied on a later cycle.
 
 ```
 ReclaimExpiredLeases()
-LeaseNext(5) × MaxBatchesPerSession
+LeaseNext(1) × MaxBatchesPerSession
 For each group with type=main (open once):
-  For each lease:
-    restore archived .clip media and paste in room order
-    checkpoint each media paste
-    ComposeBatch(5 rooms, "=======================")
-    send one text message and checkpoint group delivery
+  For each one-room lease:
+    restore each archived .clip and paste (one image message each)
+    send room text and checkpoint
+    send separator message "======="
 CompleteLease() only after every main group succeeds
 ```
 
@@ -129,23 +128,18 @@ Select `SĐT P001` → look up the per-listing JSON store → paste phone into a
 ## 5. Output format
 
 ```text
+[image messages for room 1]
 📍 Địa chỉ: 123 Nguyễn Văn A, Quận 1
 🔑 Số phòng: P001
-💰 Giá: 5 triệu/tháng
-⚡ Điện: 3.500đ/kWh
-💧 Nước: 100k/người
-🧾 Dịch vụ: 150k/tháng
-ℹ️ Thông tin: 25m2, full nội thất
-📞 Số chủ: Nhắn bot "SĐT P001" để lấy số
-
-=======================
-
+…
+=======          ← separate Zalo message
+[image messages for room 2]
 📍 Địa chỉ: 45 Lê Lợi, Quận 1
-...
+…
+=======
 ```
 
-Each Zalo text message contains at most five room blocks separated by
-`=======================`. The final lease may contain fewer than five rooms.
+Each room is its own cycle: images → text → separator message `=======`.
 
 ## 6. Excel / CSV files
 

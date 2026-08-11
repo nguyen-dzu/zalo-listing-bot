@@ -149,14 +149,15 @@ class AppConfig {
         ; ── Output ──
         this.Separator := this._Read(ini, "Output", "Separator", "------------{group}------------")
         this.MaxMessageChars := this._Int(ini, "Output", "MaxMessageChars", 1800)
-        this.MaskPhone := this._Bool(ini, "Output", "MaskPhone", true)
+        ; 0 = hiện SĐT + nhà mạng trên dòng Số chủ (mặc định publish).
+        this.MaskPhone := this._Bool(ini, "Output", "MaskPhone", false)
         this.PhoneHint := this._Read(ini, "Output", "PhoneHint", 'Nhắn bot "SĐT {room_code}" để lấy số')
-        this.OneMessagePerListing := this._Bool(ini, "Output", "OneMessagePerListing", true)
-        this.ListingsPerMessage := Max(1, this._Int(ini, "Output", "ListingsPerMessage", 1))
-        this.ListingSeparator := this._Read(ini, "Output", "ListingSeparator", "=======================")
+        ; One room = images → text → separator message. Multi-room blob is retired.
+        this.OneMessagePerListing := true
+        this.ListingsPerMessage := 1
+        this.ListingSeparator := this._Read(ini, "Output", "ListingSeparator", "=======")
         ; After each room text, send ListingSeparator as its own Zalo message.
-        this.SendSeparatorAsMessage := this._Bool(
-            ini, "Output", "SendSeparatorAsMessage", true)
+        this.SendSeparatorAsMessage := true
         this.IncludeGroupHeader := this._Bool(ini, "Output", "IncludeGroupHeader", false)
 
         ; ── Images ──
@@ -195,6 +196,9 @@ class AppConfig {
             this._Int(ini, "Images", "ImageViewerSettleMs", 700))
         this.ImageContextCopyKey := this._Read(
             ini, "Images", "ImageContextCopyKey", "c")
+        ; Zalo menu accelerator for "Copy hình ảnh" is usually c or i.
+        this.ImageContextCopyKeys := this._Read(
+            ini, "Images", "ImageContextCopyKeys", "c,i")
         this.ImageSelectMode := StrLower(
             this._Read(ini, "Images", "ImageSelectMode", "shift_up"))
         this.ImageSelectStepPx := Max(40,
@@ -249,8 +253,8 @@ class AppConfig {
         this.CaptureSettleMs := this._Int(ini, "Timing", "CaptureSettleMs", 600)
         this.AfterPublishRecheckMs := this._Int(ini, "Timing", "AfterPublishRecheckMs", 800)
 
-        ; ── Batch harvest/publish ──
-        this.BatchSize := Max(1, this._Int(ini, "Batch", "Size", 5))
+        ; ── Batch harvest/publish (legacy keys; Size forced to 1) ──
+        this.BatchSize := 1
         this.RecheckAfterPublish := this._Bool(ini, "Batch", "RecheckAfterPublish", true)
         this.BetweenBatchesMs := this._Int(ini, "Batch", "BetweenBatchesMs", 2000)
 
@@ -261,15 +265,13 @@ class AppConfig {
             this._Int(ini, "Harvest", "MaxGroupsPerCycle", 50))
         this.HarvestAuditGroupsPerCycle := Max(0,
             this._Int(ini, "Harvest", "AuditGroupsPerCycle", 10))
-        this.HarvestPublishAfterGroups := Max(1,
-            this._Int(ini, "Harvest", "PublishAfterGroups", 1))
+        ; Publish to main groups after each source group that saved rooms.
+        this.HarvestPublishAfterGroups := 1
         this.HarvestSaveStateEachGroup := this._Bool(
             ini, "Harvest", "SaveStateEachGroup", true)
 
         ; ── Durable publish queue ──
-        this.LeaseSize := this.OneMessagePerListing
-            ? 1
-            : Max(1, this._Int(ini, "PublishQueue", "LeaseSize", 5))
+        this.LeaseSize := 1
         this.LeaseTimeoutMs := Max(60000,
             this._Int(ini, "PublishQueue", "LeaseTimeoutMs", 7200000))
         this.MaxPublishAttempts := Max(1,

@@ -67,7 +67,7 @@ Chỉ commit khi user yêu cầu. Không commit private runtime data/config.
 |---|--------|--------|
 | 1 | **1 phòng = ảnh → text → separator** | Done — `OneMessagePerListing=1` |
 | 2 | **Phone paste on Zalo** | Partial — normalize + focus fix |
-| 3 | **Copy ảnh trước text** | Archive `.clip` once; Windows E2E pending |
+| 3 | **Copy ảnh trước text** | Context-menu + `ClipWait(,1)` + BitBlt; E2E pending |
 | 4 | **Room code format** | Done — `NormalizeRoomCode()` |
 | 5 | **Blocklist keywords** | Done — see `blocklist.example.csv` |
 
@@ -78,8 +78,9 @@ Chỉ commit khi user yêu cầu. Không commit private runtime data/config.
 ### Harvest pipeline
 
 ```text
+Watch cycle 2+: FindUnreadSidebarGroups (Acc badge) → HarvestScheduler
 OpenGroup(read) → CaptureConversationText → SplitBlocks
-  → duplicate hash → skip
+  → newest-first; first seen hash → stop (không quét tin cũ)
   → BlockList.Match → skip (blocked)
   → Validate (LooksLikeListing + optional RequiredFields) → skip (invalid)
   → SaveListing
@@ -98,13 +99,14 @@ Fields: `address`, `room_code`, `price`, `electric_price`, `water_price`, `utili
 
 - `RULES` order: **Giá điện trước Giá**
 - `_InferFields`: giá `5tr7`, SĐT, địa chỉ ngoặc, `Nc`/`Dv`/`PDV`
-- `ExtractPhone`: ưu tiên dòng ☎/Liên hệ; hỗ trợ `0377.785.784`
+- `ExtractPhone` / `ExtractPhoneNumbers`: `0`/`+84`, chấm/gạch/space; `ClassifyCarrier`
+- Output `MaskPhone=0`: `📞 Số chủ: 090… (Mobifone)`
 
-### Durable batch publish
+### Durable one-room publish
 
-`PublishQueueStore` journals queue transitions and leases five eligible rooms at a time.
-`DurableListingPublisher` opens each output group once, restores local media archives,
-sends one five-room text, and checkpoints each group before completing the lease.
+`PublishQueueStore` journals queue transitions and leases **one** eligible room at a time.
+`DurableListingPublisher` opens each output group, restores media archives, then for
+each room: paste images → send text → send separator `=======`.
 
 States: `media_pending → ready → leased → sending → completed`, with
 `retry_wait`, `dead_letter`, and `uncertain` recovery paths.
@@ -151,23 +153,17 @@ Path AHK thường gặp:
 
 ---
 
-## Output format (default: 5 rooms / message)
+## Output format (1 room / cycle)
 
-```text
-📍 Địa chỉ: …
-🔑 Số phòng: P102
-…
-=======================
-📍 Địa chỉ: …
-…
-```
+Per room, per main group:
 
-Config: `[Output] ListingsPerMessage=5`, `ListingSeparator=======================`
+1. Paste từng ảnh
+2. Gửi text phòng
+3. Gửi message riêng `=======`
+4. Phòng tiếp theo
 
-Publish: restore **archived images first** → **1 message text** / 5 rooms. Source
-groups are not reopened during publish.
-
-Set `[Output] OneMessagePerListing=1` for one room per Zalo message.
+Config khóa: `LeaseSize=1`, `ListingSeparator=======`, `SendSeparatorAsMessage=1`.
+Source groups are not reopened during publish.
 
 ---
 

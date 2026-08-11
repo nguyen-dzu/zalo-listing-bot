@@ -29,7 +29,8 @@ class ListingParser {
     ; Freeform posts often start with rental keywords instead of "Địa chỉ:"
     static RENTAL_START_PATTERN := "i)^\s*(?:🏠\s*|📍\s*|🚩\s*|👉\s*|👇\s*|💎\s*|🚥\s*)?(?:Cho thuê|Cần cho thuê|Sang CHDV|CHDV|Phòng trọ|Căn hộ|Nhà nguyên căn|Studio|Phòng|Giữa tháng|Giá|Hình ảnh.*trống|trống\s+mã)\b"
     static MAP_LINK_PATTERN := "i)(?:maps\.(?:app\.)?goo\.gl|google\.com/maps|goo\.gl/maps)"
-    static PHONE_FRAGMENT_PATTERN := "i)(0[\d\.\s\-]{9,16})"
+    ; VN mobile: 0… or +84/84… with optional spaces/dots/dashes between digits.
+    static PHONE_FRAGMENT_PATTERN := "(?:\+?84|0)(?:[\s.\-]*\d){9}"
     static DEFAULT_IMAGE_MARKER := "i)\[(?:Hình ảnh|Ảnh|Image|Photo)\]"
     static DEFAULT_MIN_LISTING_SCORE := 3
     ; "Minh Anh 18:05" — Zalo prints a sender/time header above each message
@@ -42,6 +43,7 @@ class ListingParser {
         listing["extra_info"] := ""
         listing["raw_text"] := ""
         listing["image_count"] := 0
+        listing["phone_carrier"] := ""
         return listing
     }
 
@@ -264,8 +266,15 @@ class ListingParser {
         if listing["owner_phone"] = ""
             listing["owner_phone"] := ListingParser.ExtractPhone(listing["raw_text"])
 
+        listing["phone_carrier"] := listing["owner_phone"] != ""
+            ? ListingParser.ClassifyCarrier(listing["owner_phone"]) : ""
+
         listing["image_count"] := ListingParser.CountMatches(listing["raw_text"], marker)
         ListingParser._InferFields(listing)
+        if listing["owner_phone"] = ""
+            listing["owner_phone"] := ListingParser.ExtractPhone(listing["raw_text"])
+        if listing["owner_phone"] != "" && listing["phone_carrier"] = ""
+            listing["phone_carrier"] := ListingParser.ClassifyCarrier(listing["owner_phone"])
         listing["room_code"] := ListingParser.NormalizeRoomCode(listing, "")
         ListingParser._DedupExtraInfo(listing)
 
@@ -433,6 +442,9 @@ class ListingParser {
 
         if listing["owner_phone"] = ""
             listing["owner_phone"] := ListingParser.ExtractPhone(text)
+        if listing["owner_phone"] != ""
+            listing["phone_carrier"] := ListingParser.ClassifyCarrier(
+                listing["owner_phone"])
 
         if listing["info"] = "" {
             for line in StrSplit(text, "`n") {
@@ -447,43 +459,88 @@ class ListingParser {
         }
     }
 
+    ; Normalize to 10-digit 0xxxxxxxxx (accepts +84 / 84 / separators).
     static NormalizePhone(value) {
         if value = ""
             return ""
-        digits := RegExReplace(value, "[^\d]")
-        return RegExMatch(digits, "^0\d{8,10}$") ? digits : ""
+        digits := RegExReplace(String(value), "\D", "")
+        if digits = ""
+            return ""
+        if SubStr(digits, 1, 2) = "84"
+            digits := "0" SubStr(digits, 3)
+        if StrLen(digits) = 10 && SubStr(digits, 1, 1) = "0"
+            return digits
+        return ""
     }
 
+    ; All VN mobiles in text → Array of Map("raw","phone","carrier").
+    static ExtractPhoneNumbers(text) {
+        phoneList := []
+        seen := Map()
+        pos := 1
+        while RegExMatch(text, ListingParser.PHONE_FRAGMENT_PATTERN, &match, pos) {
+            rawPhone := match[0]
+            cleanPhone := ListingParser.NormalizePhone(rawPhone)
+            if cleanPhone != "" && !seen.Has(cleanPhone) {
+                seen[cleanPhone] := true
+                phoneList.Push(Map(
+                    "raw", rawPhone,
+                    "phone", cleanPhone,
+                    "carrier", ListingParser.ClassifyCarrier(cleanPhone)
+                ))
+            }
+            pos := match.Pos(0) + Max(match.Len(0), 1)
+        }
+        return phoneList
+    }
+
+    ; Prefer phone on a Liên hệ/SĐT/☎ line; else last valid number in text.
     static ExtractPhone(text) {
         for line in StrSplit(text, "`n") {
             line := Trim(line)
-            if RegExMatch(line, "i)(?:☎|📞|liên hệ|lh\s*[:\-]|sđt|sdt|hotline|tel\b|phone\b)", &_) {
-                phone := ListingParser._PhoneFromFragment(line)
-                if phone != ""
-                    return phone
+            if RegExMatch(line,
+                "i)(?:☎|📞|☎️?|liên hệ|lh\s*[:\-]|số chủ|số điện thoại|sđt|sdt|hotline|tel\b|phone\b)",
+                &_) {
+                phones := ListingParser.ExtractPhoneNumbers(line)
+                if phones.Length
+                    return phones[1]["phone"]
             }
         }
 
-        last := ""
-        pos := 1
-        while RegExMatch(text, ListingParser.PHONE_FRAGMENT_PATTERN, &found, pos) {
-            phone := ListingParser._PhoneFromFragment(found[0])
-            if phone != ""
-                last := phone
-            pos := found.Pos(0) + Max(found.Len(0), 1)
-        }
-        return last
+        phones := ListingParser.ExtractPhoneNumbers(text)
+        if !phones.Length
+            return ""
+        return phones[phones.Length]["phone"]
     }
 
     static _PhoneFromFragment(fragment) {
-        pos := 1
-        while RegExMatch(fragment, ListingParser.PHONE_FRAGMENT_PATTERN, &found, pos) {
-            digits := RegExReplace(found[0], "[^\d]")
-            if RegExMatch(digits, "^0\d{8,10}$")
-                return digits
-            pos := found.Pos(0) + Max(found.Len(0), 1)
+        phones := ListingParser.ExtractPhoneNumbers(fragment)
+        return phones.Length ? phones[1]["phone"] : ""
+    }
+
+    ; Prefix match for major VN mobile carriers (3-digit head).
+    static ClassifyCarrier(phone) {
+        clean := ListingParser.NormalizePhone(phone)
+        if clean = ""
+            return "Không xác định"
+        prefix3 := SubStr(clean, 1, 3)
+        switch prefix3 {
+            case "086", "096", "097", "098",
+                "032", "033", "034", "035", "036", "037", "038", "039":
+                return "Viettel"
+            case "088", "091", "094", "083", "084", "085", "081", "082":
+                return "Vinaphone"
+            case "089", "090", "093", "070", "079", "077", "076", "078":
+                return "Mobifone"
+            case "092", "056", "058":
+                return "Vietnamobile"
+            case "099", "059":
+                return "Gmobile"
+            case "055":
+                return "Mạng ảo (Wintel/ITel)"
+            default:
+                return "Không xác định"
         }
-        return ""
     }
 
     static CountMatches(text, pattern) {
@@ -569,8 +626,14 @@ class ListingParser {
             hint := phoneHint != "" ? phoneHint : 'Nhắn bot "SĐT {room_code}" để lấy số'
             hint := StrReplace(hint, "{room_code}", roomCode != "" ? roomCode : "mã phòng")
             lines.Push("📞 Số chủ: " hint)
-        } else if listing["owner_phone"] != "" {
-            lines.Push("📞 Số chủ: " listing["owner_phone"])
+        } else if listing.Has("owner_phone") && listing["owner_phone"] != "" {
+            phoneLine := listing["owner_phone"]
+            carrier := listing.Has("phone_carrier") ? listing["phone_carrier"] : ""
+            if carrier = ""
+                carrier := ListingParser.ClassifyCarrier(listing["owner_phone"])
+            if carrier != "" && carrier != "Không xác định"
+                phoneLine .= " (" carrier ")"
+            lines.Push("📞 Số chủ: " phoneLine)
         }
 
         return StrJoin(lines, "`n")

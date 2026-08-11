@@ -129,3 +129,45 @@ WithinConfiguredHours(start, finish, current := "") {
     return StrCompare(current, start) >= 0
         || StrCompare(current, finish) <= 0
 }
+
+; Put a local file path on the clipboard as CF_HDROP so Zalo can Ctrl+V it as
+; an attachment (Gemini/Zalo workaround when bitmap paste is unreliable).
+SetClipboardFile(filePath) {
+    if !FileExist(filePath)
+        return false
+    path := filePath
+    Loop Files filePath, "F" {
+        path := A_LoopFileFullPath
+        break
+    }
+    ; DROPFILES + double-null-terminated UTF-16 path list.
+    pathBytes := (StrLen(path) + 1) * 2
+    total := 20 + pathBytes + 2
+    hGlobal := DllCall("GlobalAlloc", "UInt", 0x0002 | 0x0040, "UPtr", total, "Ptr") ; GMEM_MOVEABLE|ZEROINIT
+    if !hGlobal
+        return false
+    pGlobal := DllCall("GlobalLock", "Ptr", hGlobal, "Ptr")
+    if !pGlobal {
+        DllCall("GlobalFree", "Ptr", hGlobal)
+        return false
+    }
+    NumPut("UInt", 20, pGlobal, 0)      ; pFiles
+    NumPut("Int", 0, pGlobal, 4)        ; pt.x
+    NumPut("Int", 0, pGlobal, 8)        ; pt.y
+    NumPut("UInt", 0, pGlobal, 12)      ; fNC
+    NumPut("UInt", 1, pGlobal, 16)      ; fWide
+    StrPut(path, pGlobal + 20, "UTF-16")
+    DllCall("GlobalUnlock", "Ptr", hGlobal)
+    if !DllCall("OpenClipboard", "Ptr", A_ScriptHwnd) {
+        DllCall("GlobalFree", "Ptr", hGlobal)
+        return false
+    }
+    DllCall("EmptyClipboard")
+    if !DllCall("SetClipboardData", "UInt", 15, "Ptr", hGlobal) { ; CF_HDROP
+        DllCall("CloseClipboard")
+        DllCall("GlobalFree", "Ptr", hGlobal)
+        return false
+    }
+    DllCall("CloseClipboard")
+    return true
+}

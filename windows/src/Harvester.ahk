@@ -14,19 +14,10 @@ class MessageHarvester {
 
     _EmptySummary() {
         return Map(
-            "groups", 0, "batches", 0, "saved", 0, "blocked", 0,
+            "groups", 0, "saved", 0, "blocked", 0,
             "duplicate", 0, "invalid", 0, "published", 0,
             "revisit", 0, "media_captured", 0, "media_failed", 0, "errors", []
         )
-    }
-
-    _MergeSummary(total, part) {
-        for key in ["groups", "batches", "saved", "blocked", "duplicate", "invalid",
-            "published", "revisit", "media_captured", "media_failed"]
-            total[key] += part[key]
-        for err in part["errors"]
-            total["errors"].Push(err)
-        return total
     }
 
     ; Harvest every enabled source group. Returns a summary Map.
@@ -77,47 +68,6 @@ class MessageHarvester {
             this.config.HarvestGroupDelayMaxMs)
     }
 
-    ; Harvest source groups in batches of BatchSize, publish after each batch,
-    ; then recheck conversation snapshot for new messages (revisit queue).
-    HarvestAllBatched(publishFn) {
-        summary := this._EmptySummary()
-        sources := this.registry.SourceGroups()
-        batchSize := this.config.BatchSize
-
-        revisitNames := this.state.ListRevisitGroups()
-        if revisitNames.Length {
-            batch := this._NamesToGroups(revisitNames, sources)
-            if batch.Length
-                this._MergeSummary(summary, this._RunBatch(batch, publishFn, true))
-        }
-
-        index := 1
-        while index <= sources.Length {
-            batch := []
-            while batch.Length < batchSize && index <= sources.Length {
-                group := sources[index]
-                if !this._GroupInBatch(group, batch)
-                    batch.Push(group)
-                index++
-            }
-            if batch.Length
-                this._MergeSummary(summary, this._RunBatch(batch, publishFn, false))
-            if index <= sources.Length
-                Sleep this.config.BetweenBatchesMs
-        }
-
-        this.state.Save()
-        return summary
-    }
-
-    _GroupInBatch(group, batch) {
-        for item in batch {
-            if item["group_name"] = group["group_name"]
-                return true
-        }
-        return false
-    }
-
     _NamesToGroups(names, sources) {
         lookup := Map()
         for group in sources
@@ -128,62 +78,6 @@ class MessageHarvester {
                 batch.Push(lookup[name])
         }
         return batch
-    }
-
-    _RunBatch(groups, publishFn, isRevisit) {
-        part := this._EmptySummary()
-        part["batches"] := 1
-        savedRecords := []
-
-        for group in groups {
-            part["groups"]++
-            try {
-                result := this.HarvestGroup(group["group_name"])
-                part["saved"] += result["saved"]
-                part["blocked"] += result["blocked"]
-                part["duplicate"] += result["duplicate"]
-                part["invalid"] += result["invalid"]
-                part["media_captured"] += result["media_captured"]
-                part["media_failed"] += result["media_failed"]
-                for record in result["saved_records"]
-                    savedRecords.Push(record)
-            } catch as err {
-                part["errors"].Push(group["group_name"] ": " err.Message)
-            }
-            Sleep this.config.BetweenGroupsMs
-        }
-
-        this.state.Save()
-
-        if savedRecords.Length && publishFn {
-            try {
-                publishFn(savedRecords)
-                part["published"] += savedRecords.Length
-            } catch as err {
-                part["errors"].Push("publish: " err.Message)
-            }
-            if this.config.RecheckAfterPublish
-                Sleep this.config.AfterPublishRecheckMs
-        }
-
-        if this.config.RecheckAfterPublish {
-            for group in groups {
-                try {
-                    if this._RecheckForNewMessages(group["group_name"])
-                        part["revisit"]++
-                } catch as err {
-                    part["errors"].Push("recheck " group["group_name"] ": " err.Message)
-                }
-            }
-        }
-
-        if isRevisit {
-            for group in groups
-                this.state.MarkNeedsRevisit(group["group_name"], false)
-        }
-
-        this.state.Save()
-        return part
     }
 
     ; Lightweight re-read after publish: if conversation hash changed, queue for next pass.
@@ -286,23 +180,17 @@ class MessageHarvester {
 
         this.state.SetCaptureHash(groupName, captureHash)
         this.state.MarkNeedsRevisit(groupName, false)
-        newCount := 0
-        ; Newest first so MaxMessagesPerGroup does not starve fresh listings
-        ; behind a long history of already-read posts.
-        index := blocks.Length
-        while index >= 1 {
-            block := blocks[index]
-            index--
 
-            hash := FnvHash(block)
-            if this.state.IsSeen(groupName, hash) {
-                result["duplicate"]++
-                continue
-            }
+        pick := MessageActivityScanner.PickUnseenNewestFirst(
+            blocks,
+            ObjBindMethod(this.state, "IsSeen", groupName),
+            this.config.MaxMessagesPerGroup)
+        if pick["stopped_on_seen"]
+            result["duplicate"]++
 
-            if newCount >= this.config.MaxMessagesPerGroup
-                break
-            newCount++
+        for item in pick["items"] {
+            block := item["block"]
+            hash := item["hash"]
 
             keyword := this.blockList.Match(block)
             if keyword != "" {

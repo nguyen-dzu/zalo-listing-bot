@@ -58,11 +58,11 @@ Mark("Composer.ahk")
 #Include Acc.ahk
 Mark("Acc.ahk")
 
-#Include ZaloUI.ahk
-Mark("ZaloUI.ahk")
-
 #Include GroupActivity.ahk
 Mark("GroupActivity.ahk")
+
+#Include ZaloUI.ahk
+Mark("ZaloUI.ahk")
 
 #Include MediaCapturer.ahk
 Mark("MediaCapturer.ahk")

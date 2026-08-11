@@ -1,6 +1,7 @@
 #Requires AutoHotkey v2.0
 #Include Acc.ahk
 #Include GroupRegistry.ahk
+#Include GroupActivity.ahk
 ; ZaloUI.ahk — Adapter: every Zalo PC keystroke lives here. Calibrate delays in config.ini.
 
 class ZaloUIAdapter {
@@ -458,6 +459,97 @@ class ZaloUIAdapter {
         return this._CaptureAccessiblePaneText(true)
     }
 
+    ; Acc sidebar: ListItems with unread badge (number or marker text).
+    ; Returns unique known group names; empty when Zalo exposes no unread state.
+    FindUnreadSidebarGroups(knownGroups) {
+        this.Activate()
+        Send "{Esc}"
+        Sleep 100
+        Send "!1"
+        Sleep this.config.GroupListSettleMs
+
+        items := this._CollectSidebarConversationItems()
+        names := GroupActivityDetector.DetectUnreadFromItems(
+            items, knownGroups, this.config.GroupUnreadMarkerPattern)
+        if names.Length
+            return names
+
+        ; Flat text fallback (Name/Value dump without ListItem structure).
+        raw := this._CaptureAccessiblePaneText(true)
+        return GroupActivityDetector.DetectUnread(
+            raw, knownGroups, this.config.GroupUnreadMarkerPattern)
+    }
+
+    _CollectSidebarConversationItems() {
+        root := this._AccessibleRoot()
+        if !root
+            return []
+        WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
+        maxX := x + Round(w * this.config.GroupAccessibilityLeftRatio)
+        items := []
+        try elements := root.FindElements([
+            {Role: Acc.Role.ListItem},
+            {Role: Acc.Role.OutlineItem}
+        ], Acc.TreeScope.Descendants, 0, this.config.GroupAccessibilityDepth)
+        catch
+            return []
+
+        for element in elements {
+            try location := element.Location
+            catch
+                continue
+            if location.w <= 0 || location.h <= 0
+                || location.x < x || location.x >= maxX
+                || location.y < y || location.y >= y + h
+                continue
+
+            parts := []
+            seen := Map()
+            for value in this._AccessibleElementStrings(element, true) {
+                clean := Trim(RegExReplace(value, "\s+", " "))
+                if clean = "" || seen.Has(clean)
+                    continue
+                seen[clean] := true
+                parts.Push(clean)
+            }
+            try children := element.Children
+            catch
+                children := []
+            for child in children {
+                for value in this._AccessibleElementStrings(child, true) {
+                    clean := Trim(RegExReplace(value, "\s+", " "))
+                    if clean = "" || seen.Has(clean)
+                        continue
+                    seen[clean] := true
+                    parts.Push(clean)
+                }
+            }
+            if !parts.Length
+                continue
+
+            name := parts[1]
+            badge := ""
+            extraParts := []
+            for part in parts {
+                if badge = "" {
+                    extracted := GroupActivityDetector.ExtractBadge(part)
+                    if extracted != "" {
+                        badge := extracted
+                        continue
+                    }
+                }
+                if part != name
+                    extraParts.Push(part)
+            }
+            items.Push(Map(
+                "name", name,
+                "badge", badge,
+                "text", StrJoin(extraParts, "`n")
+            ))
+        }
+        return items
+    }
+
     _AccessibleRoot() {
         hwnd := WinExist("ahk_exe " this.config.ExeName)
         if !hwnd
@@ -552,6 +644,10 @@ class ZaloUIAdapter {
             candidates.Push(Map(
                 "x", location.x + Round(location.w / 2),
                 "y", centerY,
+                "left", location.x,
+                "top", location.y,
+                "w", location.w,
+                "h", location.h,
                 "distance", distance
             ))
         }
@@ -576,27 +672,126 @@ class ZaloUIAdapter {
         }
     }
 
+    ; Zalo Electron often ignores Ctrl+C for chat images. Prefer context-menu
+    ; "Copy hình ảnh", then viewer hotkey, then screen BitBlt of the Acc bounds.
     CopyImageAt(location) {
         this.Activate()
+        if this._CopyImageViaContextMenu(location["x"], location["y"])
+            return true
+
         A_Clipboard := ""
         this._ScreenClick(location["x"], location["y"])
         Sleep this.config.ImageViewerSettleMs
         Send this.config.ImageCopyHotkey
         Sleep this.config.PasteDelayMs + 200
-        if ClipWait(this.config.ClipWaitSeconds) && this._ClipboardHasBitmapImage() {
+        if this._WaitForClipboardImage() {
             Send "{Esc}"
             return true
         }
-
         Send "{Esc}"
         Sleep 150
-        A_Clipboard := ""
-        this._ScreenClick(location["x"], location["y"], "Right")
-        Sleep this.config.PasteDelayMs + 200
-        Send this.config.ImageContextCopyKey
-        Sleep this.config.PasteDelayMs + 200
-        return ClipWait(this.config.ClipWaitSeconds)
-            && this._ClipboardHasBitmapImage()
+
+        if location.Has("left") && location.Has("top")
+            && location.Has("w") && location.Has("h")
+            && location["w"] > 0 && location["h"] > 0 {
+            if this._CopyScreenRegionToClipboard(
+                location["left"], location["top"], location["w"], location["h"])
+                return true
+        }
+        return false
+    }
+
+    _CopyImageViaContextMenu(x, y) {
+        for key in this._ImageContextCopyKeys() {
+            A_Clipboard := ""
+            this._ScreenClick(x, y, "Right")
+            Sleep this.config.PasteDelayMs + 250
+            Send key
+            Sleep this.config.PasteDelayMs + 250
+            if this._WaitForClipboardImage()
+                return true
+            Send "{Esc}"
+            Sleep 120
+        }
+        return false
+    }
+
+    _ImageContextCopyKeys() {
+        keys := []
+        seen := Map()
+        raw := ""
+        if this.config.HasProp("ImageContextCopyKeys")
+            raw := Trim(this.config.ImageContextCopyKeys)
+        if raw = "" && this.config.HasProp("ImageContextCopyKey")
+            raw := Trim(this.config.ImageContextCopyKey)
+        if raw = ""
+            raw := "c,i"
+        for part in StrSplit(raw, ",") {
+            key := Trim(part)
+            if key = ""
+                continue
+            norm := StrLower(key)
+            if seen.Has(norm)
+                continue
+            seen[norm] := true
+            keys.Push(key)
+        }
+        if !keys.Length {
+            keys.Push("c")
+            keys.Push("i")
+        }
+        return keys
+    }
+
+    ; ClipWait without WaitForAnyData only waits for text — Zalo image copy
+    ; puts CF_DIB/PNG and would always time out.
+    _WaitForClipboardImage() {
+        ClipWait(this.config.ClipWaitSeconds, 1)
+        return this._ClipboardHasBitmapImage()
+    }
+
+    ; Last-resort capture of the on-screen Acc Graphic rectangle (Electron-safe).
+    _CopyScreenRegionToClipboard(x, y, w, h) {
+        if w < 8 || h < 8
+            return false
+        hdcScreen := DllCall("GetDC", "Ptr", 0, "Ptr")
+        if !hdcScreen
+            return false
+        hdcMem := DllCall("CreateCompatibleDC", "Ptr", hdcScreen, "Ptr")
+        hbm := DllCall("CreateCompatibleBitmap", "Ptr", hdcScreen, "Int", w, "Int", h, "Ptr")
+        if !hdcMem || !hbm {
+            if hbm
+                DllCall("DeleteObject", "Ptr", hbm)
+            if hdcMem
+                DllCall("DeleteDC", "Ptr", hdcMem)
+            DllCall("ReleaseDC", "Ptr", 0, "Ptr", hdcScreen)
+            return false
+        }
+        obm := DllCall("SelectObject", "Ptr", hdcMem, "Ptr", hbm, "Ptr")
+        ok := DllCall("BitBlt",
+            "Ptr", hdcMem, "Int", 0, "Int", 0, "Int", w, "Int", h,
+            "Ptr", hdcScreen, "Int", x, "Int", y,
+            "UInt", 0x00CC0020)
+        DllCall("SelectObject", "Ptr", hdcMem, "Ptr", obm, "Ptr")
+        DllCall("DeleteDC", "Ptr", hdcMem)
+        DllCall("ReleaseDC", "Ptr", 0, "Ptr", hdcScreen)
+        if !ok {
+            DllCall("DeleteObject", "Ptr", hbm)
+            return false
+        }
+        if !DllCall("OpenClipboard", "Ptr", A_ScriptHwnd) {
+            DllCall("DeleteObject", "Ptr", hbm)
+            return false
+        }
+        DllCall("EmptyClipboard")
+        ; Clipboard owns hbm after a successful SetClipboardData(CF_BITMAP).
+        if !DllCall("SetClipboardData", "UInt", 2, "Ptr", hbm) {
+            DllCall("CloseClipboard")
+            DllCall("DeleteObject", "Ptr", hbm)
+            return false
+        }
+        DllCall("CloseClipboard")
+        return this._WaitForClipboardImage()
     }
 
     _AdvanceGroupListScroll() {
@@ -776,23 +971,28 @@ class ZaloUIAdapter {
         return true
     }
 
-    ; Copy image from the bubble the operator selected (Ctrl+C, then context-menu fallback).
+    ; Copy image from the bubble the operator selected.
+    ; Zalo: context-menu "Copy hình ảnh" first; Ctrl+C is usually text-only.
     CopyImageFromSelection() {
         this.Activate()
         old := ClipboardAll()
-        A_Clipboard := ""
 
+        for key in this._ImageContextCopyKeys() {
+            A_Clipboard := ""
+            Send "{AppsKey}"
+            Sleep 280
+            Send key
+            Sleep this.config.PasteDelayMs + 200
+            if this._WaitForClipboardImage()
+                return true
+            Send "{Esc}"
+            Sleep 100
+        }
+
+        A_Clipboard := ""
         Send this.config.ImageCopyHotkey
         Sleep this.config.PasteDelayMs + 100
-        if ClipWait(this.config.ClipWaitSeconds) && this._ClipboardHasImage()
-            return true
-
-        A_Clipboard := ""
-        Send "{AppsKey}"
-        Sleep 250
-        Send "c"
-        Sleep 200
-        if ClipWait(this.config.ClipWaitSeconds) && this._ClipboardHasImage()
+        if this._WaitForClipboardImage()
             return true
 
         A_Clipboard := old

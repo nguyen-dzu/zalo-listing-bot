@@ -20,10 +20,10 @@ class SimConfig {
     MaxMessageChars := 1800
     MaskPhone := true
     PhoneHint := 'Nhắn bot "SĐT {room_code}" để lấy số'
-    OneMessagePerListing := false
-    ListingsPerMessage := 5
-    LeaseSize := 5
-    ListingSeparator := "======================="
+    OneMessagePerListing := true
+    ListingsPerMessage := 1
+    LeaseSize := 1
+    ListingSeparator := "======="
     IncludeGroupHeader := false
     BlocklistSheet := "Blocklist"
     BlocklistXlsx := ""
@@ -139,9 +139,8 @@ TestLog()
 
 chunks := composerSvc.Compose(records)
 TestLog("== Sẽ gửi vào nhóm chính ==")
-TestLog("Flow: ảnh trước (chọn bubble → copy) → text gom " cfg.ListingsPerMessage " phòng/message")
-TestLog("Ngăn cách phòng: " cfg.ListingSeparator)
-TestLog("Tổng " records.Length " phòng → " chunks.Length " message Zalo, " totalImages " ảnh cần copy")
+TestLog("Flow: mỗi phòng = ảnh → text → message ngăn cách " cfg.ListingSeparator)
+TestLog("Tổng " records.Length " phòng → " chunks.Length " message text Zalo, " totalImages " ảnh cần copy")
 for index, chunk in chunks {
     TestLog()
     TestLog("----- MESSAGE " index "/" chunks.Length " (" StrLen(chunk) " ký tự) -----")

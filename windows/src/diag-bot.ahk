@@ -15,8 +15,8 @@
 #Include MediaStore.ahk
 #Include Composer.ahk
 #Include Acc.ahk
-#Include ZaloUI.ahk
 #Include GroupActivity.ahk
+#Include ZaloUI.ahk
 #Include MediaCapturer.ahk
 #Include Harvester.ahk
 #Include Publisher.ahk

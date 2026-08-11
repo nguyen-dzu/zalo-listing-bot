@@ -48,9 +48,9 @@ class TestConfig {
     MaxMessageChars := 1800
     MaskPhone := true
     PhoneHint := 'Nhắn bot "SĐT {room_code}" để lấy số'
-    OneMessagePerListing := false
-    ListingsPerMessage := 5
-    ListingSeparator := "======================="
+    OneMessagePerListing := true
+    ListingsPerMessage := 1
+    ListingSeparator := "======="
     IncludeGroupHeader := false
     BlocklistXlsx := ""
     BlocklistSheet := "Blocklist"
@@ -81,14 +81,14 @@ class QueueTestConfig {
     AccessLogFile := ""
     MediaDir := ""
     QueueLogFile := ""
-    LeaseSize := 5
+    LeaseSize := 1
     MaxBatchesPerSession := 1
     SessionCooldownMs := 0
     BetweenBatchesMs := 0
     ImagesBeforeText := true
-    OneMessagePerListing := false
-    SendSeparatorAsMessage := false
-    ListingSeparator := "======================="
+    OneMessagePerListing := true
+    SendSeparatorAsMessage := true
+    ListingSeparator := "======="
     PublishActiveHoursStart := ""
     PublishActiveHoursEnd := ""
     MaxMessageChars := 1800
@@ -382,11 +382,34 @@ Check("Điện nước gộp", listing["utility_price"] = "3.5k/100k", listing["
 Section("số điện thoại")
 listing := ListingParser.Parse("Địa chỉ: X`nGiá: 5 triệu`nAi cần alo 0912 345 678 nhé")
 Check("dò SĐT trong text tự do", listing["owner_phone"] = "0912345678", listing["owner_phone"])
+Check("phân loại Vinaphone 091", listing["phone_carrier"] = "Vinaphone",
+    listing["phone_carrier"])
+
+plus84 := ListingParser.Parse(
+    "Địa chỉ: X`nGiá: 5tr`nLh +84 988-123-456 giúp em")
+Check("chuẩn hóa +84 → 0", plus84["owner_phone"] = "0988123456", plus84["owner_phone"])
+Check("phân loại Viettel 098", plus84["phone_carrier"] = "Viettel",
+    plus84["phone_carrier"])
+
+dotted := ListingParser.ExtractPhoneNumbers(
+    "gọi 0988.123.456 hoặc +84 912 345 678")
+Check("ExtractPhoneNumbers tìm 2 số", dotted.Length = 2, dotted.Length)
+if dotted.Length >= 2 {
+    Check("ExtractPhoneNumbers số 1", dotted[1]["phone"] = "0988123456")
+    Check("ExtractPhoneNumbers số 2", dotted[2]["phone"] = "0912345678")
+}
+Check("ClassifyCarrier Mobifone 090",
+    ListingParser.ClassifyCarrier("0901234567") = "Mobifone")
+Check("ClassifyCarrier Viettel 037",
+    ListingParser.ClassifyCarrier("0377785784") = "Viettel")
 
 listing := ListingParser.Parse("Địa chỉ: X`nSố phòng: P009`nGiá: 5 triệu`nSĐT: 0901234567")
 masked := ListingParser.FormatBlock(listing, true, cfg.PhoneHint)
-Check("output không lộ SĐT", !InStr(masked, "0901234567"))
+Check("MaskPhone=1 không lộ SĐT", !InStr(masked, "0901234567"))
 Check("output có mã phòng", InStr(masked, "P009") > 0)
+shown := ListingParser.FormatBlock(listing, false, cfg.PhoneHint)
+Check("MaskPhone=0 hiện Số chủ", InStr(shown, "📞 Số chủ: 0901234567") > 0, shown)
+Check("MaskPhone=0 kèm nhà mạng", InStr(shown, "Mobifone") > 0, shown)
 
 ; ── Tách tin + gán ảnh ────────────────────────────────────
 Section("tách tin")
@@ -555,12 +578,62 @@ sameLineUnread := GroupActivityDetector.DetectUnread(
     "i)(?:tin nhắn mới|tin chưa đọc|chưa đọc)")
 Check("detect unread accessibility cùng dòng",
     sameLineUnread.Length = 1 && sameLineUnread[1] = "Nhóm B")
+badgeOnlyText := "
+(
+Nhóm A
+2
+preview
+Nhóm B
+đã đọc
+)"
+badgeOnlyUnread := GroupActivityDetector.DetectUnread(
+    badgeOnlyText, schedulerGroups,
+    "i)(?:tin nhắn mới|tin chưa đọc|chưa đọc)")
+Check("detect unread badge số thuần",
+    badgeOnlyUnread.Length = 1 && badgeOnlyUnread[1] = "Nhóm A")
+sameLineBadge := GroupActivityDetector.DetectUnread(
+    "Nhóm C 5", schedulerGroups,
+    "i)(?:tin nhắn mới|tin chưa đọc|chưa đọc)")
+Check("detect unread badge số cùng dòng tên",
+    sameLineBadge.Length = 1 && sameLineBadge[1] = "Nhóm C")
+itemUnread := GroupActivityDetector.DetectUnreadFromItems([
+    Map("name", "Nhóm A", "badge", "2", "text", "preview"),
+    Map("name", "Nhóm B", "badge", "", "text", "đã đọc")
+], schedulerGroups, "i)(?:tin nhắn mới|tin chưa đọc|chưa đọc)")
+Check("DetectUnreadFromItems theo badge Acc",
+    itemUnread.Length = 1 && itemUnread[1] = "Nhóm A")
+Check("IsUnreadBadge 3", GroupActivityDetector.IsUnreadBadge("3"))
+Check("IsUnreadBadge reject 0", !GroupActivityDetector.IsUnreadBadge("0"))
 orderedUnread := GroupActivityDetector.SelectUnreadGroups(
     schedulerGroups, ["Nhóm C", "Nhóm A"])
 Check("chon unread nhung van giu thu tu trong file",
     orderedUnread.Length = 2
     && orderedUnread[1]["group_name"] = "Nhóm A"
     && orderedUnread[2]["group_name"] = "Nhóm C")
+
+Section("message activity scanner")
+oldBlock := "Địa chỉ: cũ`nGiá: 3tr`nSĐT: 0901111111"
+newBlock := "Địa chỉ: mới`nGiá: 5tr`nSĐT: 0902222222"
+midBlock := "Địa chỉ: giữa`nGiá: 4tr`nSĐT: 0903333333"
+scanBlocks := [oldBlock, midBlock, newBlock]
+seenOld := Map(FnvHash(oldBlock), true, FnvHash(midBlock), true)
+isSeenFn := (hash) => seenOld.Has(hash)
+pickNew := MessageActivityScanner.PickUnseenNewestFirst(scanBlocks, isSeenFn, 50)
+Check("early-stop: chỉ lấy tin mới hơn seen",
+    pickNew["items"].Length = 1
+    && pickNew["items"][1]["block"] = newBlock
+    && pickNew["stopped_on_seen"])
+pickAllNew := MessageActivityScanner.PickUnseenNewestFirst(
+    scanBlocks, (hash) => false, 50)
+Check("chưa seen nào thì lấy tất cả newest-first",
+    pickAllNew["items"].Length = 3
+    && pickAllNew["items"][1]["block"] = newBlock
+    && !pickAllNew["stopped_on_seen"])
+pickCapped := MessageActivityScanner.PickUnseenNewestFirst(
+    scanBlocks, (hash) => false, 1)
+Check("MaxMessagesPerGroup cắt newest-first",
+    pickCapped["items"].Length = 1
+    && pickCapped["items"][1]["block"] = newBlock)
 
 ; ── Composer ──────────────────────────────────────────────
 Section("composer")
@@ -572,9 +645,8 @@ records := [
     Map("source_group", "Nhóm A", "address", "3 Lê Lợi", "room_code", "P3", "price", "5tr", "owner_phone", "0901234567")
 ]
 messages := composerSvc.Compose(records)
-Check("3 phòng → 1 message", messages.Length = 1, "got " messages.Length)
-Check("separator giữa phòng", ListingParser.CountMatches(messages[1], "=======================") = 2)
-Check("3 block địa chỉ", ListingParser.CountMatches(messages[1], "📍 Địa chỉ:") = 3)
+Check("3 phòng → 3 message", messages.Length = 3, "got " messages.Length)
+Check("mỗi message 1 địa chỉ", ListingParser.CountMatches(messages[1], "📍 Địa chỉ:") = 1)
 
 fiveRecords := []
 Loop 5
@@ -585,10 +657,10 @@ Loop 5
         "price", "5tr",
         "owner_phone", "0901234567"
     ))
-msg5 := composerSvc.ComposeBatch(fiveRecords)
-Check("5 phòng 4 separator", ListingParser.CountMatches(msg5, "=======================") = 4)
-Check("5 phòng trong giới hạn MaxMessageChars",
-    StrLen(msg5) <= cfg.MaxMessageChars, StrLen(msg5))
+msg5 := composerSvc.Compose(fiveRecords)
+Check("5 phòng → 5 message", msg5.Length = 5, "got " msg5.Length)
+Check("1 phòng trong giới hạn MaxMessageChars",
+    StrLen(msg5[1]) <= cfg.MaxMessageChars, StrLen(msg5[1]))
 
 sevenRecords := []
 Loop 7
@@ -600,14 +672,9 @@ Loop 7
         "owner_phone", "0901234567"
     ))
 messages7 := composerSvc.Compose(sevenRecords)
-Check("7 phòng → 2 message", messages7.Length = 2, "got " messages7.Length)
-Check("message 1 có 5 phòng", ListingParser.CountMatches(messages7[1], "📍 Địa chỉ:") = 5)
-Check("message 2 có 2 phòng", ListingParser.CountMatches(messages7[2], "📍 Địa chỉ:") = 2)
-
-cfg.OneMessagePerListing := true
-messages1 := composerSvc.Compose(sevenRecords)
-Check("OneMessagePerListing: 7 phòng → 7 message", messages1.Length = 7, "got " messages1.Length)
-cfg.OneMessagePerListing := false
+Check("7 phòng → 7 message", messages7.Length = 7, "got " messages7.Length)
+Check("message 1 có 1 phòng", ListingParser.CountMatches(messages7[1], "📍 Địa chỉ:") = 1)
+Check("ListingsPerMessage luôn 1", composerSvc.ListingsPerMessage() = 1)
 
 ; ── Mã phòng chuẩn hóa ────────────────────────────────────
 Section("room code")
@@ -941,6 +1008,7 @@ publisherRoot := A_Temp "\zalo-publisher-tests"
 if DirExist(publisherRoot)
     DirDelete publisherRoot, true
 publisherCfg := QueueTestConfig(publisherRoot)
+publisherCfg.MaxBatchesPerSession := 5
 publisherQueue := PublishQueueStore(publisherCfg)
 publisherRecords := []
 Loop 5 {
@@ -956,8 +1024,10 @@ publisherSvc := DurableListingPublisher(
     MessageComposer(cfg), publisherQueue, publisherRepo, FakePublisherMedia())
 publisherSummary := publisherSvc.RunSession()
 publisherTrace := StrJoin(publisherUi.events, "|")
-Check("publisher hoàn thành 5 phòng / 2 nhóm",
-    publisherSummary["rooms"] = 5 && publisherSummary["messages"] = 2)
+Check("publisher hoàn thành 5 phòng / 2 nhóm (1 phòng/lease)",
+    publisherSummary["rooms"] = 5 && publisherSummary["messages"] = 10,
+    Format("rooms={1} messages={2}",
+        publisherSummary["rooms"], publisherSummary["messages"]))
 Check("publisher gửi media trước text",
     InStr(publisherTrace, "restore:") > 0
     && InStr(publisherTrace, "restore:") < InStr(publisherTrace, "paste:text"))
@@ -970,10 +1040,9 @@ oneRoot := A_Temp "\zalo-publisher-one-room-tests"
 if DirExist(oneRoot)
     DirDelete oneRoot, true
 oneCfg := QueueTestConfig(oneRoot)
-oneCfg.OneMessagePerListing := true
-oneCfg.LeaseSize := 1
+oneCfg.MaxBatchesPerSession := 2
 oneCfg.SendSeparatorAsMessage := true
-oneCfg.ListingSeparator := "======================="
+oneCfg.ListingSeparator := "======="
 oneQueue := PublishQueueStore(oneCfg)
 oneRecords := []
 Loop 2 {
@@ -984,8 +1053,7 @@ Loop 2 {
 }
 oneUi := FakePublisherUI()
 oneComposer := MessageComposer(cfg)
-oneComposer.config.OneMessagePerListing := true
-oneComposer.config.ListingSeparator := "======================="
+oneComposer.config.ListingSeparator := "======="
 oneSvc := DurableListingPublisher(
     oneCfg, oneUi, FakePublisherRegistry(), oneComposer,
     oneQueue, FakePublisherRepository(oneRecords), FakePublisherMedia())
@@ -1002,6 +1070,7 @@ if DirExist(afterRoot)
     DirDelete afterRoot, true
 afterCfg := QueueTestConfig(afterRoot)
 afterCfg.ImagesBeforeText := false
+afterCfg.MaxBatchesPerSession := 5
 afterQueue := PublishQueueStore(afterCfg)
 afterRecords := []
 Loop 5 {
@@ -1020,18 +1089,16 @@ Check("ImagesBeforeText=0 vẫn gửi media sau text",
     InStr(afterTrace, "paste:text") > 0
     && InStr(afterTrace, "paste:text") < InStr(afterTrace, "restore:"))
 
-; One failed text intent is resolved atomically for all five rooms.
+; One failed text intent marks the leased room uncertain.
 uncertainRoot := A_Temp "\zalo-publisher-uncertain-tests"
 if DirExist(uncertainRoot)
     DirDelete uncertainRoot, true
 uncertainCfg := QueueTestConfig(uncertainRoot)
 uncertainQueue := PublishQueueStore(uncertainCfg)
 uncertainRecords := []
-Loop 5 {
-    record := MakePublisherRecord(300 + A_Index)
-    uncertainRecords.Push(record)
-    uncertainQueue.Enqueue(record)
-}
+record := MakePublisherRecord(301)
+uncertainRecords.Push(record)
+uncertainQueue.Enqueue(record)
 uncertainUi := FakePublisherUI()
 uncertainUi.failText := true
 uncertainSvc := DurableListingPublisher(
@@ -1039,13 +1106,13 @@ uncertainSvc := DurableListingPublisher(
     uncertainQueue, FakePublisherRepository(uncertainRecords), FakePublisherMedia())
 uncertainSvc.RunSession()
 uncertainDeliveries := uncertainQueue.UncertainDeliveries()
-Check("text intent tạo một uncertain delivery cho cả batch",
+Check("text intent tạo uncertain delivery cho 1 phòng",
     uncertainDeliveries.Length = 1
-    && uncertainDeliveries[1]["ids"].Length = 5)
+    && uncertainDeliveries[1]["ids"].Length = 1)
 uncertainQueue.ResolveUncertainDelivery(
     uncertainDeliveries[1]["delivery_id"], true)
-Check("resolve batch trả cả 5 phòng về ready",
-    uncertainQueue.Stats()["ready"] = 5
+Check("resolve uncertain trả phòng về ready",
+    uncertainQueue.Stats()["ready"] = 1
     && uncertainQueue.Stats()["uncertain"] = 0)
 
 ; Missing payload dead-letters only the missing ID and releases valid peers.
@@ -1053,6 +1120,7 @@ missingRoot := A_Temp "\zalo-publisher-missing-tests"
 if DirExist(missingRoot)
     DirDelete missingRoot, true
 missingCfg := QueueTestConfig(missingRoot)
+missingCfg.LeaseSize := 5
 missingQueue := PublishQueueStore(missingCfg)
 missingRecords := []
 Loop 5 {
@@ -1074,6 +1142,7 @@ if DirExist(oversizeRoot)
     DirDelete oversizeRoot, true
 oversizeCfg := QueueTestConfig(oversizeRoot)
 oversizeCfg.MaxMessageChars := 50
+oversizeCfg.MaxBatchesPerSession := 5
 oversizeQueue := PublishQueueStore(oversizeCfg)
 oversizeRecords := []
 Loop 5 {
@@ -1085,13 +1154,12 @@ Loop 5 {
     oversizeRecords.Push(record)
     oversizeQueue.Enqueue(record)
 }
-oversizeLease := oversizeQueue.LeaseNext(5)
 oversizeSvc := DurableListingPublisher(
     oversizeCfg, FakePublisherUI(), FakePublisherRegistry(),
     MessageComposer(oversizeCfg), oversizeQueue,
     FakePublisherRepository(oversizeRecords), FakePublisherMedia())
 oversizeSummary := oversizeSvc.RunSession()
-Check("batch quá MaxMessageChars không complete",
+Check("phòng quá MaxMessageChars không complete",
     oversizeSummary["rooms"] = 0 && oversizeQueue.Stats()["retry_wait"] = 5)
 
 cooldownRoot := A_Temp "\zalo-publisher-cooldown-tests"
@@ -1099,6 +1167,7 @@ if DirExist(cooldownRoot)
     DirDelete cooldownRoot, true
 cooldownCfg := QueueTestConfig(cooldownRoot)
 cooldownCfg.SessionCooldownMs := 3600000
+cooldownCfg.MaxBatchesPerSession := 5
 cooldownQueue := PublishQueueStore(cooldownCfg)
 cooldownRecords := []
 Loop 5 {

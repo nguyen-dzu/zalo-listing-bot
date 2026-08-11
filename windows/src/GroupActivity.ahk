@@ -4,12 +4,13 @@
 #Include GroupRegistry.ahk
 
 class GroupActivityDetector {
-    ; Zalo may expose textual unread labels in copied group-list content.
-    ; When it does not, scheduler audit shards guarantee eventual coverage.
+    ; Bare unread badge numbers Zalo Acc often exposes without "tin nhắn mới".
+    static BADGE_NUMBER_PATTERN := "i)(?:^|\s)([1-9]\d{0,2})(?:\s|$)"
+
+    ; Zalo may expose textual unread labels or bare numeric badges in the
+    ; conversation list. When it does not, scheduler audit shards still cover.
     static DetectUnread(rawText, knownGroups, markerPattern) {
-        lookup := Map()
-        for group in knownGroups
-            lookup[GroupRegistry._Key(group["group_name"])] := group["group_name"]
+        lookup := GroupActivityDetector._KnownLookup(knownGroups)
 
         lines := []
         for rawLine in StrSplit(NormalizeNewlines(rawText), "`n") {
@@ -21,14 +22,7 @@ class GroupActivityDetector {
         result := []
         seen := Map()
         for index, line in lines {
-            key := GroupRegistry._Key(line)
-            matchedKey := ""
-            for candidateKey, candidateName in lookup {
-                if key = candidateKey || InStr(key, candidateKey) {
-                    if matchedKey = "" || StrLen(candidateKey) > StrLen(matchedKey)
-                        matchedKey := candidateKey
-                }
-            }
+            matchedKey := GroupActivityDetector._MatchKnownKey(line, lookup)
             if matchedKey = ""
                 continue
 
@@ -36,20 +30,13 @@ class GroupActivityDetector {
             finish := Min(lines.Length, index + 4)
             cursor := index + 1
             while cursor <= finish {
-                nextKey := GroupRegistry._Key(lines[cursor])
-                startsNextGroup := false
-                for candidateKey, candidateName in lookup {
-                    if nextKey = candidateKey || InStr(nextKey, candidateKey) {
-                        startsNextGroup := true
-                        break
-                    }
-                }
-                if startsNextGroup
+                nextKey := GroupActivityDetector._MatchKnownKey(lines[cursor], lookup)
+                if nextKey != ""
                     break
-                context .= (context = "" ? "" : "`n") lines[cursor]
+                context .= "`n" lines[cursor]
                 cursor++
             }
-            if context = "" || !RegExMatch(context, markerPattern)
+            if !GroupActivityDetector.LooksLikeUnread(context, markerPattern)
                 continue
 
             name := lookup[matchedKey]
@@ -60,6 +47,81 @@ class GroupActivityDetector {
             result.Push(name)
         }
         return result
+    }
+
+    ; Structured Acc items: Map("name", groupOrLabel, "badge", "3"|"" , "text", …).
+    static DetectUnreadFromItems(items, knownGroups, markerPattern) {
+        lookup := GroupActivityDetector._KnownLookup(knownGroups)
+        result := []
+        seen := Map()
+        for item in items {
+            if !(item is Map)
+                continue
+            nameHint := item.Has("name") ? String(item["name"]) : ""
+            badge := item.Has("badge") ? String(item["badge"]) : ""
+            extra := item.Has("text") ? String(item["text"]) : ""
+            context := Trim(nameHint
+                . (badge != "" ? "`n" badge : "")
+                . (extra != "" ? "`n" extra : ""))
+            if context = ""
+                continue
+
+            matchedKey := GroupActivityDetector._MatchKnownKey(nameHint, lookup)
+            if matchedKey = ""
+                matchedKey := GroupActivityDetector._MatchKnownKey(context, lookup)
+            if matchedKey = ""
+                continue
+            if !GroupActivityDetector.LooksLikeUnread(context, markerPattern)
+                && !GroupActivityDetector.IsUnreadBadge(badge)
+                continue
+
+            name := lookup[matchedKey]
+            nameKey := GroupRegistry._Key(name)
+            if seen.Has(nameKey)
+                continue
+            seen[nameKey] := true
+            result.Push(name)
+        }
+        return result
+    }
+
+    static LooksLikeUnread(context, markerPattern) {
+        if Trim(context) = ""
+            return false
+        if markerPattern != "" && RegExMatch(context, markerPattern)
+            return true
+        ; Same-line: "Nhóm A 3" or "Nhóm A 3 tin nhắn mới"
+        if RegExMatch(context, "i).+\s([1-9]\d{0,2})(?:\s|$)")
+            return true
+        ; Multi-line: group name then a bare badge number on its own line.
+        for line in StrSplit(NormalizeNewlines(context), "`n") {
+            if GroupActivityDetector.IsUnreadBadge(line)
+                return true
+        }
+        return false
+    }
+
+    static IsUnreadBadge(value) {
+        text := Trim(RegExReplace(String(value), "\s+", " "))
+        if text = ""
+            return false
+        ; Pure 1–999 badge (Zalo unread count).
+        if RegExMatch(text, "^[1-9]\d{0,2}$")
+            return true
+        return false
+    }
+
+    static ExtractBadge(text) {
+        clean := Trim(RegExReplace(String(text), "\s+", " "))
+        if GroupActivityDetector.IsUnreadBadge(clean)
+            return clean
+        if RegExMatch(clean,
+            "i)(?:^|\s)([1-9]\d{0,2})\s*(?:tin nhắn mới|tin chưa đọc|chưa đọc|unread|new messages?)",
+            &found)
+            return found[1]
+        if RegExMatch(clean, "i)\s([1-9]\d{0,2})$", &found)
+            return found[1]
+        return ""
     }
 
     ; Keep the source-file order while selecting only names marked unread.
@@ -74,6 +136,60 @@ class GroupActivityDetector {
                 result.Push(group)
         }
         return result
+    }
+
+    static _KnownLookup(knownGroups) {
+        lookup := Map()
+        for group in knownGroups
+            lookup[GroupRegistry._Key(group["group_name"])] := group["group_name"]
+        return lookup
+    }
+
+    static _MatchKnownKey(text, lookup) {
+        key := GroupRegistry._Key(text)
+        if key = ""
+            return ""
+        matchedKey := ""
+        for candidateKey, candidateName in lookup {
+            if key = candidateKey || InStr(key, candidateKey) {
+                if matchedKey = "" || StrLen(candidateKey) > StrLen(matchedKey)
+                    matchedKey := candidateKey
+            }
+        }
+        ; Also allow "Group Name 3" by stripping trailing badge before match.
+        if matchedKey = "" {
+            stripped := Trim(RegExReplace(
+                String(text),
+                "i)\s+[1-9]\d{0,2}(?:\s*(?:tin nhắn mới|tin chưa đọc|chưa đọc|unread|new messages?))?$",
+                ""))
+            if stripped != "" && stripped != text
+                return GroupActivityDetector._MatchKnownKey(stripped, lookup)
+        }
+        return matchedKey
+    }
+}
+
+; Newest-first message walk for harvest: stop when hitting an already-seen hash.
+class MessageActivityScanner {
+    ; isSeenFn(hash) -> true if already processed.
+    ; blocks: oldest-first array (index 1 = oldest, Length = newest).
+    static PickUnseenNewestFirst(blocks, isSeenFn, maxMessages) {
+        items := []
+        stoppedOnSeen := false
+        index := blocks.Length
+        while index >= 1 {
+            block := blocks[index]
+            hash := FnvHash(block)
+            if isSeenFn.Call(hash) {
+                stoppedOnSeen := true
+                break
+            }
+            if items.Length >= maxMessages
+                break
+            items.Push(Map("index", index, "hash", hash, "block", block))
+            index--
+        }
+        return Map("items", items, "stopped_on_seen", stoppedOnSeen)
     }
 }
 

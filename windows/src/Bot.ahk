@@ -16,8 +16,8 @@
 #Include MediaStore.ahk
 #Include Composer.ahk
 #Include Acc.ahk
-#Include ZaloUI.ahk
 #Include GroupActivity.ahk
+#Include ZaloUI.ahk
 #Include MediaCapturer.ahk
 #Include Harvester.ahk
 #Include Publisher.ahk
@@ -165,7 +165,7 @@ class ListingBotService {
         return summary
     }
 
-    ; Drain a bounded number of durable five-room leases.
+    ; Drain a bounded number of durable one-room leases.
     PublishToMain() {
         return this.publisher.RunSession()
     }
@@ -508,17 +508,13 @@ class ListingBotService {
                             "unread", 0,
                             "audit", 0)
                     } else {
-                        unreadRaw := this.ui.CaptureUnreadConversationText()
-                        unreadNames := GroupActivityDetector.DetectUnread(
-                            unreadRaw, sources,
-                            this.config.GroupUnreadMarkerPattern)
-                        unreadGroups := GroupActivityDetector.SelectUnreadGroups(
-                            sources, unreadNames)
-                        plan := Map(
-                            "mode", "source_file_unread",
-                            "groups", unreadGroups,
-                            "unread", unreadGroups.Length,
-                            "audit", 0)
+                        ; Acc sidebar badges (+ flat-text DetectUnread fallback inside).
+                        ; Scheduler adds oldest-first audit when Acc returns nothing.
+                        unreadNames := this.ui.FindUnreadSidebarGroups(sources)
+                        plan := this.harvestScheduler.BuildPlan(
+                            sources, this.state, unreadNames)
+                        if plan["mode"] != "empty"
+                            plan["mode"] := "source_file_unread"
                     }
                     this.watchPublishBatchesRemaining :=
                         this.config.PublishBatchesPerWatchCycle

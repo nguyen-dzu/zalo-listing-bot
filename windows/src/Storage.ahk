@@ -113,6 +113,8 @@ class ListingRepository {
             "utility_price", listing["utility_price"],
             "service_price", listing["service_price"],
             "owner_phone", listing["owner_phone"],
+            "phone_carrier", listing.Has("phone_carrier")
+                ? listing["phone_carrier"] : "",
             "info", listing["info"],
             "extra_info", listing["extra_info"],
             "image_count", listing["image_count"],

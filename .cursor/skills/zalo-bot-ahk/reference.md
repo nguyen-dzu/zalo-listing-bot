@@ -80,8 +80,8 @@ state.Save()
 
 ```autohotkey
 composer := MessageComposer(cfg)
-chunks := composer.Compose(records)
-text   := composer.ComposeBatch(fiveRecords)
+chunks := composer.Compose(records)   ; one text message per room
+text   := composer.ComposeOne(record)
 ids    := composer.CollectIds(records)
 ```
 
@@ -89,7 +89,7 @@ ids    := composer.CollectIds(records)
 
 ```autohotkey
 queue := PublishQueueStore(cfg)
-lease := queue.LeaseNext(5)          ; Map(token, ids)
+lease := queue.LeaseNext(1)          ; Map(token, ids) — publish leases 1 room
 queue.MarkDeliveryIntent(lease["ids"], group, "text")
 queue.CheckpointText(lease["ids"], group)
 queue.CompleteLease(lease["token"])

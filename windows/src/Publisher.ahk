@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
-; Publisher.ahk — resumable service: lease five rooms, send media, then one text
+; Publisher.ahk — resumable service: lease one room at a time
+; Per room / output group: each image → text → separator message
 
 class DurableListingPublisher {
     __New(config, ui, registry, composer, queueStore, repository, mediaStore) {
@@ -165,43 +166,9 @@ class DurableListingPublisher {
                 throw Error("Lease ownership đã thay đổi cho listing " id)
         }
 
-        ; One room = images → text → separator message → next room.
-        if this.config.OneMessagePerListing || this.config.LeaseSize = 1 {
-            for record in records
-                this._SendOneRoom(record, groupName, true)
-            return
-        }
-
-        if this.config.ImagesBeforeText {
-            for record in records
-                this._SendRecordMedia(record, groupName)
-        }
-
-        sentCount := 0
-        for id in ids {
-            entry := this.queue.Get(id)
-            delivery := this._DeliveryOrDefault(entry, groupName)
-            if delivery["text_sent"]
-                sentCount++
-        }
-        if sentCount != ids.Length {
-            if sentCount > 0
-                throw Error("Checkpoint text không đồng nhất trong batch " lease["token"])
-
-            message := this.composer.ComposeBatch(records)
-            if StrLen(message) > this.config.MaxMessageChars
-                throw Error("Batch text vượt MaxMessageChars ("
-                    . StrLen(message) "/" this.config.MaxMessageChars ")")
-            beforeSend := ObjBindMethod(
-                this.queue, "MarkDeliveryIntent", ids, groupName, "text")
-            this.ui.SendTextInSession(message, beforeSend)
-            this.queue.CheckpointText(ids, groupName)
-        }
-
-        if !this.config.ImagesBeforeText {
-            for record in records
-                this._SendRecordMedia(record, groupName)
-        }
+        ; Always one room per cycle: images → text → separator → next room.
+        for record in records
+            this._SendOneRoom(record, groupName, true)
     }
 
     ; Per room: archive images first, then formatted text, then separator bubble.
