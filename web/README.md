@@ -27,35 +27,35 @@ Tab Zalo thường (không có `#harvest` / `#publish`) **không poll** lệnh b
   Poll ping + focus_compose only  ◄──►   ZaloUI paste Ctrl+V + Enter
 ```
 
-| Cửa sổ | URL hash | Title | Vai trò |
-|--------|----------|-------|---------|
-| Harvest | `#harvest` | `[Harvest] Zalo` | Đọc DOM, navigate nhóm nguồn, copy ảnh |
+| Cửa sổ  | URL hash   | Title            | Vai trò                                       |
+| ------- | ---------- | ---------------- | --------------------------------------------- |
+| Harvest | `#harvest` | `[Harvest] Zalo` | Đọc DOM, navigate nhóm nguồn, copy ảnh        |
 | Publish | `#publish` | `[Publish] Zalo` | Focus compose, paste/gửi tin (AHK keystrokes) |
 
 ## API Bridge
 
-| Endpoint | Mô tả |
-|----------|-------|
-| `GET /api/health` | Health + trạng thái 2 role |
-| `POST /api/register` | JS đăng ký role (`harvest` / `publish`) |
-| `GET /api/register` | AHK xem client đã sẵn sàng chưa |
-| `GET /api/command?role=harvest` | Harvest poll lệnh |
+| Endpoint                        | Mô tả                                   |
+| ------------------------------- | --------------------------------------- |
+| `GET /api/health`               | Health + trạng thái 2 role              |
+| `POST /api/register`            | JS đăng ký role (`harvest` / `publish`) |
+| `GET /api/register`             | AHK xem client đã sẵn sàng chưa         |
+| `GET /api/command?role=harvest` | Harvest poll lệnh                       |
 | `GET /api/command?role=publish` | Publish poll lệnh (ping, focus_compose) |
-| `POST /api/command-result` | JS trả kết quả |
-| `POST /api/event` | Push tin mới (chỉ Harvest observer) |
+| `POST /api/command-result`      | JS trả kết quả                          |
+| `POST /api/event`               | Push tin mới (chỉ Harvest observer)     |
 
 ### Lệnh JS
 
-| action | Role | Mô tả |
-|--------|------|-------|
-| `ping` | cả hai | Health check |
-| `navigate` | harvest | Mở nhóm nguồn (`group`) |
-| `scan` | harvest | Quét tin trong chat |
-| `dump_dom` | harvest | Diagnostic: selector, messageCount, sampleTexts |
-| `unread` | harvest | Nhóm có badge chưa đọc |
-| `find_images` | harvest | Tìm URL ảnh gần anchor |
-| `copy_image` | harvest | Copy 1 ảnh vào clipboard |
-| `focus_compose` | publish | Focus ô soạn tin |
+| action          | Role    | Mô tả                                           |
+| --------------- | ------- | ----------------------------------------------- |
+| `ping`          | cả hai  | Health check                                    |
+| `navigate`      | harvest | Mở nhóm nguồn (`group`)                         |
+| `scan`          | harvest | Quét tin trong chat                             |
+| `dump_dom`      | harvest | Diagnostic: selector, messageCount, sampleTexts |
+| `unread`        | harvest | Nhóm có badge chưa đọc                          |
+| `find_images`   | harvest | Tìm URL ảnh gần anchor                          |
+| `copy_image`    | harvest | Copy 1 ảnh vào clipboard                        |
+| `focus_compose` | publish | Focus ô soạn tin                                |
 
 ### DomEngine
 
