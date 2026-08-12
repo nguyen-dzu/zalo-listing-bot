@@ -15,8 +15,8 @@
 #Include QueueStore.ahk
 #Include MediaStore.ahk
 #Include Composer.ahk
-#Include Acc.ahk
 #Include GroupActivity.ahk
+#Include WebBridge.ahk
 #Include ZaloUI.ahk
 #Include MediaCapturer.ahk
 #Include Harvester.ahk

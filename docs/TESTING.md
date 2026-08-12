@@ -1,6 +1,6 @@
 # Testing — Zalo Listing Bot (Windows)
 
-All tests run on Windows with AutoHotkey v2. Two tiers: logic tests (no Zalo) and end-to-end tests (requires Zalo PC).
+All tests run on Windows with AutoHotkey v2. Two tiers: logic tests (no Chrome) and end-to-end tests (requires Zalo Web + Tampermonkey).
 
 ## Tier 1 — Logic tests, no Zalo required
 
@@ -47,18 +47,31 @@ the remainder as inputs. `blocklist.csv` still supplies banned keywords.
 
 ---
 
-## Tier 2 — End-to-end with Zalo PC
+## Tier 2 — End-to-end with Zalo Web (2-window)
 
 ### Setup
 
 1. Install [AutoHotkey v2](https://www.autohotkey.com/)
-2. Install Zalo PC, log in with the **bot account**
-3. Add the bot account to all source and main groups
-4. Run `windows\src\Bot.ahk` once — the bot creates `config.ini` and `blocklist.csv`
-5. Verify `[Groups] OutputGroups`, then inspect `data\zalo-groups-capture.txt`
-6. Press `Ctrl+Shift+R` to reload
+2. Install Chrome + Tampermonkey; import `web/zalo-listing-bot.user.js`
+3. Open **two Chrome windows** (bookmarks):
+   - `https://chat.zalo.me/#harvest` → tab title `[Harvest] Zalo`, sidebar on **source groups**
+   - `https://chat.zalo.me/#publish` → tab title `[Publish] Zalo`, sidebar on **output group**
+4. Log in with the **bot account** in both windows
+5. Copy `config.example.ini` → `config.ini`, verify `[Groups] OutputGroups` and `[ZaloWeb]` URLs
+6. Run `windows\src\Bot.ahk` — bot waits for **both** roles to register + ping
 
-### Test cases
+### Test cases (2-window)
+
+| # | Step | Expected |
+|---|------|----------|
+| 1 | Run `dump_dom` (via bridge) on a source group in Harvest window | `messageCount > 0`, `matchedSelector` set |
+| 2 | Run `Bot.ahk` with both windows open | TrayTip; bridge ping OK for harvest + publish |
+| 3 | Harvest one source group (`Ctrl+Shift+H` or watch loop) | Parser saves JSON; Harvest window stays on source chat |
+| 4 | Publish one room (`Ctrl+Shift+G`) | Images → text → separator on **Publish window only** |
+| 5 | Open extra Zalo tab without `#harvest` / `#publish` | Tab does not poll `/api/command` (no race) |
+| 6 | Real-time: new message in Harvest source group | `POST /api/event` → listing enqueued (dedupe via hash) |
+
+### Legacy test cases
 
 | # | Step | Expected |
 |---|------|----------|
@@ -81,7 +94,7 @@ the remainder as inputs. `blocklist.csv` still supplies banned keywords.
 | Post missing `Địa chỉ:` | Not split into a listing, skipped |
 | Post missing phone with `RequiredFields=owner_phone` | Counted as Invalid |
 | Zalo group-list capture is empty | Bot stops before harvest and points to `data\zalo-groups-capture.txt` |
-| Zalo not running | TrayTip error, bot does not hang |
+| Zalo not running / missing Harvest or Publish window | TrayTip error naming `#harvest` / `#publish` bookmark |
 | No ready/retry records → `Ctrl+Shift+G` | TrayTip reports an empty queue or pending media |
 | Missing media with `MediaRequired=1` | Listing remains `media_pending`, never leased |
 | Send failure before Enter | Retry with backoff, then dead-letter at `MaxAttempts` |
@@ -123,9 +136,8 @@ Incremental watch tests cover:
 - unread marker parsing from copied Alt+3 group-list context;
 - publish jitter is disabled in fake publisher configs for deterministic tests.
 
-Windows E2E must additionally verify that the installed Zalo version exposes
-group/community names and `tin nhắn mới` / `chưa đọc` state through MSAA.
-Run `dump-groups.ahk`, then inspect `data\zalo-groups-capture.txt`.
+Windows E2E must verify both Chrome windows register with bridge (`GET /api/register`).
+If harvest returns empty groups, run `dump_dom` and verify Tampermonkey + DomEngine selectors.
 If unread state is unavailable, the audit shard still provides coverage.
 
 Media E2E:

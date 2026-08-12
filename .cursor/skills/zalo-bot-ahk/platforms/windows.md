@@ -1,68 +1,38 @@
-# Windows Platform
-
-> **Backlog & setup máy mới:** [README.md](../../../README.md) · [BACKLOG.md](../BACKLOG.md)
+# Windows — Zalo Web daily ops
 
 ## Requirements
 
 - Windows 10/11
-- AutoHotkey v2 (64-bit)
-- Zalo PC
-- Dedicated Zalo account for the bot, joined in **every source and main group**
-- MS Excel (optional — use CSV if Excel is not installed)
+- AutoHotkey v2
+- Chrome + Tampermonkey + `web/zalo-listing-bot.user.js`
+- Bot account logged into https://chat.zalo.me in all source + output groups
 
 ## First run
 
-```cmd
-cd zalo-listing-bot
-"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe" windows\src\Bot.ahk
-```
+1. Import userscript into Tampermonkey
+2. Open Chrome → https://chat.zalo.me
+3. Copy `config.example.ini` → `config.ini`
+4. Run `windows\src\Bot.ahk` or `Launch-Bot-Dev.cmd`
 
-On first run the bot creates from example files:
-
-- `windows\config\config.ini`
-- `windows\config\blocklist.csv`
-
-At startup, choose or drop the CSV/XLSX source list (`group_name` column).
-Verify the five `[Groups] OutputGroups`; matching rows are excluded from input.
-
-## Daily operation
-
-```
-1. Open Zalo PC and start Bot.ahk
-2. Drop/select the source-group CSV/XLSX
-3. Bot searches each row, copies/parses new posts and queues them
-4. Bot publishes ready text/media batches to output groups
-5. After Watch.IntervalMs, bot restarts at row 1
-```
-
-Use `[Capture] Method=accessibility` to avoid clipboard selection caching the
-group avatar. `selectall` remains a compatibility fallback.
-
-## Compile to EXE
+## Startup folder
 
 ```cmd
-mkdir windows\dist
-Ahk2Exe /in windows\src\Bot.ahk /out windows\dist\ZaloListingBot.exe
+windows\setup\install-startup.cmd
 ```
 
-`Bot.ahk` uses relative `#Include` paths, so Ahk2Exe bundles all modules into one file.
+Creates shortcuts for **Zalo Web (Chrome)** and **Zalo Listing Bot**.
 
-## Auto-start
+## Troubleshooting
 
-1. Win+R → `shell:startup`
-2. Create a shortcut to `ZaloListingBot.exe`
-3. Ensure Zalo PC also starts with Windows
+| Symptom | Fix |
+|---------|-----|
+| Bot exits on start | Run `load-check.ahk`; ensure Tampermonkey script is enabled |
+| Harvest empty | Update `SELECTORS` in userscript; verify group names match |
+| Paste fails | Focus Chrome manually; check `WindowTitle` in config |
+| Bridge timeout | Allow localhost:8080; restart bot |
 
-## UI automation notes
+## Architecture
 
-`ZaloUIAdapter` only uses:
-
-1. `WinActivate` on `ahk_exe Zalo.exe`
-2. Open group: Acc ListItem → sidebar search (Acc label → click list → `Ctrl+F` → ratio fallback)
-3. `Ctrl+F` opens **sidebar** search when the chat list has focus; in-chat find only runs after `_ClickMessagePane()`
-4. Tune `SearchBoxClickX/Y`, `SidebarMinX`, `ListPaneClickX/Y` if clicks still miss (client-area ratios)
-4. On miss / wrong chat: throw → harvester skips to the next group
-5. `Ctrl+C` to copy conversation, `Ctrl+V` + `Enter` to send
-6. `[Images] ForwardHotkey` (default `^q`) to open the Forward dialog; `FindInChatHotkey` only for in-chat image anchors
-
-When Zalo updates its UI: tune `[Timing]` / `SearchBoxClickX/Y` first, then edit `ZaloUI.ahk`. The `ForwardHotkey` must match the Forward shortcut in your Zalo version.
+1. **JS** reads DOM, navigates groups, copies images
+2. **WebBridge** HTTP server on `127.0.0.1:8080`
+3. **ZaloUI** activates Chrome, sends Ctrl+V + Enter

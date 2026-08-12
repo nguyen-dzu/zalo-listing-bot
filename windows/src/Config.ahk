@@ -40,9 +40,17 @@ class AppConfig {
         ; Keep one explicit UTF-8 decode and read values from it first.
         this._IniUtf8Text := ReadTextFile(ini)
 
-        ; ── Zalo ──
-        this.ExeName := this._Read(ini, "Zalo", "ExeName", "Zalo.exe")
-        this.ZaloExePath := this._Read(ini, "Zalo", "ExePath", "")
+        ; ── Zalo Web (Chrome + Tampermonkey, 2-window) ──
+        this.BrowserExeName := this._Read(ini, "ZaloWeb", "BrowserExe", "chrome.exe")
+        this.HarvestWindowTitle := this._Read(ini, "ZaloWeb", "HarvestWindowTitle", "[Harvest]")
+        this.PublishWindowTitle := this._Read(ini, "ZaloWeb", "PublishWindowTitle", "[Publish]")
+        this.HarvestUrl := this._Read(ini, "ZaloWeb", "HarvestUrl", "https://chat.zalo.me/#harvest")
+        this.PublishUrl := this._Read(ini, "ZaloWeb", "PublishUrl", "https://chat.zalo.me/#publish")
+        this.WebWindowTitle := this.HarvestWindowTitle
+        this.WebBridgeHost := this._Read(ini, "ZaloWeb", "BridgeHost", "127.0.0.1")
+        this.WebBridgePort := Max(1024, this._Int(ini, "ZaloWeb", "BridgePort", 8080))
+        this.WebChatUrl := this.HarvestUrl
+        this.WebChromePath := this._Read(ini, "ZaloWeb", "ChromePath", "")
 
         ; ── Paths ──
         this.DataDir := this._Resolve(this._Read(ini, "Paths", "DataDir", "data"))
@@ -88,88 +96,9 @@ class AppConfig {
             ini, "Groups", "SourceColumn", "group_name")
         this.SourceGroupReloadEachCycle := this._Bool(
             ini, "Groups", "ReloadSourceFileEachCycle", true)
-        this.GroupListTabHotkey := this._Read(
-            ini, "Groups", "ListTabHotkey", "!3")
-        this.GroupDiscoveryMode := StrLower(this._Read(
-            ini, "Groups", "DiscoveryMode", "hybrid"))
-        this.GroupListSettleMs := Max(500,
-            this._Int(ini, "Groups", "ListSettleMs", 1500))
-        this.GroupListScanPages := Max(1,
-            this._Int(ini, "Groups", "ListScanPages", 30))
-        this.GroupRefreshEveryCycles := Max(1,
-            this._Int(ini, "Groups", "RefreshEveryCycles", 12))
-        this.GroupListPaneClickXRatio := this._Float(
-            ini, "Groups", "ListPaneClickX", 0.20)
-        this.GroupListPaneClickYRatio := this._Float(
-            ini, "Groups", "ListPaneClickY", 0.42)
-        ; Top of left chat list — conversation search box (not Ctrl+F in-chat).
-        this.GroupSearchBoxClickXRatio := this._Float(
-            ini, "Groups", "SearchBoxClickX", 0.14)
-        this.GroupSearchBoxClickYRatio := this._Float(
-            ini, "Groups", "SearchBoxClickY", 0.075)
-        this.GroupSearchResultClickYRatio := this._Float(
-            ini, "Groups", "SearchResultClickY", 0.28)
-        this.SearchResultClickOffsetYPx := this._Int(
-            ini, "Groups", "SearchResultClickOffsetYPx", 0)
-        ; Skip far-left icon rail when locating sidebar search via Acc/ratio.
-        this.GroupSidebarMinXRatio := this._Float(
-            ini, "Groups", "SidebarMinX", 0.07)
-        ; Ctrl+F opens sidebar search when focus is on chat list (not message pane).
-        this.GroupSearchHotkey := this._Read(
-            ini, "Groups", "SearchHotkey", "^f")
-        this.GroupCommunityTabClickXRatio := this._Float(
-            ini, "Groups", "CommunityTabClickX", 0.28)
-        this.GroupCommunityTabClickYRatio := this._Float(
-            ini, "Groups", "CommunityTabClickY", 0.14)
-        this.CaptureCommunities := this._Bool(
-            ini, "Groups", "CaptureCommunities", true)
-        this.GroupListScrollMode := StrLower(this._Read(
-            ini, "Groups", "ListScrollMode", "wheel"))
-        this.GroupListWheelSteps := Max(1,
-            this._Int(ini, "Groups", "ListWheelSteps", 8))
-        this.GroupListUsePaneClick := this._Bool(
-            ini, "Groups", "ListUsePaneClick", false)
-        this.UiUseRatioClicks := this._Bool(
-            ini, "Groups", "UiUseRatioClicks", false)
-        this.GroupAccessibilityDepth := Max(3,
-            this._Int(ini, "Groups", "AccessibilityDepth", 18))
-        this.GroupAccessibilityLeftRatio := this._Float(
-            ini, "Groups", "AccessibilityLeftRatio", 0.52)
-        ; Fixed left chrome width (rail + chat list) in physical px when maximized.
-        ; 0 = fall back to 0.36 width ratio (drifts on ultrawide / fullscreen).
-        this.LayoutSidebarWidthPx := Max(0,
-            this._Int(ini, "Groups", "LayoutSidebarWidthPx", 380))
-        this.LayoutSidebarWidthRatio := this._Float(
-            ini, "Groups", "LayoutSidebarWidthRatio", 0.345)
-        this.LayoutMessageClickYRatio := this._Float(
-            ini, "Groups", "MessageClickY", 0.24)
-        this.LayoutMessageClickXRatio := this._Float(
-            ini, "Groups", "MessageClickX", 0.28)
-        this.LayoutComposeClickYRatio := this._Float(
-            ini, "Groups", "ComposeClickY", 0.92)
-        this.LayoutComposeClickXRatio := this._Float(
-            ini, "Groups", "ComposeClickX", 0.42)
-        this.ComposeClickOffsetYPx := this._Int(
-            ini, "Groups", "ComposeClickOffsetYPx", 75)
-        ; Kept for ini compatibility; OpenGroup always tries Acc ListItem first.
-        this.PreferAccessibleConversationClick := this._Bool(
-            ini, "Groups", "PreferAccessibleConversationClick", true)
-        this.VerifyActiveConversation := this._Bool(
-            ini, "Groups", "VerifyActiveConversation", true)
-        this.VerifyConversationFingerprint := this._Bool(
-            ini, "Groups", "VerifyConversationFingerprint", true)
-        this.OpenGroupMaxAttempts := Max(1,
-            this._Int(ini, "Groups", "OpenGroupMaxAttempts", 2))
-        this.GroupListManualFile := this._Resolve(this._Read(
-            ini, "Groups", "ManualListFile", "config\groups-manual.txt"))
-        this.GroupListIgnoredLabels := this._PipeList(this._Read(
-            ini, "Groups", "IgnoredLabels", ""))
         this.GroupUnreadMarkerPattern := this._Read(
             ini, "Groups", "UnreadMarkerPattern",
             "i)(?:tin nhắn mới|tin chưa đọc|chưa đọc|unread|new messages?)")
-        this.GroupListCaptureFile := this._Resolve(this._Read(
-            ini, "Paths", "GroupListCaptureFile",
-            "data\zalo-groups-capture.txt"))
 
         ; ── Blocklist table ──
         this.BlocklistXlsx := this._Resolve(this._Read(ini, "Groups", "BlocklistXlsx", "config\zalo-groups.xlsx"))
@@ -177,14 +106,10 @@ class AppConfig {
         this.BlocklistCsv := this._Resolve(this._Read(ini, "Groups", "BlocklistCsv", "config\blocklist.csv"))
 
         ; ── Capture ──
-        this.CaptureMethod := StrLower(this._Read(
-            ini, "Capture", "Method", "selectall"))
-        this.CaptureAccessibilityFallback := StrLower(this._Read(
-            ini, "Capture", "AccessibilityFallback", "selectall"))
         this.ListingStartPattern := this._Read(ini, "Capture", "ListingStartPattern", "")
         this.ImageMarkerPattern := this._Read(ini, "Capture", "ImageMarkerPattern", "")
         this.MaxMessagesPerGroup := this._Int(ini, "Capture", "MaxMessagesPerGroup", 50)
-        this.RequiredFields := this._List(this._Read(ini, "Capture", "RequiredFields", "address,price,owner_phone"))
+        this.RequiredFields := this._List(this._Read(ini, "Capture", "RequiredFields", ""))
 
         ; ── Output ──
         this.Separator := this._Read(ini, "Output", "Separator", "------------{group}------------")
@@ -201,21 +126,7 @@ class AppConfig {
         this.IncludeGroupHeader := this._Bool(ini, "Output", "IncludeGroupHeader", false)
 
         ; ── Images ──
-        this.ImageStrategy := StrLower(this._Read(ini, "Images", "Strategy", "clipboard"))
-        this.ForwardHotkey := this._Read(ini, "Images", "ForwardHotkey", "^q")
-        ; hotkey = Ctrl+Q in viewer; click = ratio button inside Zalo window.
-        this.ViewerForwardMode := StrLower(
-            this._Read(ini, "Images", "ViewerForwardMode", "hotkey"))
-        this.ViewerForwardClickX := this._Float(
-            ini, "Images", "ViewerForwardClickX", 0.92)
-        this.ViewerForwardClickY := this._Float(
-            ini, "Images", "ViewerForwardClickY", 0.92)
-        this.AlbumMaxImages := Max(1,
-            this._Int(ini, "Images", "AlbumMaxImages", 8))
         this.ImagesBeforeText := this._Bool(ini, "Images", "ImagesBeforeText", true)
-        this.RelayImagesPerListing := this._Bool(ini, "Images", "RelayPerListing", true)
-        this.RelayImagesPauseMs := this._Int(ini, "Images", "RelayPauseMs", 5000)
-        this.ImageCopyHotkey := this._Read(ini, "Images", "ImageCopyHotkey", "^c")
         this.MediaRequired := this._Bool(ini, "Images", "MediaRequired", true)
         this.MediaCapturePauseMs := this._Int(ini, "Images", "MediaCapturePauseMs", 5000)
         this.AutoCapture := this._Bool(ini, "Images", "AutoCapture", true)
@@ -223,8 +134,6 @@ class AppConfig {
             this._Read(ini, "Images", "AutoCaptureAnchor", "room_code"))
         this.AutoCaptureMaxRetries := Max(0,
             this._Int(ini, "Images", "AutoCaptureMaxRetries", 2))
-        this.AutoCaptureMode := StrLower(
-            this._Read(ini, "Images", "AutoCaptureMode", "accessibility"))
         this.AutoCaptureProbeImages := this._Bool(
             ini, "Images", "AutoCaptureProbeImages", true)
         this.AutoCaptureProbeMaxImages := Max(1,
@@ -233,26 +142,6 @@ class AppConfig {
             ini, "Images", "AutoCaptureReplaceUntrusted", true)
         this.AutoCaptureRepairPerCycle := Max(0,
             this._Int(ini, "Images", "AutoCaptureRepairPerCycle", 3))
-        this.ImageCandidateMaxDistancePx := Max(100,
-            this._Int(ini, "Images", "ImageCandidateMaxDistancePx", 900))
-        this.ImageCandidateDirection := StrLower(this._Read(
-            ini, "Images", "ImageCandidateDirection", "above"))
-        this.ImageCandidateMinWidthPx := Max(16,
-            this._Int(ini, "Images", "ImageCandidateMinWidthPx", 40))
-        this.ImageCandidateMinHeightPx := Max(16,
-            this._Int(ini, "Images", "ImageCandidateMinHeightPx", 40))
-        this.ImageViewerSettleMs := Max(200,
-            this._Int(ini, "Images", "ImageViewerSettleMs", 700))
-        this.ImageContextCopyKey := this._Read(
-            ini, "Images", "ImageContextCopyKey", "c")
-        ; Zalo menu accelerator for "Copy hình ảnh" is usually c or i.
-        this.ImageContextCopyKeys := this._Read(
-            ini, "Images", "ImageContextCopyKeys", "c,i")
-        this.ImageSelectMode := StrLower(
-            this._Read(ini, "Images", "ImageSelectMode", "shift_up"))
-        this.ImageSelectStepPx := Max(40,
-            this._Int(ini, "Images", "ImageSelectStepPx", 100))
-        this.FindInChatHotkey := this._Read(ini, "Images", "FindInChatHotkey", "^f")
 
         ; ── Relay mode ──
         ; TextOnly=1 disables image archive (debug). Default 0 = images then text.
@@ -278,11 +167,15 @@ class AppConfig {
 
         ; ── Startup / auto-run ──
         this.StartupAutoRunWatch := this._Bool(ini, "Startup", "AutoRunWatch", true)
-        this.StartupWaitForZaloSeconds := Max(5,
-            this._Int(ini, "Startup", "WaitForZaloSeconds", 120))
-        this.StartupLaunchZaloIfMissing := this._Bool(
-            ini, "Startup", "LaunchZaloIfMissing", true)
-        this.StartupMaximizeZalo := this._Bool(ini, "Startup", "MaximizeZalo", false)
+        this.StartupWaitForBrowserSeconds := Max(5,
+            this._Int(ini, "Startup", "WaitForBrowserSeconds",
+                this._Int(ini, "Startup", "WaitForZaloSeconds", 120)))
+        this.StartupLaunchBrowserIfMissing := this._Bool(
+            ini, "Startup", "LaunchBrowserIfMissing",
+            this._Bool(ini, "Startup", "LaunchZaloIfMissing", true))
+        this.StartupMaximizeBrowser := this._Bool(
+            ini, "Startup", "MaximizeBrowser",
+            this._Bool(ini, "Startup", "MaximizeZalo", false))
         this.NormalizedWindowWidth := Max(0,
             this._Int(ini, "Startup", "NormalizedWidth", 1100))
         this.NormalizedWindowHeight := Max(0,
@@ -295,13 +188,10 @@ class AppConfig {
             ini, "Startup", "ShowStopButton", true)
 
         ; ── Timing ──
-        this.SearchDelayMs := this._Int(ini, "Timing", "SearchDelayMs", 400)
-        this.OpenChatDelayMs := this._Int(ini, "Timing", "OpenChatDelayMs", 800)
         this.PasteDelayMs := this._Int(ini, "Timing", "PasteDelayMs", 200)
         this.SendDelayMs := this._Int(ini, "Timing", "SendDelayMs", 300)
         this.BetweenMessagesMs := this._Int(ini, "Timing", "BetweenMessagesMs", 900)
         this.BetweenGroupsMs := this._Int(ini, "Timing", "BetweenGroupsMs", 1200)
-        this.ForwardDialogMs := this._Int(ini, "Timing", "ForwardDialogMs", 900)
         this.ClipWaitSeconds := this._Int(ini, "Timing", "ClipWaitSeconds", 2)
         this.CaptureSettleMs := this._Int(ini, "Timing", "CaptureSettleMs", 600)
         this.AfterPublishRecheckMs := this._Int(ini, "Timing", "AfterPublishRecheckMs", 800)

@@ -26,7 +26,7 @@ for %%F in (
   Util.ahk JSON.ahk Config.ahk TableLoader.ahk GroupRegistry.ahk
   SourceGroupFile.ahk BotControlWindow.ahk BlockList.ahk Parser.ahk
   Storage.ahk StateStore.ahk QueueStore.ahk MediaStore.ahk Composer.ahk
-  ZaloUI.ahk Acc.ahk GroupActivity.ahk MediaCapturer.ahk Harvester.ahk
+  ZaloUI.ahk WebBridge.ahk GroupActivity.ahk MediaCapturer.ahk Harvester.ahk
   Publisher.ahk load-check.ahk diag-bot.ahk
 ) do if not exist "%WIN%\src\%%F" set "MISSING=%%F"
 if defined MISSING (

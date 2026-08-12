@@ -55,8 +55,8 @@ Mark("MediaStore.ahk")
 #Include Composer.ahk
 Mark("Composer.ahk")
 
-#Include Acc.ahk
-Mark("Acc.ahk")
+#Include WebBridge.ahk
+Mark("WebBridge.ahk")
 
 #Include GroupActivity.ahk
 Mark("GroupActivity.ahk")

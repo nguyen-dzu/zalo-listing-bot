@@ -15,8 +15,8 @@
 #Include QueueStore.ahk
 #Include MediaStore.ahk
 #Include Composer.ahk
-#Include Acc.ahk
 #Include GroupActivity.ahk
+#Include WebBridge.ahk
 #Include ZaloUI.ahk
 #Include MediaCapturer.ahk
 #Include Harvester.ahk
@@ -76,7 +76,10 @@ class ListingBotService {
         this.media := ListingMediaStore(this.config)
         this.repo := ListingRepository(this.config, this.queue)
         this._ReconcileMediaArchives()
-        this.ui := ZaloUIAdapter(this.config)
+        this.bridge := WebBridge(this.config)
+        this.bridge.Start()
+        this.bridge.OnEvent(ObjBindMethod(this, "_HandleBridgeEvent"))
+        this.ui := ZaloUIAdapter(this.config, this.bridge)
         this.composer := MessageComposer(this.config)
         this.harvestScheduler := HarvestScheduler(this.config)
         this.lastGroupListRaw := ""
@@ -134,6 +137,8 @@ class ListingBotService {
     Reload() {
         if this._RejectIfBusy("reload")
             return false
+        if this.HasProp("bridge") && this.bridge
+            this.bridge.Stop()
         sourceFile := this.config.SourceGroupFilePath
         this.config.Reload()
         this.config.SourceGroupFilePath := sourceFile
@@ -234,24 +239,12 @@ class ListingBotService {
         mainGroups := this.registry.MainGroups()
         if !mainGroups.Length
             return this._Notify("Thiếu nhóm chính", "Chưa khai báo nhóm type=main.", 3)
-        if this.config.ImageStrategy = "off"
-            return this._Notify("Ảnh đang tắt", "Đặt [Images] Strategy=forward hoặc clipboard.", 2)
-
-        if this.config.ImageStrategy = "clipboard" {
-            try {
-                if !this.ui.CopyImageFromSelection()
-                    throw Error("Không copy được bubble ảnh đang chọn.")
-            } catch as err {
-                return this._Notify("Lỗi copy ảnh", err.Message, 3)
-            }
-        }
+        if !this.ui.CopyImageFromSelection()
+            return this._Notify("Lỗi copy ảnh", "Clipboard không có ảnh. Chọn ảnh trên Zalo Web trước.", 3)
 
         for group in mainGroups {
             try {
-                if this.config.ImageStrategy = "clipboard"
-                    this.ui.RelayClipboardImage(group["group_name"])
-                else
-                    this.ui.ForwardSelection(group["group_name"])
+                this.ui.RelayClipboardImage(group["group_name"])
             } catch as err {
                 return this._Notify("Lỗi chuyển ảnh", group["group_name"] ": " err.Message, 3)
             }
@@ -387,7 +380,7 @@ class ListingBotService {
             if this.config.StartupDelayMs > 0
                 Sleep this.config.StartupDelayMs
             this._Notify("Auto-start",
-                "Zalo sẵn sàng — bật watch loop tự động.", 1)
+                "Zalo Web sẵn sàng — bật watch loop tự động.", 1)
             return this.RunExclusive("watch", ObjBindMethod(this, "RunWatchLoop"))
         } catch as err {
             this._Notify("Auto-start lỗi", err.Message, 3)
@@ -395,24 +388,108 @@ class ListingBotService {
         }
     }
 
+    _HandleBridgeEvent(payload) {
+        if !IsObject(payload) || !payload.Has("type") || payload["type"] != "message"
+            return
+        group := payload.Has("group") ? payload["group"] : ""
+        text := payload.Has("text") ? payload["text"] : ""
+        if group = "" || Trim(text) = ""
+            return
+        ; Image capture needs a follow-up bridge command and must not run inside
+        ; the HTTP event handler. Leave image posts unseen so the scheduled scan
+        ; processes and archives them through the normal Harvester path.
+        hasImages := (payload.Has("hasImage") && payload["hasImage"])
+            || (payload.Has("images") && payload["images"].Length > 0)
+        if hasImages
+            return
+        hash := payload.Has("hash") ? payload["hash"] : FnvHash(text)
+        if this.state.IsSeen(group, hash)
+            return
+
+        keyword := this.blockList.Match(text)
+        if keyword != "" {
+            this.state.MarkSeen(group, hash)
+            return
+        }
+
+        listing := ListingParser.Parse(text, this.config.ImageMarkerPattern)
+        if ListingParser.Validate(listing, this.config.RequiredFields).Length {
+            this.state.MarkSeen(group, hash)
+            return
+        }
+
+        this.repo.SaveListing(listing, group, hash)
+        this.state.MarkSeen(group, hash)
+        this.state.Save()
+    }
+
     _WaitForZaloReady() {
-        exe := this.config.ExeName
-        timeout := this.config.StartupWaitForZaloSeconds
-        if WinExist("ahk_exe " exe) {
-            this._PrepareZaloWindow()
-            return true
-        }
-        if this.config.StartupLaunchZaloIfMissing {
-            path := this._ResolveZaloExePath()
-            if path = ""
-                throw Error(
-                    "Không tìm thấy Zalo.exe. Cấu hình [Zalo] ExePath trong config.ini.")
-            Run path
-        }
+        exe := this.config.BrowserExeName
+        timeout := this.config.StartupWaitForBrowserSeconds
+        if !this.bridge
+            throw Error("WebBridge chưa khởi tạo.")
+        if !this.bridge.running
+            this.bridge.Start()
+        if this.config.StartupLaunchBrowserIfMissing
+            this._EnsureBrowserWindows()
         if !WinWait("ahk_exe " exe,, timeout)
-            throw Error("Zalo không mở sau " timeout " giây.")
-        this._PrepareZaloWindow()
+            throw Error("Chrome/Zalo Web không mở sau " timeout " giây.")
+        this._PingWebBridge(timeout)
+        this._PrepareBrowserWindow()
         return true
+    }
+
+    _EnsureBrowserWindows() {
+        exe := this.config.BrowserExeName
+        path := this._ResolveChromePath()
+        if !WinExist(this.config.HarvestWindowTitle " ahk_exe " exe) {
+            if path != ""
+                Run Format('"{1}" --new-window "{2}"', path, this.config.HarvestUrl)
+            else
+                Run this.config.HarvestUrl
+            Sleep 800
+        }
+        if !WinExist(this.config.PublishWindowTitle " ahk_exe " exe) {
+            if path != ""
+                Run Format('"{1}" --new-window "{2}"', path, this.config.PublishUrl)
+            else
+                Run this.config.PublishUrl
+            Sleep 800
+        }
+    }
+
+    _PingWebBridge(timeoutSeconds := 30) {
+        this.bridge.WaitForRoles(timeoutSeconds)
+        deadline := A_TickCount + (timeoutSeconds * 1000)
+        while A_TickCount < deadline {
+            try {
+                harvest := this.bridge.RunCommand("ping", Map(), 3000, "harvest")
+                publish := this.bridge.RunCommand("ping", Map(), 3000, "publish")
+                if harvest.Has("role") && harvest["role"] = "harvest"
+                    && publish.Has("role") && publish["role"] = "publish"
+                    return true
+            } catch {
+                Sleep 1000
+            }
+        }
+        throw Error(
+            "Tampermonkey userscript chưa kết nối cả 2 cửa sổ.`n"
+            . "Mở bookmark #harvest và #publish trên https://chat.zalo.me/")
+    }
+
+    _ResolveChromePath() {
+        if this.config.WebChromePath != "" && FileExist(this.config.WebChromePath)
+            return this.config.WebChromePath
+        candidates := [
+            EnvGet("ProgramFiles") "\Google\Chrome\Application\chrome.exe",
+            EnvGet("ProgramFiles(x86)") "\Google\Chrome\Application\chrome.exe",
+            EnvGet("LocalAppData") "\Google\Chrome\Application\chrome.exe"
+        ]
+        for path in candidates {
+            if path != "" && FileExist(path)
+                return path
+        }
+        return ""
     }
 
     _EnsureGroupsDiscovered() {
@@ -446,38 +523,10 @@ class ListingBotService {
         return true
     }
 
-    _PrepareZaloWindow() {
+    _PrepareBrowserWindow() {
         try DllCall("SetThreadDpiAwarenessContext", "Ptr", -4, "Ptr")
-        exe := "ahk_exe " this.config.ExeName
-        WinActivate exe
-        if !WinWaitActive(exe,, 5)
-            throw Error("Không kích hoạt được cửa sổ Zalo.")
-        if this.config.StartupMaximizeZalo {
-            WinMaximize exe
-            Sleep 450
-            ; Confirm maximize (some Electron builds need a second request).
-            if WinGetMinMax(exe) != 1
-                WinMaximize exe
-        } else {
-            this.ui.EnsureNormalized()
-        }
+        this.ui.EnsureWindowState()
         Sleep 500
-    }
-
-    _ResolveZaloExePath() {
-        if this.config.ZaloExePath != "" && FileExist(this.config.ZaloExePath)
-            return this.config.ZaloExePath
-        candidates := [
-            EnvGet("LocalAppData") "\Programs\Zalo\Zalo.exe",
-            A_AppData "\Zalo\Zalo.exe",
-            EnvGet("ProgramFiles") "\Zalo\Zalo.exe",
-            EnvGet("ProgramFiles(x86)") "\Zalo\Zalo.exe"
-        ]
-        for path in candidates {
-            if path != "" && FileExist(path)
-                return path
-        }
-        return ""
     }
 
     RunWatchLoop() {
@@ -846,7 +895,7 @@ try {
 
     _autoMode := cfg.StartupAutoRunWatch ? "tu dong" : "thu cong (hotkey)"
     TrayTip Format(
-        "San sang — {1} nhom nguon, {2} nhom chinh`n{3}`nChe do: {4}",
+        "San sang — {1} nhom nguon, {2} nhom chinh`n{3}`nZalo Web`nChe do: {4}",
         bot.registry.SourceGroups().Length,
         bot.registry.MainGroups().Length,
         bot.QueueStatus(), _autoMode),

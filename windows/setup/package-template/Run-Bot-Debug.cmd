@@ -45,7 +45,7 @@ for %%C in (
       BotModules.ahk Util.ahk JSON.ahk Config.ahk TableLoader.ahk GroupRegistry.ahk
       SourceGroupFile.ahk BotControlWindow.ahk BlockList.ahk Parser.ahk
       Storage.ahk StateStore.ahk QueueStore.ahk MediaStore.ahk Composer.ahk
-      ZaloUI.ahk Acc.ahk GroupActivity.ahk MediaCapturer.ahk Harvester.ahk
+      ZaloUI.ahk WebBridge.ahk GroupActivity.ahk MediaCapturer.ahk Harvester.ahk
       Publisher.ahk
     ) do (
       if not exist "!SRC_DIR!%%F" set "SRC_OK=0"
@@ -61,7 +61,7 @@ for %%C in (
         BotModules.ahk Util.ahk JSON.ahk Config.ahk TableLoader.ahk GroupRegistry.ahk
         SourceGroupFile.ahk BotControlWindow.ahk BlockList.ahk Parser.ahk
         Storage.ahk StateStore.ahk QueueStore.ahk MediaStore.ahk Composer.ahk
-        ZaloUI.ahk Acc.ahk GroupActivity.ahk MediaCapturer.ahk Harvester.ahk
+        ZaloUI.ahk WebBridge.ahk GroupActivity.ahk MediaCapturer.ahk Harvester.ahk
         Publisher.ahk
       ) do if not exist "!SRC_DIR!%%F" echo     thieu: !SRC_DIR!%%F
     )

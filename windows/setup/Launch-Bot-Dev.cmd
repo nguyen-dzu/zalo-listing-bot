@@ -5,7 +5,7 @@ title Zalo Listing Bot - Dev
 
 set "WIN=%~dp0.."
 set "BOT=%WIN%\src\Bot.ahk"
-set "ACC=%WIN%\src\Acc.ahk"
+set "BRIDGE=%WIN%\src\WebBridge.ahk"
 
 set "AHK="
 for %%P in (
@@ -24,8 +24,8 @@ if not exist "%BOT%" (
   pause
   exit /b 1
 )
-if not exist "%ACC%" (
-  echo Thieu Acc.ahk — chay: git pull origin main
+if not exist "%BRIDGE%" (
+  echo Thieu WebBridge.ahk — chay: git pull origin main
   pause
   exit /b 1
 )

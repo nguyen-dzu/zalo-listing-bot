@@ -30,12 +30,12 @@ if not defined BOT (
   exit /b 1
 )
 
-set "ACC=%BOT:\Bot.ahk=\Acc.ahk%"
-if not exist "%ACC%" (
+set "BRIDGE=%BOT:\Bot.ahk=\WebBridge.ahk%"
+if not exist "%BRIDGE%" (
   echo.
-  echo  Thieu Acc.ahk - dist\src co the cu.
+  echo  Thieu WebBridge.ahk - dist\src co the cu.
   echo  Chay: windows\setup\Launch-Bot-Dev.cmd
-  echo  Can: %ACC%
+  echo  Can: %BRIDGE%
   pause
   exit /b 1
 )

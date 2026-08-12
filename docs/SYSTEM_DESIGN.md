@@ -2,7 +2,9 @@
 
 ## 1. Goals
 
-The bot collects room listings from **multiple source groups** on Zalo PC, filters out closed/deal posts, stores each post as a local JSON object, then aggregates and sends them to the **main group**.
+The bot collects room listings from **multiple source groups** on Zalo Web, filters out closed/deal posts, stores each post as a local JSON object, then publishes to **main groups**.
+
+Windows only. AutoHotkey v2 + Chrome (Tampermonkey userscript) + local HTTP bridge — no server component.
 
 | Aspect | Description |
 |--------|-------------|
@@ -15,7 +17,6 @@ The bot collects room listings from **multiple source groups** on Zalo PC, filte
 
 ## 2. Scope
 
-Windows only. The entire project is AutoHotkey v2 controlling Zalo PC — no other runtime, no server component.
 
 ## 3. Architecture
 

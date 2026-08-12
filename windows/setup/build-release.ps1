@@ -49,8 +49,11 @@ New-Item -ItemType Directory -Force -Path $configDir, $setupOut,
 # Sample config
 Copy-Item (Join-Path $windowsRoot "config\config.example.ini") (Join-Path $configDir "config.example.ini")
 Copy-Item (Join-Path $windowsRoot "config\blocklist.example.csv") (Join-Path $configDir "blocklist.example.csv")
-Copy-Item (Join-Path $windowsRoot "config\groups-manual.example.txt") (Join-Path $configDir "groups-manual.example.txt")
 Copy-Item (Join-Path $windowsRoot "config\source-groups.example.csv") (Join-Path $configDir "source-groups.example.csv")
+$repoRoot = Split-Path $windowsRoot -Parent
+$webOut = Join-Path $releaseDir "web"
+New-Item -ItemType Directory -Force -Path $webOut | Out-Null
+Copy-Item (Join-Path $repoRoot "web\zalo-listing-bot.user.js") (Join-Path $webOut "zalo-listing-bot.user.js") -Force -ErrorAction SilentlyContinue
 Copy-Item (Join-Path $configDir "config.example.ini") (Join-Path $configDir "config.ini")
 Copy-Item (Join-Path $configDir "blocklist.example.csv") (Join-Path $configDir "blocklist.csv")
 Copy-Item (Join-Path $configDir "source-groups.example.csv") (Join-Path $configDir "source-groups.csv")
@@ -61,7 +64,6 @@ Copy-Item (Join-Path $setupDir "install-startup.cmd") $setupOut
 Copy-Item (Join-Path $setupDir "package-template\Install.cmd") (Join-Path $releaseDir "Install.cmd")
 Copy-Item (Join-Path $setupDir "package-template\Run-Bot-Debug.cmd") (Join-Path $releaseDir "Run-Bot-Debug.cmd")
 Copy-Item (Join-Path $setupDir "package-template\RUN-ME-FIRST.txt") (Join-Path $releaseDir "RUN-ME-FIRST.txt")
-Copy-Item (Join-Path $windowsRoot "src\Acc.LICENSE.txt") (Join-Path $releaseDir "Acc.LICENSE.txt")
 
 function Find-Ahk2Exe {
     $candidates = @(
@@ -105,7 +107,6 @@ if ($compiler) {
 $fallbackDir = Join-Path $releaseDir "src"
 New-Item -ItemType Directory -Force -Path $fallbackDir | Out-Null
 Get-ChildItem (Join-Path $windowsRoot "src\*.ahk") | Copy-Item -Destination $fallbackDir -Force
-Copy-Item (Join-Path $windowsRoot "src\Acc.LICENSE.txt") $fallbackDir -Force
 Copy-Item (Join-Path $setupDir "package-template\Launch-Bot.cmd") (Join-Path $releaseDir "Launch-Bot.cmd") -Force
 if (-not $compiled) {
     if (Test-Path $exeOut) {

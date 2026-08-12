@@ -19,7 +19,6 @@
 #Include ../src/MediaCapturer.ahk
 #Include ../src/Storage.ahk
 #Include ../src/Harvester.ahk
-#Include ../src/ZaloUI.ahk
 #Include ../src/Publisher.ahk
 #Include TestLog.ahk
 
@@ -88,7 +87,6 @@ class QueueTestConfig {
     SessionCooldownMs := 0
     BetweenBatchesMs := 0
     ImagesBeforeText := true
-    ImageStrategy := "clipboard"
     AutoCaptureProbeImages := false
     OneMessagePerListing := true
     SendSeparatorAsMessage := true
@@ -131,8 +129,6 @@ class FakeHarvestScheduleState {
 
 class HarvesterTestConfig {
     CaptureSettleMs := 0
-    CaptureMethod := "accessibility"
-    CaptureAccessibilityFallback := "selectall"
     ListingStartPattern := ""
     ImageMarkerPattern := ""
     RequiredFields := []
@@ -147,26 +143,10 @@ class HarvesterTestConfig {
     AfterPublishRecheckMs := 0
 }
 
-class LayoutTestConfig {
-    ExeName := "Zalo.exe"
-    LayoutSidebarWidthPx := 380
-    LayoutSidebarWidthRatio := 0.345
-    LayoutMessageClickYRatio := 0.24
-    LayoutMessageClickXRatio := 0.28
-    LayoutComposeClickYRatio := 0.92
-    LayoutComposeClickXRatio := 0.42
-    GroupSearchBoxClickXRatio := 0.55
-    GroupSearchBoxClickYRatio := 0.075
-    GroupSearchResultClickYRatio := 0.28
-    ComposeClickOffsetYPx := 75
-}
-
 class ForwardCaptureTestConfig {
     AutoCapture := true
     AutoCaptureProbeImages := true
     AutoCaptureAnchor := "room_code"
-    ImageStrategy := "forward"
-    AlbumMaxImages := 8
     QueueLogFile := ""
 }
 
@@ -759,35 +739,6 @@ Check("nhóm chưa harvest được ưu tiên trước audit",
     && mixedStampPlan["groups"].Length = 2
     && mixedStampPlan["groups"][1]["group_name"] = "Nhóm B"
     && mixedStampPlan["groups"][2]["group_name"] = "Nhóm A")
-
-Section("Zalo UI geometry guards")
-layoutUi := ZaloUIAdapter(LayoutTestConfig())
-layout := layoutUi._LayoutSnapshot(
-    Map("x", 0, "y", 0, "w", 1920, "h", 1032, "hwnd", 0))
-Check("layout fullscreen dùng sidebar px cố định",
-    layout["minX"] = 380 && layout["sidebarWidth"] = 380)
-Check("layout compose dùng semantic row gần đáy",
-    layout["composeY"] = Round(1032 * 0.92) + 75
-    && layout["cy"] = Round(1032 * 0.48))
-Check("layout text focus tránh vùng ảnh giữa chat",
-    layout["textFocusX"] < layout["cx"]
-    && layout["textFocusY"] < layout["cy"]
-    && layout["textFocusY"] = Round(1032 * 0.24))
-Check("layout search result nằm trong sidebar",
-    layout["firstResultX"] < layout["minX"]
-    && layout["searchY"] = Round(1032 * 0.075)
-    && layout["firstResultY"] = Round(1032 * 0.28))
-norm := layoutUi._LayoutSnapshot(
-    Map("x", 410, "y", 91, "w", 1100, "h", 850, "hwnd", 0))
-Check("layout normalized dùng sidebar ratio",
-    norm["sidebarWidth"] = Round(1100 * 0.345)
-    && norm["minX"] = 410 + Round(1100 * 0.345))
-layoutUi.lastOpenedFingerprint := "same-chat"
-layoutUi.lastOpenedGroup := "Nhóm A"
-Check("fingerprint chặn chat dính sang nhóm khác",
-    !layoutUi._FingerprintMatchesOpen("Nhóm B", "same-chat"))
-Check("fingerprint cho phép nội dung mới",
-    layoutUi._FingerprintMatchesOpen("Nhóm B", "new-chat"))
 
 activityText := "
 (
@@ -1539,7 +1490,7 @@ forwardCapture := ListingMediaCapturer(
 forwardProbeRecord := Map(
     "id", "forward-probe", "room_code", "P404",
     "address", "", "raw_text", "Mã phòng: P404", "image_count", 0)
-Check("forward probe không phóng đại số ảnh",
+Check("web probe không phóng đại số ảnh",
     forwardCapture.CaptureForRecord("Nhóm Probe", forwardProbeRecord)
     && forwardProbeRecord["image_count"] = 1
     && forwardQueue.attached.Length = 1)

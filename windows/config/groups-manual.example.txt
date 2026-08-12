@@ -1,7 +1,0 @@
-# Fallback danh sach nhom/cong dong (1 ten moi dong).
-# Bot dung file nay khi Alt+3 copy khong ra text.
-# Dong bat dau bang # hoac ; se bi bo qua.
-#
-# Vi du:
-# Nhom Cho Thue Q1
-# Cong dong BDS Sai Gon

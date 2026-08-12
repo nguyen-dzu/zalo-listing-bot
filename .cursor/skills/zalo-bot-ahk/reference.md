@@ -9,17 +9,11 @@ cfg := AppConfig.Instance()
 cfg.Reload()
 ```
 
-Properties: `ExeName`, `DataDir`, `ListingsFile`, `ListingsDir`, `MediaDir`, `QueueDir`,
-`QueueEventsFile`, `QueueSnapshotFile`, `QueueLogFile`, `AccessLogFile`,
-`HarvestStateFile`, `HarvestStateDir`,
-`OutputGroupNames`, `GroupListTabHotkey`, `GroupListScanPages`,
-`BlocklistXlsx`, `BlocklistSheet`, `BlocklistCsv`,
-`CaptureMethod`, `ListingStartPattern`, `ImageMarkerPattern`, `MaxMessagesPerGroup`, `RequiredFields`,
-`Separator`, `ListingsPerMessage`, `ListingSeparator`, `MaskPhone`, `PhoneHint`,
-`ImageStrategy`, `MediaRequired`, `LeaseSize`, `MaxBatchesPerSession`, `MaxPublishAttempts`,
-`SearchDelayMs`, `OpenChatDelayMs`, `PasteDelayMs`, `SendDelayMs`, `BetweenMessagesMs`,
-`BetweenGroupsMs`, `ForwardDialogMs`, `ClipWaitSeconds`, `MaxSeenHashes`,
-plus the `Hotkey*` values.
+Properties: `BrowserExeName`, `WebWindowTitle`, `WebBridgeHost`, `WebBridgePort`, `WebChatUrl`,
+`DataDir`, `ListingsDir`, `MediaDir`, `QueueDir`, `OutputGroupNames`,
+`BlocklistCsv`, `ListingStartPattern`, `ImageMarkerPattern`, `RequiredFields`,
+`ListingSeparator`, `MaskPhone`, `MediaRequired`, `AutoCapture`, `LeaseSize`,
+`PasteDelayMs`, `SendDelayMs`, `BetweenMessagesMs`, `ClipWaitSeconds`, plus `Hotkey*` values.
 
 ### TableLoader
 

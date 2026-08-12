@@ -1,6 +1,4 @@
-# Create Zalo + Zalo Listing Bot shortcuts in Windows Startup folder.
-# Dev repo:  windows\setup\install-startup.ps1
-# Release:   setup\install-startup.ps1 (inside portable folder)
+# Create Chrome (Zalo Web Harvest + Publish) + Zalo Listing Bot shortcuts in Startup.
 
 $ErrorActionPreference = "Stop"
 
@@ -32,6 +30,40 @@ function Find-Ahk64 {
     return $null
 }
 
+function Find-Chrome {
+    param([string]$configuredPath)
+    if ($configuredPath -and (Test-Path $configuredPath)) { return $configuredPath }
+    $candidates = @(
+        "${env:ProgramFiles}\Google\Chrome\Application\chrome.exe",
+        "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+        "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) { return $candidate }
+    }
+    return $null
+}
+
+function New-ChromeShortcut {
+    param(
+        [string]$startup,
+        [object]$shell,
+        [string]$chromePath,
+        [string]$url,
+        [string]$name,
+        [string]$description
+    )
+    $link = Join-Path $startup "$name.lnk"
+    $shortcut = $shell.CreateShortcut($link)
+    $shortcut.TargetPath = $chromePath
+    $shortcut.Arguments = "--new-window `"$url`""
+    $shortcut.WorkingDirectory = Split-Path $chromePath -Parent
+    $shortcut.WindowStyle = 7
+    $shortcut.Description = $description
+    $shortcut.Save()
+    Write-Host "Created: $link"
+}
+
 $setupDir = $PSScriptRoot
 $packageRoot = Split-Path $setupDir -Parent
 $portableExe = Join-Path $packageRoot "ZaloListingBot.exe"
@@ -39,45 +71,28 @@ $portableConfig = Join-Path $packageRoot "config\config.ini"
 $portableConfigExample = Join-Path $packageRoot "config\config.example.ini"
 
 if ((Test-Path $portableExe) -or (Test-Path $portableConfig) -or (Test-Path $portableConfigExample)) {
-    $windowsRoot = $packageRoot
     $botExe = $portableExe
     $botScript = Join-Path $packageRoot "src\Bot.ahk"
     $configIni = $portableConfig
     $configExample = $portableConfigExample
 } else {
-    $windowsRoot = Split-Path $setupDir -Parent
     $botExe = $null
-    $botScript = Join-Path $windowsRoot "src\Bot.ahk"
-    $configIni = Join-Path $windowsRoot "config\config.ini"
-    $configExample = Join-Path $windowsRoot "config\config.example.ini"
-    if (-not (Test-Path $botScript) -and -not (Test-Path $botExe)) {
-        Write-Error "Bot not found. Run from repo setup/ or portable package setup/."
-    }
+    $botScript = Join-Path (Split-Path $setupDir -Parent) "src\Bot.ahk"
+    $configIni = Join-Path (Split-Path $setupDir -Parent) "config\config.ini"
+    $configExample = Join-Path (Split-Path $setupDir -Parent) "config\config.example.ini"
 }
 
 $iniPath = if (Test-Path $configIni) { $configIni } else { $configExample }
-$zaloPath = Read-IniValue $iniPath "Zalo" "ExePath" ""
-if (-not $zaloPath) {
-    $candidates = @(
-        "$env:LOCALAPPDATA\Programs\Zalo\Zalo.exe",
-        "$env:APPDATA\Zalo\Zalo.exe",
-        "${env:ProgramFiles}\Zalo\Zalo.exe",
-        "${env:ProgramFiles(x86)}\Zalo\Zalo.exe"
-    )
-    foreach ($candidate in $candidates) {
-        if (Test-Path $candidate) {
-            $zaloPath = $candidate
-            break
-        }
-    }
-}
+$harvestUrl = Read-IniValue $iniPath "ZaloWeb" "HarvestUrl" "https://chat.zalo.me/#harvest"
+$publishUrl = Read-IniValue $iniPath "ZaloWeb" "PublishUrl" "https://chat.zalo.me/#publish"
+$chromePath = Find-Chrome (Read-IniValue $iniPath "ZaloWeb" "ChromePath" "")
 
 $startup = [Environment]::GetFolderPath("Startup")
 $shell = New-Object -ComObject WScript.Shell
 $botLink = Join-Path $startup "Zalo Listing Bot.lnk"
 $botShortcut = $shell.CreateShortcut($botLink)
 
-if ((Test-Path $botExe)) {
+if ($botExe -and (Test-Path $botExe)) {
     $botShortcut.TargetPath = $botExe
     $botShortcut.WorkingDirectory = $packageRoot
     Write-Host "Startup shortcut -> ZaloListingBot.exe"
@@ -97,19 +112,13 @@ $botShortcut.Description = "Zalo Listing Bot - auto harvest/publish"
 $botShortcut.Save()
 Write-Host "Created: $botLink"
 
-if ($zaloPath -and (Test-Path $zaloPath)) {
-    $zaloLink = Join-Path $startup "Zalo.lnk"
-    $zaloShortcut = $shell.CreateShortcut($zaloLink)
-    $zaloShortcut.TargetPath = $zaloPath
-    $zaloShortcut.WorkingDirectory = Split-Path $zaloPath -Parent
-    $zaloShortcut.WindowStyle = 7
-    $zaloShortcut.Description = "Zalo PC"
-    $zaloShortcut.Save()
-    Write-Host "Created: $zaloLink"
+if ($chromePath) {
+    New-ChromeShortcut $startup $shell $chromePath $harvestUrl "Zalo Harvest" "Zalo Web Harvest window (#harvest)"
+    New-ChromeShortcut $startup $shell $chromePath $publishUrl "Zalo Publish" "Zalo Web Publish window (#publish)"
 } else {
-    Write-Warning "Zalo.exe not found - only bot shortcut was created. Set [Zalo] ExePath in config.ini."
+    Write-Warning "Chrome not found - only bot shortcut was created. Set [ZaloWeb] ChromePath in config.ini."
 }
 
 Write-Host ""
 Write-Host "Startup folder: $startup"
-Write-Host "After Windows login, Zalo and the bot will start automatically."
+Write-Host "After login: 2 Chrome windows (Harvest + Publish) and the bot start automatically."

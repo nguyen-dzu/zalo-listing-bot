@@ -1,5 +1,5 @@
 #Requires AutoHotkey v2.0
-; MediaCapturer.ahk — Service: auto-select image bubbles and archive during harvest
+; MediaCapturer.ahk — archive listing images via Zalo Web DOM bridge
 
 class ListingMediaCapturer {
     __New(config, ui, mediaStore, queueStore) {
@@ -9,7 +9,6 @@ class ListingMediaCapturer {
         this.queue := queueStore
     }
 
-    ; Pure helper for tests — pick a Zalo find-in-chat query from a saved record.
     static BuildSearchAnchor(record, config) {
         mode := config.HasProp("AutoCaptureAnchor")
             ? config.AutoCaptureAnchor : "room_code"
@@ -53,62 +52,28 @@ class ListingMediaCapturer {
 
         anchor := ListingMediaCapturer.BuildSearchAnchor(record, this.config)
         if anchor = "" {
-            this._LogFail(record, "", "Không có anchor tìm bubble")
+            this._LogFail(record, "", "Không có anchor tìm ảnh")
             return false
-        }
-
-        ; Forward strategy: only need the first album thumbnail; Viewer + Right
-        ; walks the rest. Mark queue ready without BitBlt archives.
-        if this.config.ImageStrategy = "forward" {
-            try {
-                locations := this.ui.FindImageBubblesNearMessage(anchor, 1, true)
-                if !locations.Length {
-                    if imageCount > 0
-                        throw Error("Không tìm thấy ảnh đầu album gần listing.")
-                    return true
-                }
-                ; Probe confirms only the first thumbnail. Never inflate an
-                ; unknown album to AlbumMaxImages or publish phantom images.
-                if imageCount <= 0
-                    record["image_count"] := 1
-                this.queue.AttachMedia(record["id"], [], [])
-                this._Log("auto_capture_ok mode=forward group=" groupName
-                    " id=" record["id"]
-                    " room=" (record.Has("room_code") ? record["room_code"] : "")
-                    " images=" record["image_count"])
-                return true
-            } catch as err {
-                this._LogFail(record, anchor, err.Message)
-                return false
-            }
         }
 
         maxRetries := this.config.AutoCaptureMaxRetries
         Loop maxRetries + 1 {
             try {
-                if this.config.AutoCaptureMode = "accessibility" {
-                    limit := imageCount > 0
-                        ? imageCount : this.config.AutoCaptureProbeMaxImages
-                    allowHeuristic := imageCount > 0
-                        || this.config.AutoCaptureProbeImages
-                    locations := this.ui.FindImageBubblesNearMessage(
-                        anchor, limit, allowHeuristic)
-                    if !locations.Length {
-                        if imageCount > 0
-                            throw Error("Không tìm thấy image bubble gần listing.")
-                        return true
-                    }
-                    captured := this._ArchiveLocations(
-                        groupName, record, anchor, locations)
-                    if captured > 0 && imageCount <= 0
-                        record["image_count"] := captured
-                } else {
-                    if imageCount <= 0
-                        return true
-                    this.ui.FindMessageInConversation(anchor)
-                    this.ui.SelectImageBubblesAbove(imageCount)
-                    this.ArchiveFromSelection(record, false)
+                limit := imageCount > 0
+                    ? imageCount : this.config.AutoCaptureProbeMaxImages
+                allowHeuristic := imageCount > 0
+                    || this.config.AutoCaptureProbeImages
+                locations := this.ui.FindImageBubblesNearMessage(
+                    anchor, limit, allowHeuristic)
+                if !locations.Length {
+                    if imageCount > 0
+                        throw Error("Không tìm thấy ảnh gần listing.")
+                    return true
                 }
+                captured := this._ArchiveLocations(
+                    groupName, record, anchor, locations)
+                if captured > 0 && imageCount <= 0
+                    record["image_count"] := captured
                 this._Log("auto_capture_ok group=" groupName
                     " id=" record["id"]
                     " room=" (record.Has("room_code") ? record["room_code"] : "")
@@ -155,7 +120,7 @@ class ListingMediaCapturer {
             prepared := this.media.PrepareArchive(id, captured > 0)
             try {
                 if !this.ui.CopyImageAt(location)
-                    throw Error("Image bubble không tạo bitmap clipboard.")
+                    throw Error("Không copy ảnh vào clipboard.")
                 this.ui.SaveClipboardArchive(prepared["temp_path"])
                 this.media.CommitGeneration(prepared)
                 captured++
@@ -169,12 +134,12 @@ class ListingMediaCapturer {
             }
         }
         if !captured
-            throw Error("Không capture được bitmap nào.")
+            throw Error("Không capture được ảnh nào.")
 
         this.media.WriteManifest(id, Map(
             "capture_version", 2,
             "validated_bitmap", 1,
-            "capture_mode", "accessibility_single",
+            "capture_mode", "web_dom",
             "source_group", groupName,
             "anchor", anchor,
             "image_count", captured,
