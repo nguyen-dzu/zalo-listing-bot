@@ -10,6 +10,7 @@ class PublishQueueStore {
         this.snapshotPath := config.QueueSnapshotFile
         this.records := Map()
         this.statusIndex := Map()
+        this.leaseIndex := Map()
         this.order := []
         this.nextSeq := 1
         this.eventsSinceSnapshot := 0
@@ -23,20 +24,39 @@ class PublishQueueStore {
     Load() {
         this.records := Map()
         this.statusIndex := Map()
+        this.leaseIndex := Map()
         this.order := []
         this.nextSeq := 1
         this.eventsSinceSnapshot := 0
 
         raw := ReadTextFile(this.snapshotPath)
         if Trim(raw) != "" {
-            try {
-                snapshot := JSON.Parse(raw)
-                if snapshot is Map {
-                    if snapshot.Has("next_seq")
-                        this.nextSeq := snapshot["next_seq"]
-                    if snapshot.Has("records") && snapshot["records"] is Array {
-                        for entry in snapshot["records"]
-                            this._PutEntry(entry)
+            normalizedSnapshot := NormalizeNewlines(raw)
+            firstBreak := InStr(normalizedSnapshot, "`n")
+            firstLine := Trim(firstBreak
+                ? SubStr(normalizedSnapshot, 1, firstBreak - 1)
+                : normalizedSnapshot)
+            if InStr(firstLine, "queue_snapshot_jsonl") {
+                lines := StrSplit(normalizedSnapshot, "`n")
+                header := JSON.Parse(Trim(lines[1]))
+                if header.Has("next_seq")
+                    this.nextSeq := header["next_seq"]
+                Loop lines.Length - 1 {
+                    line := Trim(lines[A_Index + 1])
+                    if line = ""
+                        continue
+                    this._PutEntry(JSON.Parse(line))
+                }
+            } else {
+                try {
+                    snapshot := JSON.Parse(raw)
+                    if snapshot is Map {
+                        if snapshot.Has("next_seq")
+                            this.nextSeq := snapshot["next_seq"]
+                        if snapshot.Has("records") && snapshot["records"] is Array {
+                            for entry in snapshot["records"]
+                                this._PutEntry(entry)
+                        }
                     }
                 }
             }
@@ -173,35 +193,39 @@ class PublishQueueStore {
     LeaseNext(limit := 5) {
         this.ActivateDeferred()
         selected := []
-        used := Map()
         now := this._Now()
 
-        Loop limit {
-            bestId := ""
-            best := 0
-            for statusName in ["ready", "retry_wait"] {
-                if !this.statusIndex.Has(statusName)
+        ; Single pass over eligible records. The old implementation rescanned
+        ; the entire ready index once per requested room, which made the
+        ; 5,000-record stress path unnecessarily quadratic.
+        candidates := []
+        for statusName in ["ready", "retry_wait"] {
+            if !this.statusIndex.Has(statusName)
+                continue
+            for id, unused in this.statusIndex[statusName] {
+                if !this.records.Has(id)
                     continue
-                for id, unused in this.statusIndex[statusName] {
-                    if used.Has(id) || !this.records.Has(id)
-                        continue
-                    entry := this.records[id]
-                    if !this._Eligible(entry, now)
-                        continue
-                    if bestId = ""
-                        || entry["priority"] > best["priority"]
-                        || (entry["priority"] = best["priority"]
-                            && entry["queue_seq"] < best["queue_seq"]) {
-                        bestId := id
-                        best := entry
+                entry := this.records[id]
+                if !this._Eligible(entry, now)
+                    continue
+                inserted := false
+                for index, candidateId in candidates {
+                    candidate := this.records[candidateId]
+                    if entry["priority"] > candidate["priority"]
+                        || (entry["priority"] = candidate["priority"]
+                            && entry["queue_seq"] < candidate["queue_seq"]) {
+                        candidates.InsertAt(index, id)
+                        inserted := true
+                        break
                     }
                 }
+                if !inserted
+                    candidates.Push(id)
+                if candidates.Length > limit
+                    candidates.Pop()
             }
-            if bestId = ""
-                break
-            selected.Push(bestId)
-            used[bestId] := true
         }
+        selected := candidates
 
         if !selected.Length
             return Map("token", "", "ids", [])
@@ -552,18 +576,20 @@ class PublishQueueStore {
     }
 
     Compact() {
-        records := []
+        ; JSONL snapshot v2 keeps each record independently parseable. Parsing
+        ; one giant pretty-printed JSON array became the dominant cost at
+        ; 5,000 rooms; legacy v1 snapshots remain readable in Load().
+        lines := [this._JsonLine(Map(
+            "format", "queue_snapshot_jsonl",
+            "version", 2,
+            "created_at", NowStamp(),
+            "next_seq", this.nextSeq
+        ))]
         for id in this.order {
             if this.records.Has(id)
-                records.Push(this.records[id])
+                lines.Push(this._JsonLine(this.records[id]))
         }
-        snapshot := Map(
-            "version", 1,
-            "created_at", NowStamp(),
-            "next_seq", this.nextSeq,
-            "records", records
-        )
-        WriteTextFile(this.snapshotPath, JSON.Stringify(snapshot))
+        WriteTextFile(this.snapshotPath, StrJoin(lines, "`n") "`n")
         WriteTextFile(this.eventsPath, "")
         this.eventsSinceSnapshot := 0
     }
@@ -638,6 +664,7 @@ class PublishQueueStore {
                 }
 
             case "lease":
+                leasedIds := []
                 for id in event["ids"] {
                     if this.records.Has(id) {
                         entry := this.records[id]
@@ -645,8 +672,10 @@ class PublishQueueStore {
                         entry["lease_token"] := event["token"]
                         entry["lease_expires_at"] := event["expires_at"]
                         entry["last_error"] := ""
+                        leasedIds.Push(id)
                     }
                 }
+                this.leaseIndex[event["token"]] := leasedIds
 
             case "delivery_intent":
                 legacyDeliveryId := FnvHash(
@@ -697,6 +726,8 @@ class PublishQueueStore {
                             ? event["completed_at"] : NowStamp()
                     }
                 }
+                if event.Has("token") && this.leaseIndex.Has(event["token"])
+                    this.leaseIndex.Delete(event["token"])
 
             case "fail":
                 for update in event["updates"] {
@@ -710,6 +741,8 @@ class PublishQueueStore {
                     entry["lease_token"] := ""
                     entry["lease_expires_at"] := ""
                 }
+                if event.Has("token") && this.leaseIndex.Has(event["token"])
+                    this.leaseIndex.Delete(event["token"])
 
             case "reclaim":
                 for id in event["ids"] {
@@ -806,6 +839,12 @@ class PublishQueueStore {
             this.order.Push(id)
         this.records[id] := entry
         this._IndexAdd(entry["status"], id)
+        if entry.Has("lease_token") && entry["lease_token"] != "" {
+            token := entry["lease_token"]
+            if !this.leaseIndex.Has(token)
+                this.leaseIndex[token] := []
+            this.leaseIndex[token].Push(id)
+        }
     }
 
     _SetStatus(entry, status) {
@@ -866,6 +905,15 @@ class PublishQueueStore {
     }
 
     _IdsForLease(token) {
+        if this.leaseIndex.Has(token) {
+            indexed := []
+            for id in this.leaseIndex[token] {
+                if this.records.Has(id)
+                    && this.records[id]["lease_token"] = token
+                    indexed.Push(id)
+            }
+            return indexed
+        }
         ids := []
         for id in this.order {
             if this.records.Has(id) && this.records[id]["lease_token"] = token

@@ -19,17 +19,19 @@ AutoHotkey is a GUI-subsystem app, so console output may not appear. Both script
 
 ### RunTests.ahk
 
-Covers parser/blocklist/composer plus durable queue behavior: FIFO lease-five, partial
-final lease, journal/snapshot reload, retry/dead-letter, uncertain resolution, media
-gating, expired-lease reclaim, and migration from legacy `listings.json`.
+Covers parser/blocklist/composer, scheduler string timestamps, UI geometry/fingerprint
+guards, harvester/repository integration, and durable queue behavior: one-room production
+leases, journal/snapshot reload, retry/dead-letter, uncertain resolution, media gating,
+expired-lease reclaim, and migration from legacy `listings.json`.
 
 Exit code `1` if any test fails.
 
 ### Simulate.ahk
 
 Runs harvest → publish using sample files and prints the **exact** message the bot would
-send. It also creates a temporary 5,000-room queue, drains exactly 1,000 leases, compacts,
-reloads, and verifies all IDs are completed. Temporary data is deleted afterward.
+send. `run-tests.cmd` uses a fast 200-room queue gate. Run
+`windows\tests\run-stress.cmd` for the full 5,000-room/1,000-batch stress test.
+Temporary data is deleted afterward.
 
 Each post is tagged `[SAVED]`, `[BLOCKED]`, `[DUPLICATE]`, or `[INVALID]`.
 
@@ -61,7 +63,7 @@ the remainder as inputs. `blocklist.csv` still supplies banned keywords.
 | # | Step | Expected |
 |---|------|----------|
 | 1 | Run `Bot.ahk` | TrayTip shows correct source / main group counts |
-| 2 | Start bot with Zalo open on Windows | TrayTip reports discovered input/output counts |
+| 2 | Start bot with Zalo open on Windows | TrayTip reports CSV source/output counts |
 | 3 | Open source group, select posts → `Ctrl+Shift+H` | TrayTip: `New: n \| Blocked: n \| Duplicate: n` |
 | 4 | Check `windows\data\listings\` and `data\queue\` | Per-listing JSON and queue event exist |
 | 5 | Press `Ctrl+Shift+H` again on same posts | All counted as Duplicate, nothing new saved |
@@ -77,7 +79,7 @@ the remainder as inputs. `blocklist.csv` still supplies banned keywords.
 |----------|----------|
 | Post contains `Đã chốt` | Counted as Blocked, not sent to main group |
 | Post missing `Địa chỉ:` | Not split into a listing, skipped |
-| Post missing phone | Counted as Invalid (missing fields) |
+| Post missing phone with `RequiredFields=owner_phone` | Counted as Invalid |
 | Zalo group-list capture is empty | Bot stops before harvest and points to `data\zalo-groups-capture.txt` |
 | Zalo not running | TrayTip error, bot does not hang |
 | No ready/retry records → `Ctrl+Shift+G` | TrayTip reports an empty queue or pending media |
@@ -95,6 +97,10 @@ SearchDelayMs=600
 OpenChatDelayMs=1200
 BetweenMessagesMs=1500
 ```
+
+When click targets drift, enable `[Diagnostics] Enabled=1`, reproduce once, and inspect
+`data\ui-diagnostic.jsonl`. Confirm the cached main HWND remains maximized and
+`composeY` is near 92% of the Zalo client height. Disable diagnostics after verification.
 
 ---
 

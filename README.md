@@ -27,11 +27,11 @@ trong `config.ini`; từ khóa cấm đọc từ `blocklist.csv`/Excel.
 | Heuristic | `LooksLikeListing()` — không bắt buộc `Địa chỉ:` / `Giá:` / `SĐT:` nếu `RequiredFields` để trống |
 | Blocklist | `LOCK`, `Chốt`, `Đã chốt`, … — so khớp không phân biệt hoa thường |
 | State | `harvest_state/`: shard theo nhóm cho hash trùng, capture snapshot, revisit |
-| Durable queue | Lease 1 phòng/lượt, checkpoint theo nhóm output, retry/dead-letter, resume sau restart |
+| Durable queue | Lease 1 phòng/lượt, JSONL snapshot v2, checkpoint theo output, retry/dead-letter, resume |
 | Media archive | Lưu selection ảnh thành `.clip` một lần, tái sử dụng cho mọi nhóm output |
 | Storage | Mỗi listing một file JSON; migrate tự động từ `listings.json` cũ |
 | ZaloUI | Tách `OpenGroup(focus)` `"read"` vs `"send"`; delay có thể chỉnh trong `config.ini` |
-| Scale test | `Simulate.ahk` tạo 5.000 phòng → 1.000 lease/message |
+| Scale test | `run-tests.cmd` chạy nhanh 200 phòng; `run-stress.cmd` chạy đủ 5.000 phòng |
 
 ### Giới hạn cần test trên Windows
 
@@ -244,12 +244,26 @@ SendSeparatorAsMessage=1
 MaskPhone=0                  ; 0 = hiện SĐT + nhà mạng trên Số chủ
 
 [Images]
+Strategy=clipboard             ; mặc định bền vững: archive local, không mở lại source khi publish
 MediaRequired=1             ; có marker ảnh → archive trước khi ready
 AutoCapture=1               ; archive ảnh gần mã phòng khi harvest
 AutoCaptureMode=accessibility
 AutoCaptureProbeImages=1    ; vẫn dò graphic khi text copy không có marker ảnh
 AutoCaptureRepairPerCycle=3 ; retry media_pending ở các watch cycle sau
 ImagesBeforeText=1
+
+[Groups]
+LayoutSidebarWidthPx=380
+MessageClickY=0.48
+ComposeClickY=0.92
+SearchBoxClickY=0.055
+SearchResultClickY=0.135
+VerifyActiveConversation=1
+VerifyConversationFingerprint=1
+OpenGroupMaxAttempts=2
+
+[Diagnostics]
+Enabled=0                    ; bật tạm để ghi data\ui-diagnostic.jsonl
 
 [Relay]
 TextOnly=0                  ; 0 = ảnh + text; 1 = chỉ text (debug)

@@ -129,7 +129,7 @@ class GroupRegistry {
         seen := Map()
         for rawLine in StrSplit(ReadTextFile(path), "`n", "`r") {
             line := Trim(rawLine)
-            if line = "" || SubStr(line, 1, 1) = "#" || SubStr(line, 1, 2) = ";"
+            if line = "" || SubStr(line, 1, 1) = "#" || SubStr(line, 1, 1) = ";"
                 continue
             key := GroupRegistry._Key(line)
             if seen.Has(key)

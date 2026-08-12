@@ -564,14 +564,6 @@ class ListingParser {
         if !keys.Length
             return []
 
-        hasSignal := false
-        for key in ["address", "price", "owner_phone", "room_code", "info", "extra_info"] {
-            if listing.Has(key) && listing[key] != ""
-                hasSignal := true
-        }
-        if hasSignal
-            return []
-
         labels := Map(
             "address", "Địa chỉ",
             "room_code", "Số phòng",
@@ -605,38 +597,105 @@ class ListingParser {
         return ListingParser.FormatBlock(listing, true, phoneHint)
     }
 
+    ; Standard listing card. Missing fields become "-".
     static FormatBlock(listing, maskPhone := true, phoneHint := "") {
         ListingParser._DedupExtraInfo(listing)
-        lines := []
-        ListingParser._AddLine(lines, "📍 Địa chỉ", listing, "address")
-        ListingParser._AddLine(lines, "🔑 Số phòng", listing, "room_code")
-        ListingParser._AddLine(lines, "💰 Giá", listing, "price")
-        ListingParser._AddLine(lines, "⚡💧 Điện nước", listing, "utility_price")
-        ListingParser._AddLine(lines, "⚡ Điện", listing, "electric_price")
-        ListingParser._AddLine(lines, "💧 Nước", listing, "water_price")
-        ListingParser._AddLine(lines, "🧾 Dịch vụ", listing, "service_price")
-        ListingParser._AddLine(lines, "ℹ️ Thông tin", listing, "info")
-        ListingParser._AddLine(lines, "📝 Khác", listing, "extra_info")
+        dash := "-"
 
-        roomCode := ListingParser.NormalizeRoomCode(listing, listing.Has("id") ? listing["id"] : "")
-        if roomCode != "" && listing["room_code"] != roomCode
+        groupName := listing.Has("source_group") && Trim(listing["source_group"]) != ""
+            ? Trim(listing["source_group"]) : dash
+        roomType := ListingParser._RoomTypeLabel(listing)
+        roomCode := ListingParser.NormalizeRoomCode(
+            listing, listing.Has("id") ? listing["id"] : "")
+        if roomCode != ""
             listing["room_code"] := roomCode
+        else
+            roomCode := dash
 
+        info := ListingParser._RoomInfoLabel(listing)
+        price := listing.Has("price") && Trim(listing["price"]) != ""
+            ? Trim(listing["price"]) : dash
+        service := listing.Has("service_price") && Trim(listing["service_price"]) != ""
+            ? Trim(listing["service_price"]) : dash
+        utility := ListingParser._UtilityLabel(listing)
+        phone := ListingParser._PhoneLabel(listing, maskPhone, phoneHint, roomCode)
+
+        return StrJoin([
+            "-----------------------------------",
+            "- tên nhóm: " groupName,
+            "- phòng: " roomType,
+            "- mã phòng: " roomCode,
+            "- thông tin phòng: " info,
+            "- giá: " price,
+            "- giá dịch vụ: " service,
+            "- giá điện nước: " utility,
+            "- số điện thoại của chủ trọ: " phone,
+            "-----------------------------------"
+        ], "`n")
+    }
+
+    static _PhoneLabel(listing, maskPhone, phoneHint, roomCode) {
+        dash := "-"
         if maskPhone {
-            hint := phoneHint != "" ? phoneHint : 'Nhắn bot "SĐT {room_code}" để lấy số'
-            hint := StrReplace(hint, "{room_code}", roomCode != "" ? roomCode : "mã phòng")
-            lines.Push("📞 Số chủ: " hint)
-        } else if listing.Has("owner_phone") && listing["owner_phone"] != "" {
-            phoneLine := listing["owner_phone"]
-            carrier := listing.Has("phone_carrier") ? listing["phone_carrier"] : ""
-            if carrier = ""
-                carrier := ListingParser.ClassifyCarrier(listing["owner_phone"])
-            if carrier != "" && carrier != "Không xác định"
-                phoneLine .= " (" carrier ")"
-            lines.Push("📞 Số chủ: " phoneLine)
+            if Trim(phoneHint) = ""
+                return dash
+            hint := StrReplace(phoneHint, "{room_code}",
+                roomCode != dash ? roomCode : "mã phòng")
+            return hint
         }
+        phone := listing.Has("owner_phone") ? Trim(listing["owner_phone"]) : ""
+        if phone = ""
+            return dash
+        ; Masked Zalo numbers like 0987***890 cannot be recovered.
+        if InStr(phone, "*")
+            return dash
+        carrier := listing.Has("phone_carrier") ? listing["phone_carrier"] : ""
+        if carrier = ""
+            carrier := ListingParser.ClassifyCarrier(phone)
+        if carrier != "" && carrier != "Không xác định"
+            return phone " (" carrier ")"
+        return phone
+    }
 
-        return StrJoin(lines, "`n")
+    static _RoomTypeLabel(listing) {
+        hay := ""
+        for key in ["info", "extra_info", "address", "raw_text", "room_code"] {
+            if listing.Has(key) && listing[key] != ""
+                hay .= " " listing[key]
+        }
+        if RegExMatch(hay, "i)\b(studio|1\s*pn|2\s*pn|3\s*pn|duplex|mezzanine|ban\s*công|phòng\s*trọ|căn\s*hộ|chdv)\b", &m)
+            return Trim(RegExReplace(m[0], "\s+", " "))
+        return "-"
+    }
+
+    static _RoomInfoLabel(listing) {
+        parts := []
+        for key in ["address", "info", "extra_info"] {
+            if !listing.Has(key)
+                continue
+            value := Trim(RegExReplace(NormalizeNewlines(listing[key]), "\s+", " "))
+            if value != ""
+                parts.Push(value)
+        }
+        if parts.Length
+            return StrJoin(parts, " | ")
+        if listing.Has("raw_text") && Trim(listing["raw_text"]) != ""
+            return Trim(RegExReplace(NormalizeNewlines(listing["raw_text"]), "\s+", " "))
+        return "-"
+    }
+
+    static _UtilityLabel(listing) {
+        if listing.Has("utility_price") && Trim(listing["utility_price"]) != ""
+            return Trim(listing["utility_price"])
+        dien := listing.Has("electric_price") ? Trim(listing["electric_price"]) : ""
+        nuoc := listing.Has("water_price") ? Trim(listing["water_price"]) : ""
+        if dien = "" && nuoc = ""
+            return "-"
+        if dien = ""
+            return "Nước: " nuoc
+        if nuoc = ""
+            return "Điện: " dien
+        return "Điện: " dien " | Nước: " nuoc
     }
 
     static _AddLine(lines, label, listing, key) {

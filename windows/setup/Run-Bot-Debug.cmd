@@ -69,30 +69,55 @@ if not defined AHK_EXE (
   exit /b 1
 )
 
-set "ERRLOG=%WIN%\data\ahk-stderr.log"
+set "ERRLOG=%WIN%\data\ahk-stderr-%RANDOM%.log"
 set "LOADLOG=%WIN%\data\load-check.log"
-del /q "%ERRLOG%" "%LOADLOG%" 2>nul
+if exist "%LOADLOG%" del /q "%LOADLOG%" 2>nul
+
+set "BOTPID="
+for /f "delims=" %%P in ('powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'AutoHotkey64.exe' -and $_.CommandLine -like '*Bot.ahk*' } | Select-Object -ExpandProperty ProcessId -First 1"') do set "BOTPID=%%P"
+if defined BOTPID (
+  echo [CANH BAO] Bot.ahk da chay ^(PID !BOTPID!^).
+  echo   Terminal DEBUG cu van giu bot — khong chay them lan nua.
+  echo   Muon nap code moi: bam DUNG BOT tren man hinh, hoac:
+  echo     taskkill /PID !BOTPID! /F
+  echo   roi chay lai script nay.
+  echo.
+  pause
+  exit /b 1
+)
 
 echo AutoHotkey: %AHK_EXE%
 echo Bot.ahk   : %BOT%
 echo Config    : %WIN%\config\config.ini
 echo Source    : %WIN%\config\source-groups.csv
 echo.
-echo Dang chay Bot.ahk...
+echo Dang chay Bot.ahk ^(nen process, terminal khong bi treo^)...
+echo Stderr log: %ERRLOG%
 echo.
 
-"%AHK_EXE%" /ErrorStdOut "%BOT%" > "%ERRLOG%" 2>&1
-set "EXITCODE=!errorlevel!"
+start "Zalo Listing Bot" "%AHK_EXE%" /ErrorStdOut "%BOT%"
+timeout /t 3 /nobreak >nul
+set "EXITCODE=0"
+set "BOTPID="
+for /f "delims=" %%P in ('powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'AutoHotkey64.exe' -and $_.CommandLine -like '*Bot.ahk*' } | Select-Object -ExpandProperty ProcessId -First 1"') do (
+  set "BOTPID=%%P"
+  set "EXITCODE=0"
+)
+if not defined BOTPID set "EXITCODE=1"
 
 echo.
 if !EXITCODE! neq 0 (
-  echo Bot thoat ma loi !EXITCODE!
+  echo Bot khong khoi dong duoc.
   echo.
   if !EXITCODE! equ 2 (
     echo Ma 2 = loi load script. Dang chay load-check.ahk...
     "!AHK_EXE!" /ErrorStdOut "!LOAD_CHECK!" > "!ERRLOG!" 2>&1
     echo.
   )
+) else (
+  echo Bot dang chay PID !BOTPID!
+  echo Nut DUNG BOT hien tren man hinh de dung an toan.
+  echo.
 )
 
 if exist "%ERRLOG%" (

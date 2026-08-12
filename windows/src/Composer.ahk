@@ -59,7 +59,7 @@ class MessageComposer {
         listing := Map()
         for key in ["address", "room_code", "price", "electric_price", "water_price",
             "utility_price", "service_price", "owner_phone", "phone_carrier",
-            "info", "extra_info"]
+            "info", "extra_info", "raw_text", "source_group", "id"]
             listing[key] := record.Has(key) ? record[key] : ""
 
         hash := record.Has("id") ? record["id"] : ""

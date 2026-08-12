@@ -274,7 +274,10 @@ class HarvestScheduler {
             inserted := false
             for index, existing in oldest {
                 existingStamp := state.LastHarvestAt(existing["group_name"])
-                if stamp < existingStamp {
+                ; AHK v2 relational operators are numeric. Harvest timestamps are
+                ; fixed-width sortable strings (yyyy-MM-dd HH:mm:ss), so compare
+                ; them explicitly as strings to avoid a type error.
+                if StrCompare(String(stamp), String(existingStamp)) < 0 {
                     oldest.InsertAt(index, group)
                     inserted := true
                     break

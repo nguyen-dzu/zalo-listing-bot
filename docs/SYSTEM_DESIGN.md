@@ -45,13 +45,13 @@ Windows only. The entire project is AutoHotkey v2 controlling Zalo PC — no oth
 │              per-listing JSON + durable queue journal           │
 │                            │                                    │
 │                            ▼                                    │
-│        PublishQueueStore.LeaseNext(5)                            │
+│        PublishQueueStore.LeaseNext(1)                            │
 │              │                 │                                 │
 │              ▼                 ▼                                 │
-│       local .clip media   MessageComposer.ComposeBatch()         │
+│       local .clip media   MessageComposer.ComposeOne()           │
 │                            │                                    │
 │                            ▼                                    │
-│         Main group: [images] → [message with separators]        │
+│         Main group: [images] → [room text] → [=======]          │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -83,10 +83,10 @@ Cycle 1:
 Cycle 2+:
   capture unread conversation labels from Zalo
   intersect unread names with the selected CSV/XLSX
-  process only matching groups, preserving file order
+  prioritize matching unread groups, then oldest-first audit groups
 
 Every cycle:
-  after each 5 groups, attempt one publish batch
+  after each source group that saved rooms, attempt one one-room publish batch
   stop at MaxBatchesPerWatchCycle
   sleep Watch.IntervalMs
 ```
@@ -119,6 +119,9 @@ For scalable publishing, select all images for one harvested room and press
 selects the complete active generation. Publishing restores that archive for every main group,
 without reopening source groups.
 
+`[Images] Strategy=clipboard` is the production default. `forward` remains an
+operator-selected fallback and may reopen a source group during publish.
+
 `Ctrl+Shift+I` remains an ad-hoc manual relay fallback.
 
 ### Flow R — Release phone (`Ctrl+Shift+P`)
@@ -129,12 +132,14 @@ Select `SĐT P001` → look up the per-listing JSON store → paste phone into a
 
 ```text
 [image messages for room 1]
-📍 Địa chỉ: 123 Nguyễn Văn A, Quận 1
-🔑 Số phòng: P001
+- tên nhóm: Nhóm nguồn A
+- mã phòng: P001
+- thông tin phòng: 123 Nguyễn Văn A, Quận 1
 …
 =======          ← separate Zalo message
 [image messages for room 2]
-📍 Địa chỉ: 45 Lê Lợi, Quận 1
+- mã phòng: P002
+- thông tin phòng: 45 Lê Lợi, Quận 1
 …
 =======
 ```

@@ -65,7 +65,13 @@ class DurableListingPublisher {
                 if this.stopRequested
                     break
                 groupName := group["group_name"]
-                this.ui.BeginPublishSession(groupName)
+                try {
+                    this.ui.BeginPublishSession(groupName)
+                } catch as err {
+                    this._Log("open_output_failed group=" groupName
+                        " error=" err.Message)
+                    throw err
+                }
 
                 for leaseIndex, lease in leases {
                     this._WaitWhilePaused()
@@ -204,6 +210,11 @@ class DurableListingPublisher {
     }
 
     _SendRecordMedia(record, groupName) {
+        if this.config.ImageStrategy = "forward" {
+            this._ForwardRecordAlbum(record, groupName)
+            return
+        }
+
         id := record["id"]
         entry := this.queue.Get(id)
         files := entry && entry.Has("media_files") ? entry["media_files"] : []
@@ -227,6 +238,46 @@ class DurableListingPublisher {
             this.queue.CheckpointMedia(id, groupName, index)
             index++
         }
+    }
+
+    ; Leave main chat → open source → Image Viewer album forward → reopen main.
+    _ForwardRecordAlbum(record, groupName) {
+        id := record["id"]
+        source := record.Has("source_group") ? record["source_group"] : ""
+        if Trim(source) = ""
+            throw Error("Phòng " record["room_code"] " thiếu source_group để forward ảnh.")
+
+        imageCount := record.Has("image_count") ? record["image_count"] : 0
+        if imageCount <= 0 && !this.config.AutoCaptureProbeImages
+            return
+
+        entry := this.queue.Get(id)
+        delivery := this._DeliveryOrDefault(entry, groupName)
+        if delivery["media_index_sent"] > 0
+            return
+
+        anchor := ListingMediaCapturer.BuildSearchAnchor(record, this.config)
+        if Trim(anchor) = ""
+            throw Error("Phòng " record["room_code"] " không có anchor tìm album.")
+
+        maxImages := imageCount > 0 ? imageCount : this.config.AlbumMaxImages
+        this.ui.EndPublishSession()
+        this.ui.OpenGroup(source, "read")
+        settle := this.config.HasProp("CaptureSettleMs")
+            ? this.config.CaptureSettleMs : 600
+        Sleep settle
+
+        this.queue.MarkDeliveryIntent([id], groupName, "media", 1)
+        forwarded := this.ui.ForwardAlbumToGroup(anchor, groupName, maxImages)
+        if forwarded <= 0
+            throw Error("Không forward được ảnh album cho " record["room_code"])
+
+        Loop forwarded
+            this.queue.CheckpointMedia(id, groupName, A_Index)
+
+        this.ui.BeginPublishSession(groupName)
+        this._Log("forward_album_ok room=" record["room_code"]
+            " source=" source " target=" groupName " images=" forwarded)
     }
 
     _DeliveryOrDefault(entry, groupName) {

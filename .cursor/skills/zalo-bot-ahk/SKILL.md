@@ -66,8 +66,8 @@ Chỉ commit khi user yêu cầu. Không commit private runtime data/config.
 | # | Issue | Status |
 |---|--------|--------|
 | 1 | **1 phòng = ảnh → text → separator** | Done — `OneMessagePerListing=1` |
-| 2 | **Phone paste on Zalo** | Partial — normalize + focus fix |
-| 3 | **Copy ảnh trước text** | Context-menu + `ClipWait(,1)` + BitBlt; E2E pending |
+| 2 | **Phone paste on Zalo** | Implemented; real-Zalo E2E pending |
+| 3 | **Copy ảnh trước text** | BitBlt + context-menu fallback + manifest v2; E2E pending |
 | 4 | **Room code format** | Done — `NormalizeRoomCode()` |
 | 5 | **Blocklist keywords** | Done — see `blocklist.example.csv` |
 
@@ -100,7 +100,7 @@ Fields: `address`, `room_code`, `price`, `electric_price`, `water_price`, `utili
 - `RULES` order: **Giá điện trước Giá**
 - `_InferFields`: giá `5tr7`, SĐT, địa chỉ ngoặc, `Nc`/`Dv`/`PDV`
 - `ExtractPhone` / `ExtractPhoneNumbers`: `0`/`+84`, chấm/gạch/space; `ClassifyCarrier`
-- Output `MaskPhone=0`: `📞 Số chủ: 090… (Mobifone)`
+- Output `MaskPhone=0`: `- số điện thoại của chủ trọ: 090… (Mobifone)`
 
 ### Durable one-room publish
 
@@ -163,7 +163,8 @@ Per room, per main group:
 4. Phòng tiếp theo
 
 Config khóa: `LeaseSize=1`, `ListingSeparator=======`, `SendSeparatorAsMessage=1`.
-Source groups are not reopened during publish.
+With the default `Strategy=clipboard`, source groups are not reopened during publish.
+Optional `Strategy=forward` may reopen the source group.
 
 ---
 

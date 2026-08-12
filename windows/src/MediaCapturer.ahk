@@ -57,16 +57,42 @@ class ListingMediaCapturer {
             return false
         }
 
+        ; Forward strategy: only need the first album thumbnail; Viewer + Right
+        ; walks the rest. Mark queue ready without BitBlt archives.
+        if this.config.ImageStrategy = "forward" {
+            try {
+                locations := this.ui.FindImageBubblesNearMessage(anchor, 1, true)
+                if !locations.Length {
+                    if imageCount > 0
+                        throw Error("Không tìm thấy ảnh đầu album gần listing.")
+                    return true
+                }
+                ; Probe confirms only the first thumbnail. Never inflate an
+                ; unknown album to AlbumMaxImages or publish phantom images.
+                if imageCount <= 0
+                    record["image_count"] := 1
+                this.queue.AttachMedia(record["id"], [], [])
+                this._Log("auto_capture_ok mode=forward group=" groupName
+                    " id=" record["id"]
+                    " room=" (record.Has("room_code") ? record["room_code"] : "")
+                    " images=" record["image_count"])
+                return true
+            } catch as err {
+                this._LogFail(record, anchor, err.Message)
+                return false
+            }
+        }
+
         maxRetries := this.config.AutoCaptureMaxRetries
         Loop maxRetries + 1 {
             try {
                 if this.config.AutoCaptureMode = "accessibility" {
                     limit := imageCount > 0
                         ? imageCount : this.config.AutoCaptureProbeMaxImages
-                    ; Heuristic click slots only when text markers already say
-                    ; there are photos (image_count > 0).
+                    allowHeuristic := imageCount > 0
+                        || this.config.AutoCaptureProbeImages
                     locations := this.ui.FindImageBubblesNearMessage(
-                        anchor, limit, imageCount > 0)
+                        anchor, limit, allowHeuristic)
                     if !locations.Length {
                         if imageCount > 0
                             throw Error("Không tìm thấy image bubble gần listing.")
@@ -154,7 +180,11 @@ class ListingMediaCapturer {
             "image_count", captured,
             "captured_at", NowStamp()
         ))
+        if !this.media.IsTrusted(id)
+            throw Error("Archive vừa capture không đạt manifest v2/trusted.")
         files := this.media.RelativePaths(id)
+        if !files.Length
+            throw Error("Manifest hợp lệ nhưng không có archive media.")
         this.queue.AttachMedia(id, files, this.media.MetadataFor(id))
         return captured
     }
@@ -173,6 +203,8 @@ class ListingMediaCapturer {
                 "image_count", 1,
                 "captured_at", NowStamp()
             ))
+            if !this.media.IsTrusted(record["id"])
+                throw Error("Archive thủ công không đạt manifest v2/trusted.")
             files := this.media.RelativePaths(record["id"])
             this.queue.AttachMedia(
                 record["id"], files, this.media.MetadataFor(record["id"]))

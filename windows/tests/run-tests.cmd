@@ -18,6 +18,8 @@ if exist "%~dp0RunTests.log" type "%~dp0RunTests.log"
 
 echo.
 echo === SIMULATE HARVEST ===
+REM Fast gate. Run Simulate.ahk directly (or run-stress.cmd) for 5,000 rooms.
+set ZALO_QUEUE_STRESS_COUNT=200
 %AHK% "%~dp0Simulate.ahk"
 set SIM_RESULT=%ERRORLEVEL%
 if exist "%~dp0Simulate.log" type "%~dp0Simulate.log"

@@ -45,9 +45,9 @@ Per room in each main group:
    accessibility `Graphic` elements, and archives each image to a separate `.clip`.
 3. **Copy path (Zalo Electron, Aug 2026):** không dựa vào `Ctrl+C` (Zalo thường
    không đưa bitmap vào clipboard). Thứ tự:
-   1. Chuột phải → phím `c` / `i` ("Copy hình ảnh") + `ClipWait(timeout, 1)`
-   2. Fallback mở viewer + `ImageCopyHotkey`
-   3. Fallback BitBlt vùng Acc Graphic → `CF_BITMAP`
+   1. BitBlt vùng Acc Graphic → `CF_BITMAP`
+   2. Fallback chuột phải → phím `c` / `i` + `ClipWait(timeout, 1)`
+   3. Fallback mở viewer + `ImageCopyHotkey`
 4. Publisher restores the local archive for every output group, then sends
    images before text (`ImagesBeforeText=1`). Helper `SetClipboardFile`
    (CF_HDROP) sẵn sàng nếu cần dán dạng file.
@@ -159,8 +159,8 @@ oldest-first audit shard still provides eventual coverage.
 ## Pre-ship checklist
 
 ```
-[ ] RunTests.ahk on Windows — queue/recovery/media-gating cases
-[ ] Simulate.ahk on Windows — 5,000 rooms → 1,000 leases
+[x] RunTests.ahk on Windows — 207 parser/UI-guard/harvest/queue/media cases
+[x] Simulate.ahk on Windows — 5,000 rooms → 1,000 batches (98s queue work)
 [ ] Manual test: 1 source group → main (record in commit/PR)
 [x] blocklist.example.csv — new keywords + tests
 [x] No hardcoded group names / delays — config.ini

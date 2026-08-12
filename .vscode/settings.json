@@ -2,7 +2,7 @@
   // AutoHotkey v2 Language Support (thqby.vscode-autohotkey2-lsp)
   // User install path (preferred). Fallback if you later install system-wide:
   // C:\\Program Files\\AutoHotkey\\v2\\AutoHotkey64.exe
-  "AutoHotkey2.InterpreterPath": "C:\\Users\\Administrator\\AppData\\Local\\Programs\\AutoHotkey\\v2\\AutoHotkey64.exe",
+  "AutoHotkey2.InterpreterPath": "C:\\Program Files\\AutoHotkey\\v2\\AutoHotkey.exe",
 
   // AutoHotkey Plus Plus (mark-wiemer.vscode-autohotkey-plus-plus) — nếu dùng extension này
   "AHK++.v2.file.interpreterPath": "C:\\Users\\Administrator\\AppData\\Local\\Programs\\AutoHotkey\\v2\\AutoHotkey64.exe",

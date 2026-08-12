@@ -60,6 +60,10 @@ class AppConfig {
         this.HarvestStateFile := this._Resolve(this._Read(ini, "Paths", "HarvestStateFile", "data\harvest_state.json"))
         this.HarvestStateDir := this._Resolve(this._Read(
             ini, "Paths", "HarvestStateDir", "data\harvest_state"))
+        this.DiagnosticLogEnabled := this._Bool(
+            ini, "Diagnostics", "Enabled", false)
+        this.DiagnosticLogFile := this._Resolve(this._Read(
+            ini, "Diagnostics", "LogFile", "data\ui-diagnostic.jsonl"))
         EnsureDir(this.DataDir)
         EnsureDir(this.ListingsDir)
         EnsureDir(this.MediaDir)
@@ -102,7 +106,11 @@ class AppConfig {
         this.GroupSearchBoxClickXRatio := this._Float(
             ini, "Groups", "SearchBoxClickX", 0.14)
         this.GroupSearchBoxClickYRatio := this._Float(
-            ini, "Groups", "SearchBoxClickY", 0.10)
+            ini, "Groups", "SearchBoxClickY", 0.075)
+        this.GroupSearchResultClickYRatio := this._Float(
+            ini, "Groups", "SearchResultClickY", 0.28)
+        this.SearchResultClickOffsetYPx := this._Int(
+            ini, "Groups", "SearchResultClickOffsetYPx", 0)
         ; Skip far-left icon rail when locating sidebar search via Acc/ratio.
         this.GroupSidebarMinXRatio := this._Float(
             ini, "Groups", "SidebarMinX", 0.07)
@@ -127,11 +135,31 @@ class AppConfig {
             this._Int(ini, "Groups", "AccessibilityDepth", 18))
         this.GroupAccessibilityLeftRatio := this._Float(
             ini, "Groups", "AccessibilityLeftRatio", 0.52)
+        ; Fixed left chrome width (rail + chat list) in physical px when maximized.
+        ; 0 = fall back to 0.36 width ratio (drifts on ultrawide / fullscreen).
+        this.LayoutSidebarWidthPx := Max(0,
+            this._Int(ini, "Groups", "LayoutSidebarWidthPx", 380))
+        this.LayoutSidebarWidthRatio := this._Float(
+            ini, "Groups", "LayoutSidebarWidthRatio", 0.345)
+        this.LayoutMessageClickYRatio := this._Float(
+            ini, "Groups", "MessageClickY", 0.24)
+        this.LayoutMessageClickXRatio := this._Float(
+            ini, "Groups", "MessageClickX", 0.28)
+        this.LayoutComposeClickYRatio := this._Float(
+            ini, "Groups", "ComposeClickY", 0.92)
+        this.LayoutComposeClickXRatio := this._Float(
+            ini, "Groups", "ComposeClickX", 0.42)
+        this.ComposeClickOffsetYPx := this._Int(
+            ini, "Groups", "ComposeClickOffsetYPx", 75)
         ; Kept for ini compatibility; OpenGroup always tries Acc ListItem first.
         this.PreferAccessibleConversationClick := this._Bool(
             ini, "Groups", "PreferAccessibleConversationClick", true)
         this.VerifyActiveConversation := this._Bool(
             ini, "Groups", "VerifyActiveConversation", true)
+        this.VerifyConversationFingerprint := this._Bool(
+            ini, "Groups", "VerifyConversationFingerprint", true)
+        this.OpenGroupMaxAttempts := Max(1,
+            this._Int(ini, "Groups", "OpenGroupMaxAttempts", 2))
         this.GroupListManualFile := this._Resolve(this._Read(
             ini, "Groups", "ManualListFile", "config\groups-manual.txt"))
         this.GroupListIgnoredLabels := this._PipeList(this._Read(
@@ -175,6 +203,15 @@ class AppConfig {
         ; ── Images ──
         this.ImageStrategy := StrLower(this._Read(ini, "Images", "Strategy", "clipboard"))
         this.ForwardHotkey := this._Read(ini, "Images", "ForwardHotkey", "^q")
+        ; hotkey = Ctrl+Q in viewer; click = ratio button inside Zalo window.
+        this.ViewerForwardMode := StrLower(
+            this._Read(ini, "Images", "ViewerForwardMode", "hotkey"))
+        this.ViewerForwardClickX := this._Float(
+            ini, "Images", "ViewerForwardClickX", 0.92)
+        this.ViewerForwardClickY := this._Float(
+            ini, "Images", "ViewerForwardClickY", 0.92)
+        this.AlbumMaxImages := Max(1,
+            this._Int(ini, "Images", "AlbumMaxImages", 8))
         this.ImagesBeforeText := this._Bool(ini, "Images", "ImagesBeforeText", true)
         this.RelayImagesPerListing := this._Bool(ini, "Images", "RelayPerListing", true)
         this.RelayImagesPauseMs := this._Int(ini, "Images", "RelayPauseMs", 5000)
@@ -246,6 +283,10 @@ class AppConfig {
         this.StartupLaunchZaloIfMissing := this._Bool(
             ini, "Startup", "LaunchZaloIfMissing", true)
         this.StartupMaximizeZalo := this._Bool(ini, "Startup", "MaximizeZalo", false)
+        this.NormalizedWindowWidth := Max(0,
+            this._Int(ini, "Startup", "NormalizedWidth", 1100))
+        this.NormalizedWindowHeight := Max(0,
+            this._Int(ini, "Startup", "NormalizedHeight", 850))
         this.StartupDelayMs := Max(0,
             this._Int(ini, "Startup", "StartupDelayMs", 3000))
         this.StartupRequireAdmin := this._Bool(ini, "Startup", "RequireAdmin", false)

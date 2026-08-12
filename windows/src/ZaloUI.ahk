@@ -8,6 +8,13 @@ class ZaloUIAdapter {
     __New(config) {
         this.config := config
         this.publishGroup := ""
+        this.currentGroup := ""
+        this.lastConversationFingerprint := ""
+        this.lastConversationGroup := ""
+        this.lastOpenedFingerprint := ""
+        this.lastOpenedGroup := ""
+        this.groupFingerprints := Map()
+        this.mainHwnd := 0
         EnablePerMonitorDpiAwareness()
         CoordMode("Mouse", "Screen")
     }
@@ -16,15 +23,40 @@ class ZaloUIAdapter {
     _ScreenClick(x, y, options := "") {
         CoordMode("Mouse", "Screen")
         x := Round(x), y := Round(y)
-        ; Move before click so Electron/Zalo sees a real hover, not a stale cursor.
-        MouseMove(x, y, 0)
-        Sleep 35
-        if options = "D" || options = "U"
-            Click(x, y, , , options)
-        else if options != ""
-            Click(x, y, options)
+        ; SetCursorPos consumes physical virtual-screen pixels. This avoids the
+        ; second DPI conversion that MouseMove/Click(x,y) can apply on a scaled
+        ; maximized Zalo window.
+        virtualX := DllCall("GetSystemMetrics", "Int", 76, "Int")
+        virtualY := DllCall("GetSystemMetrics", "Int", 77, "Int")
+        virtualW := DllCall("GetSystemMetrics", "Int", 78, "Int")
+        virtualH := DllCall("GetSystemMetrics", "Int", 79, "Int")
+        x := Min(Max(x, virtualX), virtualX + Max(1, virtualW) - 1)
+        y := Min(Max(y, virtualY), virtualY + Max(1, virtualH) - 1)
+        if !DllCall("SetCursorPos", "Int", x, "Int", y)
+            throw Error("Không di chuyển được chuột tới " x "," y ".")
+        Sleep 50
+        actual := Buffer(8, 0)
+        if DllCall("GetCursorPos", "Ptr", actual) {
+            actualX := NumGet(actual, 0, "Int")
+            actualY := NumGet(actual, 4, "Int")
+            if this.publishGroup != "" {
+                ; #region agent log
+                AgentDebugLog("ZaloUI.ahk:_ScreenClick", "publish click", Map(
+                    "targetX", x, "targetY", y,
+                    "actualX", actualX, "actualY", actualY,
+                    "delta", Abs(actualX - x) + Abs(actualY - y),
+                    "publishGroup", this.publishGroup
+                ), "H5", "publish-debug")
+                ; #endregion
+            }
+            if Abs(actualX - x) > 1 || Abs(actualY - y) > 1
+                throw Error("Chuột bị DPI remap: yêu cầu " x "," y
+                    . " nhưng nhận " actualX "," actualY ".")
+        }
+        if options != ""
+            Click(options)
         else
-            Click(x, y)
+            Click()
     }
 
     _ElementClick(element) {
@@ -46,14 +78,86 @@ class ZaloUIAdapter {
         }
     }
 
-    ; Client-area screen rect — ratios must use this, not WinGetPos (title bar skews Y).
-    _WindowRect() {
+    _IsUsableWindow(hwnd) {
+        if !hwnd || !DllCall("IsWindow", "Ptr", hwnd)
+            return false
         try {
-            WinGetClientPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
+            if WinGetProcessName("ahk_id " hwnd) != this.config.ExeName
+                return false
+            WinGetClientPos(&x, &y, &w, &h, "ahk_id " hwnd)
+            return w >= 600 && h >= 450
         } catch {
-            WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
+            return false
         }
-        return Map("x", x, "y", y, "w", w, "h", h)
+    }
+
+    ; Cache the main Zalo HWND before viewers/dialogs appear. Re-select only
+    ; when that window is destroyed; transient Electron windows must never
+    ; replace a valid main handle.
+    _MainHwnd() {
+        if this._IsUsableWindow(this.mainHwnd)
+            return this.mainHwnd
+        best := 0
+        bestArea := 0
+        try ids := WinGetList("ahk_exe " this.config.ExeName)
+        catch
+            ids := []
+        for hwnd in ids {
+            try {
+                if !DllCall("IsWindowVisible", "Ptr", hwnd)
+                    continue
+                WinGetClientPos(&cx, &cy, &w, &h, "ahk_id " hwnd)
+                if w < 200 || h < 200
+                    continue
+                area := w * h
+                if area > bestArea {
+                    bestArea := area
+                    best := hwnd
+                }
+            } catch {
+                continue
+            }
+        }
+        if best {
+            this.mainHwnd := best
+            return best
+        }
+        this.mainHwnd := WinExist("ahk_exe " this.config.ExeName)
+        return this.mainHwnd
+    }
+
+    ; Client-area in physical screen pixels (GetClientRect + ClientToScreen).
+    ; More reliable than WinGetClientPos when Zalo is maximized / multi-DPI.
+    _WindowRect() {
+        hwnd := this._MainHwnd()
+        if !hwnd {
+            try {
+                WinGetClientPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
+                return Map("x", x, "y", y, "w", w, "h", h)
+            } catch {
+                WinGetPos &x, &y, &w, &h, "ahk_exe " this.config.ExeName
+                return Map("x", x, "y", y, "w", w, "h", h)
+            }
+        }
+        rect := Buffer(16, 0)
+        if !DllCall("GetClientRect", "Ptr", hwnd, "Ptr", rect) {
+            WinGetClientPos &x, &y, &w, &h, hwnd
+            return Map("x", x, "y", y, "w", w, "h", h, "hwnd", hwnd)
+        }
+        pt := Buffer(8, 0)
+        NumPut("Int", 0, pt, 0)
+        NumPut("Int", 0, pt, 4)
+        if !DllCall("ClientToScreen", "Ptr", hwnd, "Ptr", pt) {
+            WinGetClientPos &x, &y, &w, &h, hwnd
+            return Map("x", x, "y", y, "w", w, "h", h, "hwnd", hwnd)
+        }
+        return Map(
+            "x", NumGet(pt, 0, "Int"),
+            "y", NumGet(pt, 4, "Int"),
+            "w", NumGet(rect, 8, "Int"),
+            "h", NumGet(rect, 12, "Int"),
+            "hwnd", hwnd
+        )
     }
 
     _RatioPoint(win, xRatio, yRatio) {
@@ -63,42 +167,347 @@ class ZaloUIAdapter {
         ]
     }
 
+    _SidebarWidth(win) {
+        fixed := this.config.HasProp("LayoutSidebarWidthPx")
+            ? Integer(this.config.LayoutSidebarWidthPx) : 0
+        ratio := this.config.HasProp("LayoutSidebarWidthRatio")
+            ? this.config.LayoutSidebarWidthRatio : 0.345
+        if fixed > 0 && win["w"] >= 1500
+            sidebar := fixed
+        else if ratio > 0
+            sidebar := Round(win["w"] * ratio)
+        else if fixed > 0
+            sidebar := fixed
+        else
+            sidebar := Round(win["w"] * 0.345)
+        return Min(Max(sidebar, 200), Round(win["w"] * 0.48))
+    }
+
+    ; One geometry snapshot for every mouse fallback. Ratios are relative to
+    ; the main Zalo client rect, never to a viewer/dialog or the whole screen.
+    _LayoutSnapshot(win := 0) {
+        if !win
+            win := this._WindowRect()
+        sidebar := this._SidebarWidth(win)
+        minX := win["x"] + sidebar
+        maxX := win["x"] + Round(win["w"] * 0.98)
+        minY := win["y"] + Round(win["h"] * 0.10)
+        maxY := win["y"] + Round(win["h"] * 0.82)
+        paneW := Max(1, maxX - minX)
+        messageYRatio := this.config.HasProp("LayoutMessageClickYRatio")
+            ? this.config.LayoutMessageClickYRatio : 0.24
+        messageXRatio := this.config.HasProp("LayoutMessageClickXRatio")
+            ? this.config.LayoutMessageClickXRatio : 0.28
+        composeYRatio := this.config.HasProp("LayoutComposeClickYRatio")
+            ? this.config.LayoutComposeClickYRatio : 0.92
+        composeXRatio := this.config.HasProp("LayoutComposeClickXRatio")
+            ? this.config.LayoutComposeClickXRatio : 0.42
+        resultYRatio := this.config.HasProp("GroupSearchResultClickYRatio")
+            ? this.config.GroupSearchResultClickYRatio : 0.135
+        searchXRatio := this.config.HasProp("GroupSearchBoxClickXRatio")
+            ? this.config.GroupSearchBoxClickXRatio : 0.55
+        composeOffsetY := this.config.HasProp("ComposeClickOffsetYPx")
+            ? Integer(this.config.ComposeClickOffsetYPx) : 0
+        resultOffsetY := this.config.HasProp("SearchResultClickOffsetYPx")
+            ? Integer(this.config.SearchResultClickOffsetYPx) : 0
+        if searchXRatio < 0.25
+            searchXRatio := 0.55
+        layout := Map(
+            "win", win,
+            "sidebarWidth", sidebar,
+            "searchX", win["x"] + Round(sidebar * searchXRatio),
+            "searchY", win["y"] + Round(win["h"]
+                * this.config.GroupSearchBoxClickYRatio),
+            "firstResultX", win["x"] + Round(sidebar * searchXRatio),
+            "firstResultY", win["y"] + Round(win["h"] * resultYRatio)
+                + resultOffsetY,
+            "minX", minX, "maxX", maxX, "minY", minY, "maxY", maxY,
+            "textFocusX", minX + Round(paneW * messageXRatio),
+            "textFocusY", win["y"] + Round(win["h"] * messageYRatio),
+            "cx", minX + Round(paneW * 0.55),
+            "cy", win["y"] + Round(win["h"] * 0.48),
+            "composeX", minX + Round(paneW * composeXRatio),
+            "composeY", win["y"] + Round(win["h"] * composeYRatio)
+                + composeOffsetY
+        )
+        ; #region agent log
+        static lastLogTick := 0
+        if (A_TickCount - lastLogTick) > 1500 {
+            lastLogTick := A_TickCount
+            zoomed := 0
+            try {
+                if win.Has("hwnd")
+                    zoomed := WinGetMinMax("ahk_id " win["hwnd"])
+            }
+            AgentDebugLog("ZaloUI.ahk:_MessagePaneBounds", "layout bounds", Map(
+                "winX", win["x"], "winY", win["y"], "winW", win["w"], "winH", win["h"],
+                "sidebarCfg", sidebar, "minX", minX, "maxX", maxX,
+                "cx", layout["cx"], "cy", layout["cy"],
+                "composeX", layout["composeX"], "composeY", layout["composeY"],
+                "zoomed", zoomed,
+                "sidebarPct", Round(100 * (minX - win["x"]) / Max(1, win["w"]), 1)
+            ), "A")
+        }
+        ; #endregion
+        return layout
+    }
+
+    _MessagePaneBounds(win := 0) {
+        return this._LayoutSnapshot(win)
+    }
+
+    _WorkAreaRect() {
+        rect := Buffer(16, 0)
+        if !DllCall("SystemParametersInfo", "UInt", 0x30, "UInt", 0, "Ptr", rect, "UInt", 0) {
+            return Map("x", 0, "y", 0, "w", A_ScreenWidth, "h", A_ScreenHeight)
+        }
+        left := NumGet(rect, 0, "Int")
+        top := NumGet(rect, 4, "Int")
+        right := NumGet(rect, 8, "Int")
+        bottom := NumGet(rect, 12, "Int")
+        return Map(
+            "x", left, "y", top,
+            "w", Max(800, right - left),
+            "h", Max(600, bottom - top)
+        )
+    }
+
+    EnsureMaximized() {
+        if !this.config.StartupMaximizeZalo
+            return false
+        hwnd := this._MainHwnd()
+        if !hwnd
+            return false
+        if WinGetMinMax(hwnd) = 1
+            return true
+        WinMaximize "ahk_id " hwnd
+        Sleep 450
+        return WinGetMinMax(hwnd) = 1
+    }
+
+    ; Restore Zalo to a stable non-maximized size so mouse ratios stay predictable.
+    EnsureNormalized() {
+        if this.config.StartupMaximizeZalo
+            return false
+        hwnd := this._MainHwnd()
+        if !hwnd
+            return false
+        state := WinGetMinMax(hwnd)
+        if state != 0 {
+            WinRestore "ahk_id " hwnd
+            Sleep 350
+        }
+        targetW := this.config.HasProp("NormalizedWindowWidth")
+            ? Integer(this.config.NormalizedWindowWidth) : 0
+        targetH := this.config.HasProp("NormalizedWindowHeight")
+            ? Integer(this.config.NormalizedWindowHeight) : 0
+        if targetW >= 800 && targetH >= 600 {
+            work := this._WorkAreaRect()
+            outerW := targetW
+            outerH := targetH
+            try {
+                WinGetPos &curX, &curY, &curW, &curH, "ahk_id " hwnd
+                WinGetClientPos &cx, &cy, &cw, &ch, "ahk_id " hwnd
+                borderW := Max(0, curW - cw)
+                borderH := Max(0, curH - ch)
+                outerW := targetW + borderW
+                outerH := targetH + borderH
+                posX := work["x"] + Round((work["w"] - outerW) / 2)
+                posY := work["y"] + Round((work["h"] - outerH) / 2)
+                if Abs(curW - outerW) > 8 || Abs(curH - outerH) > 8
+                    || Abs(curX - posX) > 8 || Abs(curY - posY) > 8
+                    WinMove posX, posY, outerW, outerH, "ahk_id " hwnd
+            } catch {
+                posX := work["x"] + Round((work["w"] - outerW) / 2)
+                posY := work["y"] + Round((work["h"] - outerH) / 2)
+                WinMove posX, posY, outerW, outerH, "ahk_id " hwnd
+            }
+            Sleep 400
+        }
+        win := this._WindowRect()
+        zoomed := WinGetMinMax(hwnd)
+        ; #region agent log
+        AgentDebugLog("ZaloUI.ahk:EnsureNormalized", "window normalized", Map(
+            "zoomed", zoomed,
+            "winX", win["x"], "winY", win["y"],
+            "winW", win["w"], "winH", win["h"],
+            "targetW", targetW, "targetH", targetH
+        ), "W", "post-fix")
+        ; #endregion
+        return zoomed = 0
+    }
+
+    EnsureWindowState() {
+        if this.config.StartupMaximizeZalo
+            return this.EnsureMaximized()
+        return this.EnsureNormalized()
+    }
+
     IsRunning() {
-        return WinExist("ahk_exe " this.config.ExeName)
+        return !!this._MainHwnd() || WinExist("ahk_exe " this.config.ExeName)
     }
 
     Activate() {
         if !this.IsRunning()
             throw Error("Zalo PC chưa mở. Hãy mở Zalo trước.")
-        WinActivate "ahk_exe " this.config.ExeName
-        if !WinWaitActive("ahk_exe " this.config.ExeName,, 3)
+        ; Keep Acc + mouse in the same physical pixel space (fullscreen / DPI).
+        try DllCall("SetThreadDpiAwarenessContext", "Ptr", -4, "Ptr")
+        hwnd := this._MainHwnd()
+        if hwnd
+            WinActivate "ahk_id " hwnd
+        else
+            WinActivate "ahk_exe " this.config.ExeName
+        if hwnd {
+            if !WinWaitActive("ahk_id " hwnd,, 3)
+                throw Error("Không kích hoạt được cửa sổ Zalo.")
+        } else if !WinWaitActive("ahk_exe " this.config.ExeName,, 3) {
             throw Error("Không kích hoạt được cửa sổ Zalo.")
-        Sleep 300
+        }
+        this.EnsureWindowState()
+        Sleep 250
+    }
+
+    _RequireMainActive(operation) {
+        hwnd := this._MainHwnd()
+        if !hwnd || !WinActive("ahk_id " hwnd)
+            throw Error("Zalo main window mất focus trước khi " operation ".")
+        return hwnd
+    }
+
+    _PublishDebugSnapshot(stage, hypothesisId := "P", groupName := "") {
+        activeHwnd := 0
+        activeTitle := ""
+        try activeHwnd := WinExist("A")
+        try activeTitle := WinGetTitle("A")
+        cursorX := cursorY := -1
+        pt := Buffer(8, 0)
+        if DllCall("GetCursorPos", "Ptr", pt) {
+            cursorX := NumGet(pt, 0, "Int")
+            cursorY := NumGet(pt, 4, "Int")
+        }
+        focused := ""
+        try focused := ControlGetFocus("A")
+        clipTextLen := StrLen(String(A_Clipboard))
+        clipPreview := SubStr(
+            RegExReplace(Trim(String(A_Clipboard)), "\s+", " "), 1, 80)
+        win := this._WindowRect()
+        pane := this._MessagePaneBounds(win)
+        mainHwnd := this._MainHwnd()
+        group := groupName != "" ? groupName
+            : (this.publishGroup != "" ? this.publishGroup : this.currentGroup)
+        ; #region agent log
+        AgentDebugLog("ZaloUI.ahk:_PublishDebugSnapshot", stage, Map(
+            "group", group,
+            "activeHwnd", activeHwnd,
+            "activeTitle", SubStr(activeTitle, 1, 80),
+            "mainHwnd", mainHwnd,
+            "mainActive", (activeHwnd = mainHwnd) ? 1 : 0,
+            "cursorX", cursorX, "cursorY", cursorY,
+            "focused", focused,
+            "clipTextLen", clipTextLen,
+            "clipPreview", clipPreview,
+            "clipBitmap", this._ClipboardHasBitmapImage() ? 1 : 0,
+            "clipHdrop", DllCall("IsClipboardFormatAvailable", "UInt", 15) ? 1 : 0,
+            "composeX", pane["composeX"], "composeY", pane["composeY"],
+            "msgPaneX", pane["textFocusX"], "msgPaneY", pane["textFocusY"],
+            "winW", win["w"], "winH", win["h"]
+        ), hypothesisId, "publish-debug")
+        ; #endregion
     }
 
     ; focus: "read" = message pane for copy; "send" = compose box for paste.
     ; Sidebar search uses Acc / Ctrl+F on chat list — not Ctrl+F while message pane focused.
     OpenGroup(groupName, focus := "read") {
-        this.Activate()
-        this._DismissOverlayUi(1)
+        attempts := this.config.HasProp("OpenGroupMaxAttempts")
+            ? this.config.OpenGroupMaxAttempts : 2
+        lastReason := "không mở được kết quả tìm kiếm"
+        Loop attempts {
+            this.Activate()
+            this._DismissOverlayUi(1)
 
-        opened := this._ClickAccessibleConversation(groupName)
-        if !opened
-            opened := this._OpenGroupViaSidebarSearch(groupName)
+            opened := false
+            if this.config.PreferAccessibleConversationClick
+                opened := this._ClickAccessibleConversation(groupName)
+            if !opened
+                opened := this._OpenGroupViaSidebarSearch(groupName)
 
-        matched := !this.config.VerifyActiveConversation
-            || this._ActiveConversationMatches(groupName)
-        if !opened || !matched {
+            headerStatus := !this.config.VerifyActiveConversation
+                ? 1 : this._ActiveConversationStatus(groupName)
+            fingerprint := ""
+            fingerprintOk := true
+            if opened && headerStatus >= 0
+                && focus != "send"
+                && this.config.HasProp("VerifyConversationFingerprint")
+                && this.config.VerifyConversationFingerprint {
+                fingerprint := this._ProbeConversationFingerprint()
+                fingerprintOk := this._FingerprintMatchesOpen(
+                    groupName, fingerprint)
+            }
+            matched := opened && headerStatus >= 0 && fingerprintOk
+            ; #region agent log
+            AgentDebugLog("ZaloUI.ahk:OpenGroup", "open group result", Map(
+                "group", groupName, "focus", focus, "attempt", A_Index,
+                "opened", opened ? 1 : 0, "headerStatus", headerStatus,
+                "fingerprint", fingerprint, "matched", matched ? 1 : 0
+            ), "C", "post-fix")
+            ; #endregion
+            if matched {
+                if fingerprint != "" {
+                    this.groupFingerprints[groupName] := fingerprint
+                    this.lastOpenedFingerprint := fingerprint
+                    this.lastOpenedGroup := groupName
+                }
+                break
+            }
+            lastReason := !opened ? "không mở được kết quả"
+                : headerStatus < 0 ? "header không khớp"
+                : "nội dung vẫn là chat trước"
             this._DismissOverlayUi(2)
-            throw Error("Không tìm thấy nhóm: " groupName)
+            Sleep this.config.SearchDelayMs
         }
+        if !matched
+            throw Error("Không mở đúng nhóm '" groupName "': " lastReason)
 
         this._DismissOverlayUi(1)
+        this.currentGroup := groupName
         if focus = "send"
             this._FocusComposeBox()
-        else
-            this._ClickMessagePane()
+        ; focus=read: harvest/capture clicks message pane when copying — skip here
+        ; to avoid an extra mouse jump to the middle of the chat after open.
         return true
+    }
+
+    _FingerprintMatchesOpen(groupName, fingerprint) {
+        if fingerprint = ""
+            return true
+        if this.groupFingerprints.Has(groupName)
+            return this.groupFingerprints[groupName] = fingerprint
+        return !(this.lastOpenedFingerprint != ""
+            && fingerprint = this.lastOpenedFingerprint
+            && this.lastOpenedGroup != ""
+            && this.lastOpenedGroup != groupName)
+    }
+
+    _ProbeConversationFingerprint() {
+        this._ClickMessagePane()
+        this._PublishDebugSnapshot("fingerprint_before_ctrla", "H2")
+        old := ClipboardAll()
+        try {
+            A_Clipboard := ""
+            Send "^a"
+            Sleep this.config.PasteDelayMs
+            this._PublishDebugSnapshot("fingerprint_after_ctrla", "H2")
+            Send "^c"
+            text := ClipWait(this.config.ClipWaitSeconds)
+                ? String(A_Clipboard) : ""
+            this._PublishDebugSnapshot("fingerprint_after_copy", "H2")
+            Send "{Esc}"
+            normalized := RegExReplace(
+                Trim(NormalizeNewlines(text)), "\s+", " ")
+            return StrLen(normalized) >= 30 ? FnvHash(normalized) : ""
+        } finally {
+            A_Clipboard := old
+        }
     }
 
     _DismissOverlayUi(times := 1) {
@@ -119,14 +528,59 @@ class ZaloUIAdapter {
         this._ReplaceFocusedText(groupName)
         Sleep this.config.SearchDelayMs + 300
 
-        ; Filtered sidebar: Acc click is more reliable than Enter alone.
-        if this._ClickAccessibleConversation(groupName, false)
+        ; Filtered sidebar: Acc click only when enabled (Acc tree walk can hang).
+        if this.config.PreferAccessibleConversationClick
+            && this._ClickAccessibleConversation(groupName, false)
             return true
 
+        ; Enter opens the first filtered row. Down from the search box lands on
+        ; filter tabs (Tất cả / Liên hệ) — never use a bare Down+Enter here.
+        method := "enter"
         Send "{Enter}"
         Sleep this.config.OpenChatDelayMs
+        headerOk := !this.config.VerifyActiveConversation
+            || this._ActiveConversationStatus(groupName) >= 0
+        if !headerOk {
+            method := "down3_enter"
+            Send "{Down 3}"
+            Sleep 120
+            Send "{Enter}"
+            Sleep this.config.OpenChatDelayMs
+            headerOk := !this.config.VerifyActiveConversation
+                || this._ActiveConversationStatus(groupName) >= 0
+        }
+        if !headerOk {
+            method := "click_first_result"
+            this._ClickFirstFilteredConversation()
+            Sleep this.config.OpenChatDelayMs
+        }
         Send "{Esc}"
         Sleep 120
+        ; #region agent log
+        AgentDebugLog("ZaloUI.ahk:_OpenGroupViaSidebarSearch",
+            "sidebar search open", Map(
+                "group", groupName, "method", method
+            ), "C", "post-fix")
+        ; #endregion
+        return true
+    }
+
+    ; Click first row in the filtered left chat list (below search).
+    _ClickFirstFilteredConversation() {
+        win := this._WindowRect()
+        layout := this._LayoutSnapshot(win)
+        x := layout["firstResultX"]
+        y := layout["firstResultY"]
+        ; #region agent log
+        AgentDebugLog("ZaloUI.ahk:_ClickFirstFilteredConversation",
+            "click first result", Map(
+                "x", x, "y", y, "sidebar", layout["sidebarWidth"],
+                "winW", win["w"], "zoomed", win.Has("hwnd")
+                    ? WinGetMinMax("ahk_id " win["hwnd"]) : -1
+            ), "C", "post-fix")
+        ; #endregion
+        this._ScreenClick(x, y)
+        Sleep this.config.OpenChatDelayMs
         return true
     }
 
@@ -136,11 +590,16 @@ class ZaloUIAdapter {
             return true
 
         win := this._WindowRect()
-        ; Steal focus from message pane — click upper sidebar (conversation list).
-        listPt := this._RatioPoint(win,
-            this.config.GroupListPaneClickXRatio,
-            Max(this.config.GroupSearchBoxClickYRatio + 0.06, 0.16))
-        this._ScreenClick(listPt[1], listPt[2])
+        layout := this._LayoutSnapshot(win)
+        ; Focus the sidebar search row, not a conversation below it.
+        ; #region agent log
+        AgentDebugLog("ZaloUI.ahk:_FocusConversationSearchBox",
+            "click search box", Map(
+                "x", layout["searchX"], "y", layout["searchY"],
+                "sidebar", layout["sidebarWidth"], "winW", win["w"]
+            ), "C", "post-fix")
+        ; #endregion
+        this._ScreenClick(layout["searchX"], layout["searchY"])
         Sleep this.config.PasteDelayMs + 80
 
         ; Zalo PC: Ctrl+F = sidebar search when chat list has focus (not in-chat).
@@ -150,10 +609,7 @@ class ZaloUIAdapter {
             return true
 
         ; Last resort: direct ratio click into the search row (skip icon rail).
-        pt := this._RatioPoint(win,
-            this.config.GroupSearchBoxClickXRatio,
-            this.config.GroupSearchBoxClickYRatio)
-        this._ScreenClick(pt[1], pt[2])
+        this._ScreenClick(layout["searchX"], layout["searchY"])
         Sleep this.config.PasteDelayMs + 100
         return true
     }
@@ -231,13 +687,16 @@ class ZaloUIAdapter {
     }
 
     _FocusedControlLooksLikeSearch() {
-        try focused := ControlGetFocus("ahk_exe " this.config.ExeName)
+        hwnd := this._MainHwnd()
+        if !hwnd
+            return false
+        try focused := ControlGetFocus("ahk_id " hwnd)
         catch
             return false
         if focused = ""
             return false
         cls := "", caption := ""
-        try cls := ControlGetClass(focused)
+        try cls := WinGetClass(focused)
         try caption := ControlGetText(focused)
         combined := cls " " caption
         return RegExMatch(combined, "i)(?:edit|search|tìm|tim)")
@@ -297,21 +756,31 @@ class ZaloUIAdapter {
         return true
     }
 
-    _ActiveConversationMatches(groupName) {
+    ; 1 = matching header, 0 = Zalo exposes no usable header, -1 = mismatch.
+    _ActiveConversationStatus(groupName) {
+        ; Always honor VerifyActiveConversation — PreferAccessibleConversationClick
+        ; only gates Acc *click* for opening, not header verification.
         root := this._AccessibleRoot()
         if !root
-            return true
+            return 0
         win := this._WindowRect()
-        minX := win["x"] + Round(win["w"] * 0.32)
+        sidebar := 0
+        if this.config.HasProp("LayoutSidebarWidthPx")
+            sidebar := Integer(this.config.LayoutSidebarWidthPx)
+        minX := sidebar > 0
+            ? win["x"] + Min(sidebar, Round(win["w"] * 0.48))
+            : win["x"] + Round(win["w"] * 0.32)
         maxY := win["y"] + Round(win["h"] * 0.20)
         targetKey := GroupRegistry._Key(groupName)
         inspected := 0
+        ; Shallower walk than full harvest Acc — header labels are near the root.
+        depth := Min(this.config.GroupAccessibilityDepth, 12)
         try elements := root.FindElements([
             {Role: Acc.Role.StaticText},
             {Role: Acc.Role.Text}
-        ], Acc.TreeScope.Descendants, 0, this.config.GroupAccessibilityDepth)
+        ], Acc.TreeScope.Descendants, 0, depth)
         catch
-            return true
+            return 0
         for element in elements {
             try location := element.Location
             catch
@@ -325,11 +794,17 @@ class ZaloUIAdapter {
             inspected++
             nameKey := GroupRegistry._Key(name)
             if nameKey = targetKey || InStr(nameKey, targetKey)
-                return true
+                || InStr(targetKey, nameKey)
+                return 1
         }
-        ; If Zalo exposes no header text, keep compatibility. If it does expose
-        ; a header but the target is absent, stop before reading/sending wrong chat.
-        return inspected = 0
+        ; #region agent log
+        AgentDebugLog("ZaloUI.ahk:_ActiveConversationMatches",
+            "header verify", Map(
+                "group", groupName, "inspected", inspected,
+                "matched", 0, "minX", minX, "maxY", maxY
+            ), "C")
+        ; #endregion
+        return inspected = 0 ? 0 : -1
     }
 
     ; Copy the conversation text of the currently open chat.
@@ -347,9 +822,8 @@ class ZaloUIAdapter {
         }
 
         if mode = "selectall" {
-            ; Use a deterministic point inside the conversation bubbles. MSAA
-            ; Pane/Document may resolve to the compose box or left search pane.
-            this._ClickConversationTextArea()
+            ; Focus the message pane (Acc Document/Pane) before select-all copy.
+            this._ClickMessagePane()
             Send "^a"
             Sleep this.config.PasteDelayMs
         }
@@ -360,13 +834,51 @@ class ZaloUIAdapter {
         captured := ClipWait(this.config.ClipWaitSeconds) ? A_Clipboard : ""
         Send "{Esc}"
         A_Clipboard := old
+        ; #region agent log
+        preview := SubStr(RegExReplace(Trim(captured), "\s+", " "), 1, 80)
+        AgentDebugLog("ZaloUI.ahk:CaptureConversationText", "capture result", Map(
+            "mode", mode, "textLen", StrLen(captured), "preview", preview,
+            "group", this.currentGroup
+        ), "D", "post-fix")
+        ; #endregion
+        this._GuardStickyConversation(captured)
         return captured
     }
 
+    ; Detect OpenGroup "success" that left the previous chat still focused.
+    ; Use a short normalized prefix — full-hash misses near-identical sticky
+    ; captures that only differ by select-all length (545 vs 611).
+    _GuardStickyConversation(captured) {
+        text := Trim(NormalizeNewlines(captured))
+        if StrLen(text) < 80 || this.currentGroup = ""
+            return
+        prefix := SubStr(RegExReplace(text, "\s+", " "), 1, 160)
+        fp := FnvHash(prefix)
+        if this.lastConversationFingerprint != ""
+            && fp = this.lastConversationFingerprint
+            && this.lastConversationGroup != ""
+            && this.lastConversationGroup != this.currentGroup {
+            ; #region agent log
+            AgentDebugLog("ZaloUI.ahk:_GuardStickyConversation",
+                "sticky conversation", Map(
+                    "current", this.currentGroup,
+                    "previous", this.lastConversationGroup,
+                    "textLen", StrLen(text),
+                    "prefix", SubStr(prefix, 1, 60)
+                ), "C", "post-fix")
+            ; #endregion
+            prev := this.lastConversationGroup
+            cur := this.currentGroup
+            throw Error("OpenGroup không chuyển chat: vẫn nội dung của '"
+                . prev "' khi mở '" cur "'.")
+        }
+        this.lastConversationFingerprint := fp
+        this.lastConversationGroup := this.currentGroup
+    }
+
     _ClickConversationTextArea() {
-        win := this._WindowRect()
-        pt := this._RatioPoint(win, 0.68, 0.48)
-        this._ScreenClick(pt[1], pt[2])
+        pane := this._MessagePaneBounds()
+        this._ScreenClick(pane["textFocusX"], pane["textFocusY"])
         Sleep this.config.PasteDelayMs
     }
 
@@ -375,10 +887,11 @@ class ZaloUIAdapter {
         if !root
             return ""
         win := this._WindowRect()
-        minX := win["x"] + Round(win["w"] * 0.36)
-        maxX := win["x"] + Round(win["w"] * 0.96)
-        minY := win["y"] + Round(win["h"] * 0.12)
-        maxY := win["y"] + Round(win["h"] * 0.87)
+        pane := this._MessagePaneBounds(win)
+        minX := pane["minX"]
+        maxX := pane["maxX"]
+        minY := pane["minY"]
+        maxY := pane["maxY"]
         rows := []
         try elements := root.FindElements([
             {Role: Acc.Role.StaticText},
@@ -711,7 +1224,7 @@ class ZaloUIAdapter {
     }
 
     _AccessibleRoot() {
-        hwnd := WinExist("ahk_exe " this.config.ExeName)
+        hwnd := this._MainHwnd()
         if !hwnd
             return 0
         try return Acc.ElementFromHandle(hwnd)
@@ -742,13 +1255,15 @@ class ZaloUIAdapter {
             return []
 
         win := this._WindowRect()
-        paneMinX := win["x"] + Round(win["w"] * 0.36)
-        paneMaxX := win["x"] + Round(win["w"] * 0.94)
-        contentMinY := win["y"] + Round(win["h"] * 0.12)
-        contentMaxY := win["y"] + Round(win["h"] * 0.86)
-        anchorY := win["y"] + Round(win["h"] * 0.55)
-        anchorX := win["x"] + Round(win["w"] * 0.65)
+        pane := this._MessagePaneBounds(win)
+        paneMinX := pane["minX"]
+        paneMaxX := pane["maxX"]
+        contentMinY := pane["minY"]
+        contentMaxY := pane["maxY"]
+        anchorY := pane["cy"]
+        anchorX := pane["cx"]
         foundText := false
+        searchedInChat := false
 
         ; Prefer Acc text match in the already-open chat before Ctrl+F.
         textLoc := this._FindMessageTextLocation(
@@ -759,6 +1274,7 @@ class ZaloUIAdapter {
             foundText := true
         } else {
             this.FindMessageInConversation(anchor)
+            searchedInChat := true
             Sleep this.config.ImageViewerSettleMs
             textLoc := this._FindMessageTextLocation(
                 anchor, paneMinX, paneMaxX, contentMinY, contentMaxY)
@@ -773,8 +1289,15 @@ class ZaloUIAdapter {
             paneMinX, paneMaxX, contentMinY, contentMaxY, anchorY)
         this._SortLocationsByDistance(candidates)
 
-        ; Only invent click slots when caller knows the listing has photos.
-        if !candidates.Length && foundText && allowHeuristic {
+        ; Acc often hides bubble text/graphics — probe click slots above anchor.
+        if !candidates.Length && allowHeuristic {
+            if !foundText {
+                this._ClickMessagePane()
+                anchorX := pane["cx"]
+                anchorY := searchedInChat
+                    ? pane["minY"] + Round((pane["maxY"] - pane["minY"]) * 0.45)
+                    : pane["cy"]
+            }
             step := this.config.ImageSelectStepPx
             Loop maxImages {
                 clickY := Max(contentMinY + 20, anchorY - (A_Index * step))
@@ -790,6 +1313,7 @@ class ZaloUIAdapter {
                 ))
             }
             this._LogImage("heuristic_slots anchor=" anchor
+                " searched=" (searchedInChat ? 1 : 0)
                 " count=" candidates.Length)
         }
 
@@ -799,6 +1323,16 @@ class ZaloUIAdapter {
             " found_text=" (foundText ? 1 : 0)
             " heuristic=" (allowHeuristic ? 1 : 0)
             " count=" candidates.Length)
+        ; #region agent log
+        AgentDebugLog("ZaloUI.ahk:FindImageBubblesNearMessage", "image detect", Map(
+            "anchor", SubStr(anchor, 1, 40),
+            "foundText", foundText ? 1 : 0,
+            "searchedInChat", searchedInChat ? 1 : 0,
+            "count", candidates.Length,
+            "paneMinX", paneMinX, "paneMaxX", paneMaxX,
+            "anchorX", anchorX, "anchorY", anchorY
+        ), "B")
+        ; #endregion
         return candidates
     }
 
@@ -815,7 +1349,9 @@ class ZaloUIAdapter {
         for element in textElements {
             matched := false
             for value in this._AccessibleElementStrings(element) {
-                if InStr(value, anchor) {
+                if InStr(value, anchor, false)
+                    || (StrLen(anchor) > 8
+                        && InStr(value, SubStr(anchor, 1, 8), false)) {
                     matched := true
                     break
                 }
@@ -1078,23 +1614,50 @@ class ZaloUIAdapter {
     }
 
     _ClickMessagePane() {
-        if this._FocusAccRegion(["Document", "Pane"], 0.36, 0.96, 0.12, 0.87)
-            return
+        this.Activate()
+        this._DismissOverlayUi(1)
         win := this._WindowRect()
-        pt := this._RatioPoint(win, 0.65, 0.45)
-        this._ScreenClick(pt[1], pt[2])
+        pane := this._MessagePaneBounds(win)
+        minXR := (pane["minX"] - win["x"]) / Max(1, win["w"])
+        maxXR := (pane["maxX"] - win["x"]) / Max(1, win["w"])
+        minYR := (pane["minY"] - win["y"]) / Max(1, win["h"])
+        maxYR := (pane["maxY"] - win["y"]) / Max(1, win["h"])
+        usedAcc := this._FocusAccRegion(["Document", "Pane"], minXR, maxXR, minYR, maxYR)
+        ; #region agent log
+        AgentDebugLog("ZaloUI.ahk:_ClickMessagePane", "focus message pane", Map(
+            "usedAcc", usedAcc ? 1 : 0,
+            "clickX", pane["textFocusX"], "clickY", pane["textFocusY"],
+            "centerX", pane["cx"], "centerY", pane["cy"],
+            "minX", pane["minX"], "maxX", pane["maxX"],
+            "purpose", "copy_safe"
+        ), "D")
+        ; #endregion
+        ; Upper-left text band — avoids center image bubbles when copy/select-all.
+        this._ScreenClick(pane["textFocusX"], pane["textFocusY"])
         Sleep this.config.PasteDelayMs
     }
 
     ; Zalo PC: after search/open chat, focus must be in the compose box before Ctrl+V.
     _FocusComposeBox() {
         this.Activate()
-        if this._FocusAccRegion(["Text", "ComboBox", "Document"], 0.36, 0.96, 0.78, 0.98)
-            return
         win := this._WindowRect()
-        pt := this._RatioPoint(win, 0.65, 0.92)
-        this._ScreenClick(pt[1], pt[2])
+        pane := this._MessagePaneBounds(win)
+        minXR := (pane["minX"] - win["x"]) / Max(1, win["w"])
+        maxXR := (pane["maxX"] - win["x"]) / Max(1, win["w"])
+        usedAcc := this._FocusAccRegion(
+            ["Text", "ComboBox"], minXR, maxXR, 0.84, 0.98)
+        ; #region agent log
+        AgentDebugLog("ZaloUI.ahk:_FocusComposeBox", "focus compose", Map(
+            "usedAcc", usedAcc ? 1 : 0,
+            "composeX", pane["composeX"], "composeY", pane["composeY"],
+            "minX", pane["minX"], "maxX", pane["maxX"]
+        ), "E")
+        ; #endregion
+        ; Always confirm the compose row. Electron often reports the whole chat
+        ; document as an editable element even though it is not the input box.
+        this._ScreenClick(pane["composeX"], pane["composeY"])
         Sleep this.config.PasteDelayMs + 100
+        this._PublishDebugSnapshot("compose_focus_after", "H1")
     }
 
     _ResolveAccRole(roleName) {
@@ -1327,6 +1890,7 @@ class ZaloUIAdapter {
             this.Activate()
             this._FocusComposeBox()
         }
+        this._PublishDebugSnapshot("publish_session_ready", "H4", groupName)
         return true
     }
 
@@ -1340,10 +1904,13 @@ class ZaloUIAdapter {
         if !this._ClipboardHasImage()
             throw Error("Clipboard không có ảnh.")
         this._FocusComposeBox()
+        this._PublishDebugSnapshot("image_paste_before_ctrla", "H3")
         Send "^a{Backspace}"
         Sleep 100
         Send "^v"
         Sleep this.config.PasteDelayMs + 300
+        this._PublishDebugSnapshot("image_paste_after_ctrlv", "H3")
+        this._RequireMainActive("gửi ảnh")
         if beforeSend
             beforeSend.Call()
         Send "{Enter}"
@@ -1381,15 +1948,76 @@ class ZaloUIAdapter {
     ; Uses Zalo's forward dialog: Ctrl+Q -> type group -> Enter -> confirm.
     ForwardSelection(groupName) {
         this.Activate()
-        Send this.config.ForwardHotkey
+        this._TriggerForwardDialog()
+        this._ConfirmForwardToGroup(groupName)
+        return true
+    }
+
+    ; Gemini album flow: open first image near listing → Viewer →
+    ; Forward → Right → … → Esc. Avoids per-thumbnail BitBlt miss-clicks.
+    ForwardAlbumToGroup(anchor, targetGroup, maxImages := 0) {
+        if Trim(anchor) = ""
+            throw Error("Anchor tìm album ảnh rỗng.")
+        if Trim(targetGroup) = ""
+            throw Error("Tên nhóm đích forward rỗng.")
+        limit := maxImages > 0
+            ? maxImages : this.config.AlbumMaxImages
+        limit := Max(1, Min(limit, this.config.AlbumMaxImages))
+
+        locations := this.FindImageBubblesNearMessage(anchor, 1, true)
+        if !locations.Length
+            throw Error("Không tìm thấy ảnh đầu album gần: " anchor)
+
+        loc := locations[1]
+        this.Activate()
+        this._ScreenClick(loc["x"], loc["y"])
+        Sleep this.config.ImageViewerSettleMs
+        ; Double-click opens Image Viewer on some Zalo builds.
+        this._ScreenClick(loc["x"], loc["y"])
+        Sleep this.config.ImageViewerSettleMs + 200
+
+        forwarded := 0
+        Loop limit {
+            this._TriggerForwardDialog()
+            this._ConfirmForwardToGroup(targetGroup)
+            forwarded++
+            this._LogImage("forward_viewer #" forwarded
+                " → " targetGroup)
+            if A_Index >= limit
+                break
+            Send "{Right}"
+            Sleep this.config.ImageViewerSettleMs
+        }
+        Send "{Esc}"
+        Sleep 200
+        Send "{Esc}"
+        Sleep 120
+        this._LogImage("forward_album done target=" targetGroup
+            " count=" forwarded " anchor=" anchor)
+        return forwarded
+    }
+
+    _TriggerForwardDialog() {
+        mode := StrLower(this.config.HasProp("ViewerForwardMode")
+            ? this.config.ViewerForwardMode : "hotkey")
+        if mode = "click" {
+            win := this._WindowRect()
+            x := win["x"] + Round(win["w"] * this.config.ViewerForwardClickX)
+            y := win["y"] + Round(win["h"] * this.config.ViewerForwardClickY)
+            this._ScreenClick(x, y)
+        } else {
+            Send this.config.ForwardHotkey
+        }
         Sleep this.config.ForwardDialogMs
+    }
+
+    _ConfirmForwardToGroup(groupName) {
         this._ReplaceFocusedText(groupName)
         Sleep this.config.SearchDelayMs + 200
         Send "{Enter}"
         Sleep this.config.PasteDelayMs
         Send "{Enter}"
-        Sleep this.config.SendDelayMs
-        return true
+        Sleep this.config.SendDelayMs + 200
     }
 
     _ReplaceFocusedText(text) {
@@ -1419,15 +2047,32 @@ class ZaloUIAdapter {
         A_Clipboard := message
         if !ClipWait(this.config.ClipWaitSeconds) {
             A_Clipboard := old
+            ; #region agent log
+            AgentDebugLog("ZaloUI.ahk:_PasteAndSend", "clip set failed", Map(
+                "msgLen", StrLen(message), "publishGroup", this.publishGroup
+            ), "E")
+            ; #endregion
             throw Error("Không đặt được nội dung vào clipboard.")
         }
         try {
             if refocus
                 this._FocusComposeBox()
+            this._PublishDebugSnapshot("paste_before_ctrla", "H1")
             Send "^a{Backspace}"
             Sleep 100
+            this._PublishDebugSnapshot("paste_after_ctrla", "H1")
             Send "^v"
             Sleep this.config.PasteDelayMs + 150
+            this._PublishDebugSnapshot("paste_after_ctrlv", "H3")
+            this._RequireMainActive("gửi text")
+            ; #region agent log
+            AgentDebugLog("ZaloUI.ahk:_PasteAndSend", "paste sent", Map(
+                "msgLen", StrLen(message),
+                "refocus", refocus ? 1 : 0,
+                "publishGroup", this.publishGroup,
+                "preview", SubStr(RegExReplace(Trim(message), "\s+", " "), 1, 60)
+            ), "E")
+            ; #endregion
             if beforeSend
                 beforeSend.Call()
             Send "{Enter}"

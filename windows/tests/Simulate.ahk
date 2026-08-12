@@ -148,11 +148,14 @@ for index, chunk in chunks {
 }
 
 TestLog()
-TestLog("== Durable queue stress: 5.000 phòng ==")
+stressCountRaw := EnvGet("ZALO_QUEUE_STRESS_COUNT")
+stressCount := stressCountRaw != "" ? Max(1, Integer(stressCountRaw)) : 5000
+TestLog("== Durable queue stress: " stressCount " phòng ==")
 if DirExist(cfg.QueueDir)
     DirDelete cfg.QueueDir, true
 stressQueue := PublishQueueStore(cfg)
-Loop 5000 {
+stressStartedAt := A_TickCount
+Loop stressCount {
     stressQueue.Enqueue(Map(
         "id", Format("stress{:05}", A_Index),
         "room_code", "",
@@ -160,8 +163,10 @@ Loop 5000 {
         "image_count", 0
     ))
 }
+TestLog("Enqueue xong sau " Round((A_TickCount - stressStartedAt) / 1000, 1) "s")
 
 stressBatches := 0
+drainStartedAt := A_TickCount
 Loop {
     stressLease := stressQueue.LeaseNext(5)
     if stressLease["token"] = ""
@@ -169,14 +174,16 @@ Loop {
     stressQueue.CompleteLease(stressLease["token"])
     stressBatches++
 }
+TestLog("Drain xong sau " Round((A_TickCount - drainStartedAt) / 1000, 1) "s")
 stressQueue.Compact()
 stressReloaded := PublishQueueStore(cfg)
 stressStats := stressReloaded.Stats()
-stressPass := stressBatches = 1000
-    && stressStats["completed"] = 5000
-    && stressStats["total"] = 5000
+expectedBatches := Ceil(stressCount / 5)
+stressPass := stressBatches = expectedBatches
+    && stressStats["completed"] = stressCount
+    && stressStats["total"] = stressCount
 TestLog((stressPass ? "PASS" : "FAIL")
-    . " — 5.000 phòng → " stressBatches " batch; completed="
+    . " — " stressCount " phòng → " stressBatches " batch; completed="
     . stressStats["completed"] "; total=" stressStats["total"])
 if DirExist(cfg.QueueDir)
     DirDelete cfg.QueueDir, true

@@ -18,6 +18,8 @@
 #Include ../src/MediaStore.ahk
 #Include ../src/MediaCapturer.ahk
 #Include ../src/Storage.ahk
+#Include ../src/Harvester.ahk
+#Include ../src/ZaloUI.ahk
 #Include ../src/Publisher.ahk
 #Include TestLog.ahk
 
@@ -86,6 +88,8 @@ class QueueTestConfig {
     SessionCooldownMs := 0
     BetweenBatchesMs := 0
     ImagesBeforeText := true
+    ImageStrategy := "clipboard"
+    AutoCaptureProbeImages := false
     OneMessagePerListing := true
     SendSeparatorAsMessage := true
     ListingSeparator := "======="
@@ -122,6 +126,161 @@ class FakeHarvestScheduleState {
 
     LastHarvestAt(name) {
         return this.stamps.Has(name) ? this.stamps[name] : ""
+    }
+}
+
+class HarvesterTestConfig {
+    CaptureSettleMs := 0
+    CaptureMethod := "accessibility"
+    CaptureAccessibilityFallback := "selectall"
+    ListingStartPattern := ""
+    ImageMarkerPattern := ""
+    RequiredFields := []
+    MaxMessagesPerGroup := 50
+    AutoCapture := false
+    AutoCaptureProbeImages := false
+    HarvestSaveStateEachGroup := true
+    HarvestGroupDelayMinMs := 0
+    HarvestGroupDelayMaxMs := 0
+    BetweenGroupsMs := 0
+    RecheckAfterPublish := false
+    AfterPublishRecheckMs := 0
+}
+
+class LayoutTestConfig {
+    ExeName := "Zalo.exe"
+    LayoutSidebarWidthPx := 380
+    LayoutSidebarWidthRatio := 0.345
+    LayoutMessageClickYRatio := 0.24
+    LayoutMessageClickXRatio := 0.28
+    LayoutComposeClickYRatio := 0.92
+    LayoutComposeClickXRatio := 0.42
+    GroupSearchBoxClickXRatio := 0.55
+    GroupSearchBoxClickYRatio := 0.075
+    GroupSearchResultClickYRatio := 0.28
+    ComposeClickOffsetYPx := 75
+}
+
+class ForwardCaptureTestConfig {
+    AutoCapture := true
+    AutoCaptureProbeImages := true
+    AutoCaptureAnchor := "room_code"
+    ImageStrategy := "forward"
+    AlbumMaxImages := 8
+    QueueLogFile := ""
+}
+
+class FakeCaptureUI {
+    FindImageBubblesNearMessage(anchor, limit, allowHeuristic) {
+        return [Map("x", 100, "y", 100)]
+    }
+}
+
+class FakeCaptureMedia {
+    IsTrusted(id) {
+        return false
+    }
+}
+
+class FakeCaptureQueue {
+    __New() {
+        this.attached := []
+    }
+
+    AttachMedia(id, files, metadata := 0) {
+        this.attached.Push(id)
+    }
+}
+
+class FakeHarvesterUI {
+    __New(captures) {
+        this.captures := captures
+        this.captureIndex := 0
+        this.opened := []
+    }
+
+    OpenGroup(groupName, focus := "read") {
+        this.opened.Push(groupName ":" focus)
+        return true
+    }
+
+    CaptureConversationText(method := "") {
+        this.captureIndex++
+        if this.captureIndex > this.captures.Length
+            return this.captures[this.captures.Length]
+        return this.captures[this.captureIndex]
+    }
+}
+
+class FakeHarvesterState {
+    __New() {
+        this.captureHashes := Map()
+        this.seen := Map()
+        this.touched := []
+        this.saved := 0
+    }
+
+    _SeenKey(groupName, hash) {
+        return groupName "|" hash
+    }
+
+    GetCaptureHash(groupName) {
+        return this.captureHashes.Has(groupName)
+            ? this.captureHashes[groupName] : ""
+    }
+
+    SetCaptureHash(groupName, hash) {
+        this.captureHashes[groupName] := hash
+    }
+
+    MarkNeedsRevisit(groupName, value := true) {
+    }
+
+    IsSeen(groupName, hash) {
+        return this.seen.Has(this._SeenKey(groupName, hash))
+    }
+
+    MarkSeen(groupName, hash) {
+        this.seen[this._SeenKey(groupName, hash)] := true
+    }
+
+    TouchHarvest(groupName) {
+        this.touched.Push(groupName)
+    }
+
+    Save() {
+        this.saved++
+    }
+
+    ListRevisitGroups() {
+        return []
+    }
+}
+
+class FakeHarvesterRepository {
+    __New() {
+        this.records := []
+    }
+
+    SaveListing(listing, sourceGroup, hash) {
+        record := listing.Clone()
+        record["id"] := ListingRepository.BuildListingId(sourceGroup, hash)
+        record["source_group"] := sourceGroup
+        record["content_hash"] := hash
+        this.records.Push(record)
+        return record
+    }
+}
+
+class FakeHarvesterBlockList {
+    Match(text) {
+        return InStr(text, "LOCK", false) ? "LOCK" : ""
+    }
+}
+
+class FakeHarvesterRegistry {
+    SourceGroups() {
+        return []
     }
 }
 
@@ -186,6 +345,7 @@ class FakePublisherRegistry {
 class FakePublisherRepository {
     __New(records) {
         this.records := Map()
+        this.published := []
         for record in records
             this.records[record["id"]] := record
     }
@@ -201,6 +361,11 @@ class FakePublisherRepository {
                 result.Push(this.records[id])
         }
         return result
+    }
+
+    MarkPublishedLocal(ids) {
+        for id in ids
+            this.published.Push(id)
     }
 }
 
@@ -367,8 +532,10 @@ Check("suy luận địa chỉ từ 'tại'", InStr(taiAddr["address"], "17 đư
 dupListing := ListingParser.Parse(
     "Cho thuê studio`nĐịa chỉ: 1 Lê Lợi Q1`nGiá: 5tr`nFull nội thất, có gác`nLh 0901234567")
 dupOut := ListingParser.FormatBlock(dupListing, true, cfg.PhoneHint)
-Check("FormatBlock không trùng Khác với Thông tin",
-    InStr(dupOut, "ℹ️ Thông tin:") > 0 && !InStr(dupOut, "📝 Khác:"))
+Check("FormatBlock có thông tin phòng",
+    InStr(dupOut, "- thông tin phòng:") > 0, dupOut)
+Check("FormatBlock có loại phòng studio",
+    InStr(dupOut, "- phòng: studio") > 0 || InStr(dupOut, "- phòng: Studio") > 0, dupOut)
 
 ; ── "Giá điện" không được nuốt "Giá" ─────────────────────
 Section("thứ tự luật parse")
@@ -405,12 +572,20 @@ Check("ClassifyCarrier Viettel 037",
     ListingParser.ClassifyCarrier("0377785784") = "Viettel")
 
 listing := ListingParser.Parse("Địa chỉ: X`nSố phòng: P009`nGiá: 5 triệu`nSĐT: 0901234567")
+listing["source_group"] := "Nhóm Test"
 masked := ListingParser.FormatBlock(listing, true, cfg.PhoneHint)
 Check("MaskPhone=1 không lộ SĐT", !InStr(masked, "0901234567"))
-Check("output có mã phòng", InStr(masked, "P009") > 0)
+Check("output có mã phòng", InStr(masked, "- mã phòng: P009") > 0, masked)
+Check("output template tên nhóm", InStr(masked, "- tên nhóm: Nhóm Test") > 0, masked)
 shown := ListingParser.FormatBlock(listing, false, cfg.PhoneHint)
-Check("MaskPhone=0 hiện Số chủ", InStr(shown, "📞 Số chủ: 0901234567") > 0, shown)
+Check("MaskPhone=0 hiện SĐT chủ trọ",
+    InStr(shown, "- số điện thoại của chủ trọ: 0901234567") > 0, shown)
 Check("MaskPhone=0 kèm nhà mạng", InStr(shown, "Mobifone") > 0, shown)
+emptyPhone := ListingParser.FormatBlock(
+    Map("address", "X", "room_code", "P1", "price", "5tr", "owner_phone", "",
+        "source_group", "G"), false, "")
+Check("thiếu SĐT thành -",
+    InStr(emptyPhone, "- số điện thoại của chủ trọ: -") > 0, emptyPhone)
 
 ; ── Tách tin + gán ảnh ────────────────────────────────────
 Section("tách tin")
@@ -505,7 +680,9 @@ manualPath := A_Temp "\zalo-groups-manual-test.txt"
 WriteTextFile(manualPath, "# comment`nNhóm Manual A`n;skip`nNhóm Manual B`n")
 manualNames := GroupRegistry.LoadManualNames(manualPath)
 Check("manual list fallback",
-    manualNames.Length = 2 && manualNames[1] = "Nhóm Manual A")
+    manualNames.Length = 2 && manualNames[1] = "Nhóm Manual A",
+    "count=" manualNames.Length
+        . (manualNames.Length ? " first=" manualNames[1] : ""))
 if FileExist(manualPath)
     FileDelete manualPath
 
@@ -559,6 +736,58 @@ Check("vòng sau ưu tiên unread rồi audit nhóm cũ nhất",
     && incrementalPlan["groups"].Length = 2
     && incrementalPlan["groups"][1]["group_name"] = "Nhóm C"
     && incrementalPlan["groups"][2]["group_name"] = "Nhóm A")
+
+equalStampState := FakeHarvestScheduleState(Map(
+    "Nhóm A", "2026-08-01 10:00:00",
+    "Nhóm B", "2026-08-01 10:00:00",
+    "Nhóm C", "2026-08-03 10:00:00"
+))
+equalStampPlan := scheduler.BuildPlan(
+    schedulerGroups, equalStampState, [])
+Check("audit timestamp chuỗi bằng nhau giữ thứ tự nguồn",
+    equalStampPlan["groups"].Length = 1
+    && equalStampPlan["groups"][1]["group_name"] = "Nhóm A")
+
+mixedStampState := FakeHarvestScheduleState(Map(
+    "Nhóm A", "2026-08-02 10:00:00",
+    "Nhóm C", "2026-08-03 10:00:00"
+))
+mixedStampPlan := scheduler.BuildPlan(
+    schedulerGroups, mixedStampState, [])
+Check("nhóm chưa harvest được ưu tiên trước audit",
+    mixedStampPlan["mode"] = "new_groups"
+    && mixedStampPlan["groups"].Length = 2
+    && mixedStampPlan["groups"][1]["group_name"] = "Nhóm B"
+    && mixedStampPlan["groups"][2]["group_name"] = "Nhóm A")
+
+Section("Zalo UI geometry guards")
+layoutUi := ZaloUIAdapter(LayoutTestConfig())
+layout := layoutUi._LayoutSnapshot(
+    Map("x", 0, "y", 0, "w", 1920, "h", 1032, "hwnd", 0))
+Check("layout fullscreen dùng sidebar px cố định",
+    layout["minX"] = 380 && layout["sidebarWidth"] = 380)
+Check("layout compose dùng semantic row gần đáy",
+    layout["composeY"] = Round(1032 * 0.92) + 75
+    && layout["cy"] = Round(1032 * 0.48))
+Check("layout text focus tránh vùng ảnh giữa chat",
+    layout["textFocusX"] < layout["cx"]
+    && layout["textFocusY"] < layout["cy"]
+    && layout["textFocusY"] = Round(1032 * 0.24))
+Check("layout search result nằm trong sidebar",
+    layout["firstResultX"] < layout["minX"]
+    && layout["searchY"] = Round(1032 * 0.075)
+    && layout["firstResultY"] = Round(1032 * 0.28))
+norm := layoutUi._LayoutSnapshot(
+    Map("x", 410, "y", 91, "w", 1100, "h", 850, "hwnd", 0))
+Check("layout normalized dùng sidebar ratio",
+    norm["sidebarWidth"] = Round(1100 * 0.345)
+    && norm["minX"] = 410 + Round(1100 * 0.345))
+layoutUi.lastOpenedFingerprint := "same-chat"
+layoutUi.lastOpenedGroup := "Nhóm A"
+Check("fingerprint chặn chat dính sang nhóm khác",
+    !layoutUi._FingerprintMatchesOpen("Nhóm B", "same-chat"))
+Check("fingerprint cho phép nội dung mới",
+    layoutUi._FingerprintMatchesOpen("Nhóm B", "new-chat"))
 
 activityText := "
 (
@@ -636,6 +865,71 @@ Check("MaxMessagesPerGroup cắt newest-first",
     pickCapped["items"].Length = 1
     && pickCapped["items"][1]["block"] = newBlock)
 
+Section("message harvester")
+validHarvestText := "
+(
+Địa chỉ: 12 Lê Lợi, Quận 1
+Mã phòng: 202
+Giá: 5tr5
+SĐT: 0901234567
+)"
+harvestCfg := HarvesterTestConfig()
+harvestState := FakeHarvesterState()
+harvestRepo := FakeHarvesterRepository()
+harvestUi := FakeHarvesterUI(["Thanh điều hướng Zalo", validHarvestText])
+harvester := MessageHarvester(
+    harvestCfg, harvestUi, FakeHarvesterRegistry(),
+    FakeHarvesterBlockList(), harvestState, harvestRepo)
+harvestResult := harvester.HarvestGroup("Nhóm Test")
+Check("harvester fallback selectall lưu listing",
+    harvestResult["saved"] = 1
+    && harvestRepo.records.Length = 1
+    && harvestUi.captureIndex = 2)
+unchangedResult := harvester.HarvestGroup("Nhóm Test")
+Check("harvester capture hash không đổi thì bỏ qua",
+    unchangedResult["saved"] = 0
+    && harvestRepo.records.Length = 1
+    && harvestState.touched.Length = 2)
+
+blockedState := FakeHarvesterState()
+blockedRepo := FakeHarvesterRepository()
+blockedUi := FakeHarvesterUI([validHarvestText "`nLOCK"])
+blockedHarvester := MessageHarvester(
+    harvestCfg, blockedUi, FakeHarvesterRegistry(),
+    FakeHarvesterBlockList(), blockedState, blockedRepo)
+blockedResult := blockedHarvester.HarvestGroup("Nhóm Blocked")
+Check("harvester blocked vẫn mark seen",
+    blockedResult["blocked"] = 1
+    && blockedRepo.records.Length = 0
+    && blockedState.seen.Count = 1)
+
+strictCfg := HarvesterTestConfig()
+strictCfg.CaptureMethod := "selectall"
+strictCfg.RequiredFields := ["owner_phone"]
+strictText := "
+(
+Địa chỉ: 15 Nguyễn Trãi, Quận 5
+Mã phòng: 303
+Giá: 6tr
+)"
+strictState := FakeHarvesterState()
+strictHarvester := MessageHarvester(
+    strictCfg, FakeHarvesterUI([strictText]), FakeHarvesterRegistry(),
+    FakeHarvesterBlockList(), strictState, FakeHarvesterRepository())
+strictResult := strictHarvester.HarvestGroup("Nhóm Invalid")
+Check("harvester invalid strict vẫn mark seen",
+    strictResult["invalid"] = 1 && strictState.seen.Count = 1)
+
+emptyState := FakeHarvesterState()
+emptyResult := MessageHarvester(
+    harvestCfg, FakeHarvesterUI([""]), FakeHarvesterRegistry(),
+    FakeHarvesterBlockList(), emptyState,
+    FakeHarvesterRepository()).HarvestGroup("Nhóm Empty")
+Check("harvester capture rỗng không đổi state",
+    emptyResult["saved"] = 0
+    && emptyState.captureHashes.Count = 0
+    && emptyState.touched.Length = 0)
+
 ; ── Composer ──────────────────────────────────────────────
 Section("composer")
 composerSvc := MessageComposer(cfg)
@@ -647,7 +941,8 @@ records := [
 ]
 messages := composerSvc.Compose(records)
 Check("3 phòng → 3 message", messages.Length = 3, "got " messages.Length)
-Check("mỗi message 1 địa chỉ", ListingParser.CountMatches(messages[1], "📍 Địa chỉ:") = 1)
+Check("mỗi message 1 mã phòng", ListingParser.CountMatches(messages[1], "- mã phòng:") = 1)
+Check("composer dùng template mới", InStr(messages[1], "- tên nhóm: Nhóm A") > 0, messages[1])
 
 fiveRecords := []
 Loop 5
@@ -674,7 +969,7 @@ Loop 7
     ))
 messages7 := composerSvc.Compose(sevenRecords)
 Check("7 phòng → 7 message", messages7.Length = 7, "got " messages7.Length)
-Check("message 1 có 1 phòng", ListingParser.CountMatches(messages7[1], "📍 Địa chỉ:") = 1)
+Check("message 1 có 1 phòng", ListingParser.CountMatches(messages7[1], "- mã phòng:") = 1)
 Check("ListingsPerMessage luôn 1", composerSvc.ListingsPerMessage() = 1)
 
 ; ── Mã phòng chuẩn hóa ────────────────────────────────────
@@ -683,7 +978,7 @@ Check("202 → P202", ListingParser.NormalizeRoomCode(Map("room_code", "202"), "
 Check("p102 → P102", ListingParser.NormalizeRoomCode(Map("room_code", "p102"), "") = "P102")
 Check("Q3-15 giữ nguyên", ListingParser.NormalizeRoomCode(Map("room_code", "Q3-15"), "") = "Q3-15")
 Check("không lấy giá làm mã", ListingParser.NormalizeRoomCode(Map("room_code", "5tr7"), "") = "")
-Check("fallback hash", ListingParser.NormalizeRoomCode(Map("room_code", ""), "abc12345") = "Rabc12")
+Check("fallback hash", ListingParser.NormalizeRoomCode(Map("room_code", ""), "abc12345") = "Rabc123")
 Check("ParsePhoneRequest chuẩn hóa", ListingParser.ParsePhoneRequest("SĐT 202") = "P202")
 
 ; ── Hash dedupe ───────────────────────────────────────────
@@ -699,6 +994,25 @@ Check("listing id tách theo nhóm nguồn",
 Check("listing id chuẩn hóa hoa thường tên nhóm",
     ListingRepository.BuildListingId("NHÓM A", a)
     = ListingRepository.BuildListingId("nhóm a", a))
+
+Section("listing repository")
+repositoryRoot := A_Temp "\zalo-listing-repository-tests"
+if DirExist(repositoryRoot)
+    DirDelete repositoryRoot, true
+repositoryCfg := QueueTestConfig(repositoryRoot)
+repository := ListingRepository(repositoryCfg)
+repositoryListing := ListingParser.Parse(validHarvestText)
+storedFirst := repository.SaveListing(
+    repositoryListing, "Nhóm Repository", "same-content")
+storedSecond := repository.SaveListing(
+    repositoryListing, "Nhóm Repository", "same-content")
+Check("SaveListing cùng hash upsert cùng ID",
+    storedFirst["id"] = storedSecond["id"]
+    && repository.listings.Length = 1)
+Check("SaveListing ghi per-listing JSON",
+    FileExist(repositoryCfg.ListingsDir "\" storedFirst["id"] ".json"))
+Check("GetByRoomCode tìm mã chuẩn hóa",
+    repository.GetByRoomCode("202")["id"] = storedFirst["id"])
 
 ; ── Harvest state (capture snapshot + revisit) ────────────
 Section("harvest state")
@@ -788,6 +1102,8 @@ Check("snapshot reload đủ 7 completed",
     queueReloaded.Stats()["completed"] = 7,
     queueReloaded.Stats()["completed"])
 Check("bỏ qua JSONL cuối bị truncate", queueReloaded.Stats()["total"] = 7)
+Check("snapshot v2 dùng JSONL scalable",
+    InStr(ReadTextFile(qcfg.QueueSnapshotFile), "queue_snapshot_jsonl") > 0)
 
 queueReloaded.Enqueue(MakeQueueRecord(8))
 queueAfterRepair := PublishQueueStore(qcfg)
@@ -795,6 +1111,20 @@ Check("journal ghi tiếp được sau truncated tail",
     queueAfterRepair.Get("q0008") != false)
 repairLease := queueReloaded.LeaseNext(5)
 queueReloaded.CompleteLease(repairLease["token"])
+
+legacySnapshotRoot := A_Temp "\zalo-queue-legacy-snapshot-tests"
+if DirExist(legacySnapshotRoot)
+    DirDelete legacySnapshotRoot, true
+legacySnapshotCfg := QueueTestConfig(legacySnapshotRoot)
+EnsureDir(legacySnapshotCfg.QueueDir)
+WriteTextFile(legacySnapshotCfg.QueueSnapshotFile, JSON.Stringify(Map(
+    "version", 1, "next_seq", 2,
+    "records", [queueAfterRepair.Get("q0008")]
+)))
+WriteTextFile(legacySnapshotCfg.QueueEventsFile, "")
+legacySnapshotQueue := PublishQueueStore(legacySnapshotCfg)
+Check("snapshot v1 cũ vẫn reload được",
+    legacySnapshotQueue.Get("q0008") != false)
 
 corruptRoot := A_Temp "\zalo-queue-corrupt-tests"
 if DirExist(corruptRoot)
@@ -1202,6 +1532,17 @@ rawOnlyRecord := Map(
     "raw_text", "Địa chỉ: 9 Trần Hưng Đạo`nGiá: 6 triệu")
 Check("anchor fallback dòng địa chỉ",
     ListingMediaCapturer.BuildSearchAnchor(rawOnlyRecord, anchorCfg) = "9 Trần Hưng Đạo")
+forwardQueue := FakeCaptureQueue()
+forwardCapture := ListingMediaCapturer(
+    ForwardCaptureTestConfig(), FakeCaptureUI(),
+    FakeCaptureMedia(), forwardQueue)
+forwardProbeRecord := Map(
+    "id", "forward-probe", "room_code", "P404",
+    "address", "", "raw_text", "Mã phòng: P404", "image_count", 0)
+Check("forward probe không phóng đại số ảnh",
+    forwardCapture.CaptureForRecord("Nhóm Probe", forwardProbeRecord)
+    && forwardProbeRecord["image_count"] = 1
+    && forwardQueue.attached.Length = 1)
 
 Section("watch hours")
 Check("watch hours trống = luôn bật",
@@ -1215,8 +1556,8 @@ Check("watch hours qua nửa đêm",
     && WithinConfiguredHours("22:00", "06:00", "05:00")
     && !WithinConfiguredHours("22:00", "06:00", "12:00"))
 
-for tempDir in [queueRoot, corruptRoot, retryRoot, legacyIntentRoot,
-    supersedeRoot, reclaimRoot, migrateRoot,
+for tempDir in [queueRoot, legacySnapshotRoot, corruptRoot, retryRoot, legacyIntentRoot,
+    supersedeRoot, reclaimRoot, migrateRoot, repositoryRoot,
     publisherRoot, oneRoot, afterRoot, uncertainRoot, missingRoot, oversizeRoot,
     cooldownRoot] {
     if DirExist(tempDir)

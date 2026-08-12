@@ -65,6 +65,9 @@ class ListingBotService {
     }
 
     _Build() {
+        ConfigureDiagnosticLog(
+            this.config.DiagnosticLogEnabled,
+            this.config.DiagnosticLogFile)
         this.registry := GroupRegistry(this.config)
         this.groupsDiscovered := false
         this.blockList := BlockList(this.config)
@@ -444,12 +447,20 @@ class ListingBotService {
     }
 
     _PrepareZaloWindow() {
+        try DllCall("SetThreadDpiAwarenessContext", "Ptr", -4, "Ptr")
         exe := "ahk_exe " this.config.ExeName
         WinActivate exe
         if !WinWaitActive(exe,, 5)
             throw Error("Không kích hoạt được cửa sổ Zalo.")
-        if this.config.StartupMaximizeZalo
+        if this.config.StartupMaximizeZalo {
             WinMaximize exe
+            Sleep 450
+            ; Confirm maximize (some Electron builds need a second request).
+            if WinGetMinMax(exe) != 1
+                WinMaximize exe
+        } else {
+            this.ui.EnsureNormalized()
+        }
         Sleep 500
     }
 
