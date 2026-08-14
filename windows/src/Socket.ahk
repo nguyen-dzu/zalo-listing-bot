@@ -125,12 +125,12 @@ class Socket {
     }
 
     Recv(maxBytes := 65536) {
-        buffer := Buffer(maxBytes, 0)
+        recvBuf := Buffer(maxBytes, 0)
         received := DllCall(
             "Ws2_32\recv",
             "Ptr", this.handle,
-            "Ptr", buffer,
-            "Int", buffer.Size,
+            "Ptr", recvBuf.Ptr,
+            "Int", recvBuf.Size,
             "Int", 0,
             "Int"
         )
@@ -142,19 +142,19 @@ class Socket {
                 throw Error("Timeout")
             throw OSError(code, "recv failed")
         }
-        return StrGet(buffer, received, "UTF-8")
+        return StrGet(recvBuf, received, "UTF-8")
     }
 
     Send(text) {
         byteCount := StrPut(text, "UTF-8") - 1
-        buffer := Buffer(byteCount + 1, 0)
-        StrPut(text, buffer, "UTF-8")
+        sendBuf := Buffer(byteCount + 1, 0)
+        StrPut(text, sendBuf, "UTF-8")
         sentTotal := 0
         while sentTotal < byteCount {
             sent := DllCall(
                 "Ws2_32\send",
                 "Ptr", this.handle,
-                "Ptr", buffer.Ptr + sentTotal,
+                "Ptr", sendBuf.Ptr + sentTotal,
                 "Int", byteCount - sentTotal,
                 "Int", 0,
                 "Int"

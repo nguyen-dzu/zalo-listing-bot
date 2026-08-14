@@ -136,6 +136,29 @@ oldest-first audit shard still provides eventual coverage.
 
 ---
 
+### 9. ZaloUI window / compose calibration (Aug 2026) — DONE / NEEDS E2E
+
+**Done (Zalo Web, 1 tab):**
+
+- [x] `EnsureNormalized()` — restore ~1100×850, không maximize mỗi activate
+- [x] `OpenGroup` qua bridge `navigate` + verify title/scan
+- [x] `_FocusComposeBox` — bridge `focus_compose`, fallback click 42%/88%
+- [x] `_FocusMessagePane` — click 55%/45% (harvest read focus)
+- [x] Publish session clipboard-first paste (`_PasteAndSend`)
+- [x] Sticky-conversation guard (`_GuardStickyConversation`)
+- [x] Agent debug log → `AgentDebugLog` / `ui-diagnostic.jsonl`
+
+**Cần E2E trên Zalo Web thật:** navigate nhóm output, paste ảnh + text icon, separator `=======`.
+
+---
+
+### 10. Output icon format — DONE (Aug 2026)
+
+`ListingParser.FormatBlock()` — 8 dòng emoji, không viền `---`, không `- ` đầu dòng.
+Field thiếu vẫn hiển thị `-`. Tests assert `🏷️`, `🔑`, `💰`, `📞`.
+
+---
+
 ## P1 — Parser improvements (partially done)
 
 - [x] Heuristic `LooksLikeListing`
@@ -159,10 +182,12 @@ oldest-first audit shard still provides eventual coverage.
 ## Pre-ship checklist
 
 ```
-[x] RunTests.ahk on Windows — 207 parser/UI-guard/harvest/queue/media cases
-[x] Simulate.ahk on Windows — 5,000 rooms → 1,000 batches (98s queue work)
+[x] RunTests.ahk on Windows — 230 parser/UI-guard/harvest/queue/media cases
+[x] Simulate.ahk on Windows — 5,000 rooms → 1,000 batches (`run-stress.cmd`)
 [ ] Manual test: 1 source group → main (record in commit/PR)
 [x] blocklist.example.csv — new keywords + tests
 [x] No hardcoded group names / delays — config.ini
 [x] BACKLOG.md updated
+[x] Output icon format + ZaloUI calibration documented
+[x] Diagnostics: `data/ui-diagnostic.jsonl` when `[Diagnostics] Enabled=1`
 ```

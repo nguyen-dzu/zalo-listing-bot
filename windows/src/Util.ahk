@@ -179,7 +179,7 @@ AgentDebugSessionLogPath() {
     repoRoot := RegExReplace(root, "\\[^\\]+$", "")
     if repoRoot = root
         return ""
-    return repoRoot "\debug-a5234f.log"
+    return repoRoot "\debug-850be2.log"
 }
 
 AgentDebugLog(location, message, data := unset, hypothesisId := "", runId := "pre-fix") {
@@ -199,7 +199,7 @@ AgentDebugLog(location, message, data := unset, hypothesisId := "", runId := "pr
         sessionPath := AgentDebugSessionLogPath()
         if sessionPath != "" {
             sessionPayload := Map(
-                "sessionId", "a5234f",
+                "sessionId", "850be2",
                 "runId", runId,
                 "hypothesisId", hypothesisId,
                 "location", location,
@@ -269,4 +269,31 @@ SetClipboardFile(filePath) {
     }
     DllCall("CloseClipboard")
     return true
+}
+
+WriteBase64File(encoded, filePath) {
+    value := RegExReplace(String(encoded), "\s")
+    if value = ""
+        throw Error("Dữ liệu ảnh base64 rỗng.")
+    size := 0
+    if !DllCall("Crypt32\CryptStringToBinaryW",
+        "Str", value, "UInt", 0, "UInt", 1,
+        "Ptr", 0, "UInt*", &size, "Ptr", 0, "Ptr", 0)
+        throw Error("Không đọc được kích thước ảnh base64.")
+    data := Buffer(size)
+    if !DllCall("Crypt32\CryptStringToBinaryW",
+        "Str", value, "UInt", 0, "UInt", 1,
+        "Ptr", data.Ptr, "UInt*", &size, "Ptr", 0, "Ptr", 0)
+        throw Error("Không decode được ảnh base64.")
+    dir := RegExReplace(filePath, "\\[^\\]+$")
+    if dir != filePath
+        EnsureDir(dir)
+    handle := FileOpen(filePath, "w")
+    if !handle
+        throw Error("Không mở được file ảnh: " filePath)
+    handle.RawWrite(data, size)
+    handle.Close()
+    if !FileExist(filePath) || FileGetSize(filePath) <= 0
+        throw Error("File ảnh decode bị rỗng: " filePath)
+    return filePath
 }

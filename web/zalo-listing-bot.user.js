@@ -1,20 +1,25 @@
 // ==UserScript==
 // @name         Zalo Listing Bot — Web Bridge
 // @namespace    zalo-listing-bot
-// @version      3.0.0
-// @description  2-window Zalo Web: Harvest DOM engine + Publish compose bridge
-// @match        https://chat.zalo.me/*
+// @version      4.1.6
+// @description  Single-tab Zalo Web: harvest source groups then switch to sale group in-place
+// @match        *://chat.zalo.me/*
+// @match        *://chat.zalo.me/
+// @match        *://*.zalo.me/*
+// @include      *://chat.zalo.me/*
 // @grant        GM_xmlhttpRequest
+// @grant        window.onurlchange
 // @connect      127.0.0.1
 // @connect      zdn.vn
 // @connect      zaloapp.com
 // @connect      zalo.me
-// @run-at       document-idle
+// @run-at       document-start
 // ==/UserScript==
 
 (function () {
     'use strict';
 
+    const SCRIPT_VERSION = '4.1.6';
     const BRIDGE = {
         host: '127.0.0.1',
         port: 8080,
@@ -56,14 +61,27 @@
         sidebarSearch: [
             'input[placeholder*="Tìm"]',
             'input[placeholder*="tim"]',
+            'input[placeholder*="Tìm kiếm"]',
+            'input[aria-label*="Tìm"]',
+            'input[aria-label*="tim"]',
             'input[type="search"]',
-            '[class*="search"] input'
+            '[class*="search"] input',
+            '[class*="search-input"]',
+            '[class*="search"] [contenteditable="true"]',
+            '[class*="sidebar"] input[type="text"]',
+            '[class*="left-side"] input[type="text"]',
+            '[class*="conv-list"] input[type="text"]'
         ],
         conversationTitle: [
             '[class*="header-title"]',
             '[class*="conv-title"]',
+            '[class*="thread-title"]',
             '[class*="chat-header"] [class*="title"]',
+            '[class*="chat-header"] [class*="name"]',
+            '[class*="header"] [class*="title"]',
+            '[class*="header"] [class*="name"]',
             'header h1',
+            'header h2',
             'header [class*="name"]'
         ],
         sidebarItem: [
@@ -71,6 +89,15 @@
             '[class*="conversation-item"]',
             '[class*="chat-item"]',
             '[role="listitem"]'
+        ],
+        searchResultItem: [
+            '[class*="search-result"] [class*="item"]',
+            '[class*="SearchResult"]',
+            '[class*="search-list"] [class*="item"]',
+            '[class*="global-search"] [class*="item"]',
+            '[class*="result-list"] [class*="item"]',
+            '[class*="search"] [class*="conv-item"]',
+            '[class*="search"] [class*="conversation"]'
         ],
         unreadBadge: [
             '[class*="badge"]',
@@ -93,6 +120,8 @@
     let observerDebounce = null;
     let pollBusy = false;
     let lastDomDiagnostics = { matchedSelector: '', messageCount: 0 };
+    let outputGroupNames = [];
+    let eventsPaused = false;
 
     function qs(selectors, root = document) {
         const list = Array.isArray(selectors) ? selectors : [selectors];
@@ -111,10 +140,24 @@
         return (text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
     }
 
+    function normalizeGroupName(name) {
+        return normalizeText(name)
+            .toLocaleLowerCase('vi')
+            .replace(/[“”„‟]/g, '"')
+            .replace(/\u00a0/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
     function groupNamesMatch(actual, expected) {
-        const a = normalizeText(actual).toLocaleLowerCase('vi');
-        const e = normalizeText(expected).toLocaleLowerCase('vi');
-        return Boolean(a && e && (a.includes(e) || e.includes(a)));
+        const e = normalizeGroupName(expected);
+        if (!e) return false;
+        // Search-result containers often include preview text on later lines.
+        // Match only a complete title line; substring matching can open a
+        // similarly named group and leave the previous conversation active.
+        return normalizeText(actual)
+            .split('\n')
+            .some(line => normalizeGroupName(line) === e);
     }
 
     function setControlledInputValue(input, value) {
@@ -143,10 +186,11 @@
     }
 
     function http(method, path, body) {
+        const url = `http://${BRIDGE.host}:${BRIDGE.port}${path}`;
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
                 method,
-                url: `http://${BRIDGE.host}:${BRIDGE.port}${path}`,
+                url,
                 headers: body ? { 'Content-Type': 'application/json' } : undefined,
                 data: body ? JSON.stringify(body) : undefined,
                 timeout: 8000,
@@ -160,31 +204,47 @@
                         resolve({ status: resp.status, body: resp.responseText || '' });
                     }
                 },
-                onerror: reject,
-                ontimeout: () => reject(new Error('bridge timeout'))
+                onerror(err) {
+                    reject(err || new Error('gm_onerror'));
+                },
+                ontimeout() {
+                    reject(new Error('bridge timeout'));
+                }
             });
         });
     }
 
     function detectRole() {
-        const h = (location.hash || '').toLowerCase();
-        if (h.includes('harvest')) {
-            sessionStorage.setItem('zaloListingBotRole', 'harvest');
-            return 'harvest';
-        }
-        if (h.includes('publish')) {
-            sessionStorage.setItem('zaloListingBotRole', 'publish');
-            return 'publish';
-        }
-        const remembered = sessionStorage.getItem('zaloListingBotRole');
-        if (remembered === 'harvest' || remembered === 'publish') return remembered;
-        return 'unknown';
+        // Zalo Web single-session: one tab handles harvest + publish in-place.
+        sessionStorage.setItem('zaloListingBotRole', 'bot');
+        return 'bot';
     }
 
-    function applyRoleTitle(role) {
-        const base = document.title.replace(/^\[(Harvest|Publish)\]\s*/, '');
-        if (role === 'harvest') document.title = '[Harvest] ' + base;
-        else if (role === 'publish') document.title = '[Publish] ' + base;
+    function applyRoleTitle() {
+        if (!document.title) return;
+        const base = document.title.replace(/^\[(ZaloBot|Harvest|Publish)\]\s*/, '');
+        const next = '[ZaloBot] ' + (base || 'Zalo');
+        if (document.title !== next)
+            document.title = next;
+    }
+
+    function showStatusBadge() {
+        if (document.getElementById('zalo-listing-bot-badge')) return;
+        const badge = document.createElement('div');
+        badge.id = 'zalo-listing-bot-badge';
+        badge.textContent = 'ZaloBot ON';
+        badge.style.cssText = [
+            'position:fixed', 'top:8px', 'right:8px', 'z-index:2147483647',
+            'background:#0068ff', 'color:#fff', 'font:12px/1.4 sans-serif',
+            'padding:4px 8px', 'border-radius:4px', 'pointer-events:none'
+        ].join(';');
+        (document.body || document.documentElement).appendChild(badge);
+    }
+
+    function isOutputGroup(name) {
+        const actual = normalizeText(name).toLocaleLowerCase('vi');
+        if (!actual) return false;
+        return outputGroupNames.some(expected => groupNamesMatch(actual, expected));
     }
 
     function isExcludedElement(el) {
@@ -279,7 +339,18 @@
 
     function getConversationTitle() {
         const el = qs(SELECTORS.conversationTitle);
-        return el ? normalizeText(el.innerText || el.textContent) : '';
+        if (el) return normalizeText(el.innerText || el.textContent);
+        const header = qs([
+            '[class*="chat-header"]',
+            '[class*="header-chat"]',
+            'header'
+        ]);
+        if (header) {
+            const name = header.querySelector(
+                '[class*="title"], [class*="name"], h1, h2, span');
+            if (name) return normalizeText(name.innerText || name.textContent);
+        }
+        return '';
     }
 
     function extractMessageText(item) {
@@ -318,9 +389,35 @@
         return messages;
     }
 
+    function associateImagesWithText(messages) {
+        const result = [];
+        let pendingImages = [];
+        for (let index = 0; index < messages.length; index++) {
+            const message = messages[index];
+            if (!message.text && message.images.length) {
+                pendingImages.push(...message.images);
+                continue;
+            }
+            if (!message.text) continue;
+            const images = [...new Set([...pendingImages, ...message.images])];
+            pendingImages = [];
+            result.push({
+                text: message.text,
+                images,
+                hash: fnvHash(message.text + images.join('|')),
+                dom_index: index
+            });
+        }
+        return result;
+    }
+
     function scanConversation() {
-        const messages = collectMessages();
+        const messages = associateImagesWithText(collectMessages());
         const lines = messages.map(m => m.text).filter(Boolean);
+        const imageTotal = messages.reduce((sum, m) => sum + m.images.length, 0);
+        // #region agent log
+        fetch('http://127.0.0.1:7932/ingest/d1ffc0de-e0fa-4c76-b9ea-e4ddb6aeec2d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'850be2'},body:JSON.stringify({sessionId:'850be2',location:'user.js:scanConversation',message:'scan_done',data:{group:getConversationTitle(),msgCount:messages.length,textLen:lines.join('\n').length,imageTotal,selector:lastDomDiagnostics.matchedSelector},timestamp:Date.now(),hypothesisId:'H3',runId:'pre-fix'})}).catch(()=>{});
+        // #endregion
         return {
             group: getConversationTitle(),
             text: lines.join('\n'),
@@ -373,39 +470,166 @@
         return true;
     }
 
-    async function navigateToGroup(groupName) {
-        if (!groupName) throw new Error('Tên nhóm rỗng.');
-        const search = qs(SELECTORS.sidebarSearch);
-        if (!search) throw new Error('Không tìm thấy ô tìm kiếm sidebar.');
+    function getSidebarRoot() {
+        return qs([
+            '[class*="left-side"]',
+            '[class*="sidebar"]',
+            '[class*="conv-list"]',
+            'nav[class*="side"]'
+        ]) || document.body;
+    }
 
-        search.focus();
-        search.click();
-        await sleep(150);
-        setControlledInputValue(search, '');
-        await sleep(80);
-        setControlledInputValue(search, groupName);
-        await sleep(600);
-
-        const target = groupName.toLowerCase();
-        for (const sel of SELECTORS.sidebarItem) {
-            for (const item of document.querySelectorAll(sel)) {
+    function collectGroupLabels(selectors, root = document) {
+        const labels = [];
+        const seen = new Set();
+        for (const sel of selectors) {
+            for (const item of root.querySelectorAll(sel)) {
                 const label = normalizeText(item.innerText || item.textContent);
-                if (!label) continue;
-                if (label.toLowerCase().includes(target) || target.includes(label.toLowerCase().slice(0, 20))) {
-                    item.click();
-                    await sleep(900);
-                    const title = getConversationTitle();
-                    if (groupNamesMatch(title, groupName))
-                        return { ok: true, group: title };
-                }
+                if (!label || seen.has(label)) continue;
+                seen.add(label);
+                labels.push({ item, label });
+            }
+        }
+        return labels;
+    }
+
+    function dismissBrowserUi() {
+        for (let i = 0; i < 2; i++) {
+            document.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true
+            }));
+        }
+    }
+
+    function findSidebarSearchInput() {
+        const vw = window.innerWidth || document.documentElement.clientWidth || 1200;
+        const maxRight = vw * 0.52;
+
+        for (const sel of SELECTORS.sidebarSearch) {
+            for (const el of document.querySelectorAll(sel)) {
+                if (isExcludedElement(el)) continue;
+                if (el.closest('[class*="chat-input"]') || el.closest('[class*="compose"]')) continue;
+                const rect = el.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) continue;
+                if (rect.right <= maxRight) return el;
             }
         }
 
+        for (const el of document.querySelectorAll(
+            'input[type="text"], input[type="search"], input:not([type]), [contenteditable="true"]')) {
+            if (isExcludedElement(el)) continue;
+            if (el.closest('[class*="chat-input"]') || el.closest('[class*="compose"]')) continue;
+            const rect = el.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0 || rect.right > maxRight) continue;
+            const hint = [
+                el.getAttribute('placeholder') || '',
+                el.getAttribute('aria-label') || '',
+                el.getAttribute('title') || ''
+            ].join(' ').toLowerCase();
+            if (/tìm|tim|search/.test(hint) || rect.top < 220)
+                return el;
+        }
+        return null;
+    }
+
+    async function ensureSidebarSearchVisible() {
+        let search = findSidebarSearchInput();
+        if (search) return search;
+
+        const sidebar = getSidebarRoot();
+        const triggers = sidebar.querySelectorAll(
+            'button[class*="search"], [class*="search"] button, [class*="search-icon"],'
+            + '[aria-label*="Tìm"], [aria-label*="tim"], [title*="Tìm"], [title*="tim"]');
+        for (const btn of triggers) {
+            btn.click();
+            await sleep(500);
+            search = findSidebarSearchInput();
+            if (search) return search;
+        }
+        return findSidebarSearchInput();
+    }
+
+    async function typeSearchQuery(search, text) {
+        search.focus();
+        search.click();
+        await sleep(120);
+        if (search.isContentEditable) {
+            search.textContent = '';
+            search.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+            await sleep(80);
+            search.textContent = text;
+            search.dispatchEvent(new InputEvent('input', {
+                bubbles: true,
+                inputType: 'insertText',
+                data: text
+            }));
+            search.dispatchEvent(new Event('change', { bubbles: true }));
+            return;
+        }
+        setControlledInputValue(search, '');
+        await sleep(80);
+        setControlledInputValue(search, text);
+    }
+
+    async function tryOpenMatchingItem(items, groupName) {
+        for (const entry of items) {
+            if (!groupNamesMatch(entry.label, groupName))
+                continue;
+            entry.item.scrollIntoView({ block: 'nearest' });
+            entry.item.click();
+            await sleep(1200);
+            const title = getConversationTitle();
+            if (groupNamesMatch(title, groupName))
+                return { ok: true, group: title };
+        }
+        return null;
+    }
+
+    async function navigateToGroup(groupName) {
+        if (!groupName) throw new Error('Tên nhóm rỗng.');
+        dismissBrowserUi();
+        await sleep(200);
+        const search = await ensureSidebarSearchVisible();
+        if (!search) throw new Error('Không tìm thấy ô tìm kiếm sidebar Zalo.');
+        // #region agent log
+        fetch('http://127.0.0.1:7932/ingest/d1ffc0de-e0fa-4c76-b9ea-e4ddb6aeec2d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'850be2'},body:JSON.stringify({sessionId:'850be2',location:'user.js:navigateToGroup',message:'sidebar_search_focus',data:{group:groupName,tag:search.tagName,placeholder:search.getAttribute('placeholder')||'',ariaLabel:search.getAttribute('aria-label')||'',className:(search.className||'').slice(0,80)},timestamp:Date.now(),hypothesisId:'H9',runId:'post-fix'})}).catch(()=>{});
+        // #endregion
+
+        search.scrollIntoView({ block: 'nearest' });
+        await typeSearchQuery(search, groupName);
+        await sleep(1200);
+
+        const sidebarRoot = getSidebarRoot();
+        let opened = await tryOpenMatchingItem(
+            collectGroupLabels(SELECTORS.sidebarItem, sidebarRoot),
+            groupName
+        );
+        if (opened) return opened;
+
+        opened = await tryOpenMatchingItem(
+            collectGroupLabels(SELECTORS.searchResultItem, document),
+            groupName
+        );
+        if (opened) return opened;
+
+        opened = await tryOpenMatchingItem(
+            collectGroupLabels(SELECTORS.sidebarItem, document),
+            groupName
+        );
+        if (opened) return opened;
+
         search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-        await sleep(900);
+        await sleep(1200);
         const title = getConversationTitle();
         if (groupNamesMatch(title, groupName))
             return { ok: true, group: title };
+        // #region agent log
+        const diagLabels = collectGroupLabels(
+            [...SELECTORS.searchResultItem, ...SELECTORS.sidebarItem],
+            document
+        ).slice(0, 6).map(entry => entry.label.slice(0, 80));
+        fetch('http://127.0.0.1:7932/ingest/d1ffc0de-e0fa-4c76-b9ea-e4ddb6aeec2d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'850be2'},body:JSON.stringify({sessionId:'850be2',location:'user.js:navigateToGroup',message:'navigate_fail',data:{expected:groupName,titleAfter:title,searchLen:groupName.length,labelSamples:diagLabels,url:location.href},timestamp:Date.now(),hypothesisId:'H2',runId:'post-fix'})}).catch(()=>{});
+        // #endregion
         throw new Error('Không mở được nhóm: ' + groupName);
     }
 
@@ -440,6 +664,34 @@
         const type = blob.type || 'image/png';
         await navigator.clipboard.write([new ClipboardItem({ [type]: blob })]);
         return true;
+    }
+
+    function blobToBase64(blob) {
+        return new Promise((resolve, reject) => {
+            if (blob.size > 12 * 1024 * 1024) {
+                reject(new Error('Ảnh vượt giới hạn 12 MB.'));
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = () => {
+                const value = String(reader.result || '');
+                const comma = value.indexOf(',');
+                resolve(comma >= 0 ? value.slice(comma + 1) : value);
+            };
+            reader.onerror = () => reject(new Error('Không đọc được blob ảnh.'));
+            reader.readAsDataURL(blob);
+        });
+    }
+
+    async function fetchImageData(url) {
+        if (!url) throw new Error('URL ảnh rỗng.');
+        const blob = await requestImageBlob(url);
+        return {
+            data_base64: await blobToBase64(blob),
+            mime: blob.type || 'image/png',
+            size: blob.size,
+            url
+        };
     }
 
     async function findImagesNearAnchor(anchor, limit = 6) {
@@ -488,74 +740,76 @@
 
     async function registerRole() {
         try {
-            applyRoleTitle(BRIDGE.role);
+            applyRoleTitle();
             await http('POST', '/api/register', {
-                role: BRIDGE.role,
+                role: 'bot',
+                version: SCRIPT_VERSION,
                 title: document.title,
                 url: location.href,
                 ts: Date.now()
             });
+            // Chrome may throttle the faster command timer in background tabs.
+            // Process a pending command after every successful heartbeat so
+            // startup ping and later commands cannot remain stuck indefinitely.
+            await pollCommands();
+        } catch (_) { /* bridge offline */ }
+    }
+
+    async function refreshPublicConfig() {
+        try {
+            const resp = await http('GET', '/api/config');
+            const groups = resp.body && resp.body.output_groups;
+            if (Array.isArray(groups))
+                outputGroupNames = groups.map(name => String(name || ''));
         } catch (_) { /* bridge offline */ }
     }
 
     async function runCommand(cmd) {
         switch (cmd.action) {
             case 'ping':
-                return { ok: true, role: BRIDGE.role, title: document.title, url: location.href };
+                return { ok: true, role: 'bot', title: document.title, url: location.href };
             case 'navigate':
-                if (BRIDGE.role !== 'harvest')
-                    throw new Error('navigate chỉ chạy trên cửa sổ Harvest.');
                 return await navigateToGroup(cmd.group);
             case 'scan':
-                if (BRIDGE.role !== 'harvest')
-                    throw new Error('scan chỉ chạy trên cửa sổ Harvest.');
                 return scanConversation();
             case 'dump_dom':
-                if (BRIDGE.role !== 'harvest')
-                    throw new Error('dump_dom chỉ chạy trên Harvest.');
                 return dumpDom();
             case 'title':
                 return { group: getConversationTitle() };
             case 'unread':
-                if (BRIDGE.role !== 'harvest') return { groups: [] };
                 return { groups: findUnreadGroups() };
             case 'focus_compose':
                 await focusCompose();
                 return { ok: true };
             case 'find_images':
-                if (BRIDGE.role !== 'harvest')
-                    throw new Error('find_images chỉ chạy trên Harvest.');
                 if (cmd.anchor) await scrollToAnchor(cmd.anchor);
                 return await listImagesForAnchor(cmd.anchor, cmd.limit || 6);
             case 'copy_image':
-                if (BRIDGE.role !== 'harvest')
-                    throw new Error('copy_image chỉ chạy trên Harvest.');
                 return await copyImageByUrl(cmd.url);
+            case 'fetch_image':
+                return await fetchImageData(cmd.url);
             case 'copy_text':
                 await navigator.clipboard.writeText(cmd.text || '');
+                return { ok: true };
+            case 'pause_events':
+                eventsPaused = true;
+                return { ok: true };
+            case 'resume_events':
+                eventsPaused = false;
                 return { ok: true };
             default:
                 throw new Error('Unknown command: ' + cmd.action);
         }
     }
 
-    function commandAllowedForRole(cmd) {
-        if (!cmd || !cmd.action) return false;
-        if (cmd.action === 'ping' || cmd.action === 'focus_compose' || cmd.action === 'title') return true;
-        if (BRIDGE.role === 'harvest') return true;
-        if (BRIDGE.role === 'publish') return cmd.action === 'focus_compose';
-        return false;
-    }
-
     async function pollCommands() {
-        if (BRIDGE.role === 'unknown' || pollBusy) return;
+        if (pollBusy) return;
         pollBusy = true;
         let commandId = '';
         try {
-            const resp = await http('GET', '/api/command?role=' + encodeURIComponent(BRIDGE.role));
+            const resp = await http('GET', '/api/command?role=bot');
             if (!resp.body || !resp.body.action) return;
             commandId = resp.body.id || '';
-            if (!commandAllowedForRole(resp.body)) return;
             const result = await runCommand(resp.body);
             await http('POST', '/api/command-result', {
                 id: commandId,
@@ -577,17 +831,19 @@
     }
 
     async function pushLatestMessage() {
-        if (BRIDGE.role !== 'harvest') return;
+        if (eventsPaused) return;
+        const group = getConversationTitle();
+        if (isOutputGroup(group)) return;
         const messages = collectMessages();
         if (!messages.length) return;
         const latest = messages[messages.length - 1];
-        const hash = latest.hash + '|' + getConversationTitle();
+        const hash = latest.hash + '|' + group;
         if (hash === lastPushHash) return;
         lastPushHash = hash;
 
         await http('POST', '/api/event', {
             type: 'message',
-            group: getConversationTitle(),
+            group,
             text: latest.text,
             images: latest.images,
             hasImage: latest.images.length > 0,
@@ -604,28 +860,39 @@
     }
 
     function startObserver() {
-        if (BRIDGE.role !== 'harvest') return;
         const root = getMessagePane();
         if (observer) observer.disconnect();
         observer = new MutationObserver(() => schedulePush());
         observer.observe(root, { childList: true, subtree: true });
     }
 
-    async function bootstrap() {
-        BRIDGE.role = detectRole();
-        applyRoleTitle(BRIDGE.role);
-        console.info('[ZaloBot] role=' + BRIDGE.role, location.href);
+    let bootstrapped = false;
 
-        if (BRIDGE.role === 'unknown') {
-            console.warn('[ZaloBot] Thiếu #harvest hoặc #publish trong URL — script idle.');
+    async function bootstrap() {
+        if (bootstrapped) {
+            applyRoleTitle();
+            showStatusBadge();
+            await registerRole();
             return;
         }
+        bootstrapped = true;
+        BRIDGE.role = detectRole();
+        applyRoleTitle();
+        showStatusBadge();
+        console.info('[ZaloBot] single-tab role=bot', location.href);
 
         await registerRole();
+        await refreshPublicConfig();
         if (registerTimer) clearInterval(registerTimer);
-        registerTimer = setInterval(registerRole, 5000);
+        registerTimer = setInterval(() => {
+            applyRoleTitle();
+            showStatusBadge();
+            registerRole();
+            refreshPublicConfig();
+            pollCommands();
+        }, 2000);
 
-        if (BRIDGE.role === 'harvest') startObserver();
+        startObserver();
 
         if (pollTimer) clearInterval(pollTimer);
         pollTimer = setInterval(pollCommands, BRIDGE.pollMs);
@@ -640,9 +907,18 @@
         }
     }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', bootstrap);
-    } else {
-        bootstrap();
+    function startWhenReady() {
+        bootstrap().catch(err => console.warn('[ZaloBot] bootstrap', err));
     }
+
+    startWhenReady();
+    document.addEventListener('DOMContentLoaded', startWhenReady);
+    window.addEventListener('load', startWhenReady);
+    window.addEventListener('pageshow', startWhenReady);
+    window.addEventListener('focus', () => registerRole());
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) registerRole();
+    });
+    if (window.onurlchange === null)
+        window.addEventListener('urlchange', startWhenReady);
 })();

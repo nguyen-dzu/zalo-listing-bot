@@ -44,6 +44,10 @@ class MessageHarvester {
                 ; OpenGroup miss / wrong chat → skip this group, try the next.
                 summary["errors"].Push(
                     "skip " group["group_name"] ": " err.Message)
+                ; #region agent log
+                AgentDebugLog("Harvester.ahk:HarvestGroups", "harvest_group_error", Map(
+                    "group", group["group_name"], "error", err.Message), "H2")
+                ; #endregion
             }
             if this.config.HarvestSaveStateEachGroup
                 this.state.Save()
@@ -146,19 +150,44 @@ class MessageHarvester {
         this.ui.OpenGroup(groupName, "read")
         settle := this.config.HasProp("CaptureSettleMs") ? this.config.CaptureSettleMs : 600
         Sleep settle
-        text := this.ui.CaptureConversationText()
+        capture := this.ui.CaptureConversation()
+        text := capture.Has("text") ? capture["text"] : ""
         normalized := NormalizeNewlines(text)
+        ; #region agent log
+        AgentDebugLog("Harvester.ahk:HarvestGroup", "capture_result", Map(
+            "group", groupName,
+            "textLen", StrLen(normalized),
+            "msgCount", capture.Has("messages") ? capture["messages"].Length : 0,
+            "scanGroup", capture.Has("group") ? capture["group"] : ""), "H3")
+        ; #endregion
         if Trim(normalized) = ""
             return result
 
-        blocks := ListingParser.SplitBlocks(
-            normalized, this.config.ListingStartPattern, this.config.ImageMarkerPattern
-        )
+        candidates := this._BuildCandidates(capture)
+        blocks := []
+        candidateByHash := Map()
+        for candidate in candidates {
+            block := candidate["text"]
+            hash := FnvHash(block)
+            blocks.Push(block)
+            if candidateByHash.Has(hash)
+                candidateByHash[hash]["images"] := this._MergeUrls(
+                    candidateByHash[hash]["images"], candidate["images"])
+            else
+                candidateByHash[hash] := candidate
+        }
+        this._Log("harvest_scan group=" groupName
+            " messages=" (capture.Has("messages") ? capture["messages"].Length : 0)
+            " candidates=" blocks.Length)
 
-        captureHash := FnvHash(normalized)
+        captureHash := this._CaptureHash(capture, normalized)
         previousHash := this.state.GetCaptureHash(groupName)
         ; Conversation unchanged → already-read messages; skip re-copy/re-parse.
         if previousHash != "" && previousHash = captureHash {
+            ; #region agent log
+            AgentDebugLog("Harvester.ahk:HarvestGroup", "hash_skip", Map(
+                "group", groupName, "captureHash", captureHash), "H4")
+            ; #endregion
             this.state.MarkNeedsRevisit(groupName, false)
             this.state.TouchHarvest(groupName)
             return result
@@ -177,6 +206,8 @@ class MessageHarvester {
         for item in pick["items"] {
             block := item["block"]
             hash := item["hash"]
+            candidate := candidateByHash.Has(hash)
+                ? candidateByHash[hash] : Map("images", [])
 
             keyword := this.blockList.Match(block)
             if keyword != "" {
@@ -186,6 +217,8 @@ class MessageHarvester {
             }
 
             listing := ListingParser.Parse(block, this.config.ImageMarkerPattern)
+            listing["image_urls"] := candidate["images"]
+            listing["image_count"] := candidate["images"].Length
             if ListingParser.Validate(listing, this.config.RequiredFields).Length {
                 this.state.MarkSeen(groupName, hash)
                 result["invalid"]++
@@ -196,11 +229,27 @@ class MessageHarvester {
             this.state.MarkSeen(groupName, hash)
             result["saved"]++
             result["saved_records"].Push(record)
+            ; #region agent log
+            AgentDebugLog("Harvester.ahk:HarvestGroup", "listing_saved", Map(
+                "group", groupName,
+                "id", record["id"],
+                "room", record.Has("room_code") ? record["room_code"] : "",
+                "imageCount", record.Has("image_count") ? record["image_count"] : 0,
+                "rawLen", record.Has("raw_text") ? StrLen(record["raw_text"]) : 0), "H5")
+            ; #endregion
             if (this.mediaCapturer
                 && this.config.AutoCapture
                 && ((record.Has("image_count") && record["image_count"] > 0)
                     || this.config.AutoCaptureProbeImages)) {
-                if this.mediaCapturer.CaptureForRecord(groupName, record)
+                mediaOk := this.mediaCapturer.CaptureForRecord(groupName, record)
+                ; #region agent log
+                AgentDebugLog("Harvester.ahk:HarvestGroup", "media_capture", Map(
+                    "group", groupName,
+                    "id", record["id"],
+                    "ok", mediaOk,
+                    "imageCount", record.Has("image_count") ? record["image_count"] : 0), "H5")
+                ; #endregion
+                if mediaOk
                     result["media_captured"]++
                 else
                     result["media_failed"]++
@@ -208,6 +257,88 @@ class MessageHarvester {
         }
 
         this.state.TouchHarvest(groupName)
+        this._Log("harvest_result group=" groupName
+            " saved=" result["saved"]
+            " blocked=" result["blocked"]
+            " invalid=" result["invalid"]
+            " media_ok=" result["media_captured"]
+            " media_fail=" result["media_failed"])
         return result
+    }
+
+    _BuildCandidates(capture) {
+        result := []
+        messages := capture.Has("messages") && capture["messages"] is Array
+            ? capture["messages"] : []
+        if !messages.Length {
+            text := capture.Has("text") ? capture["text"] : ""
+            for block in ListingParser.SplitBlocks(
+                text, this.config.ListingStartPattern,
+                this.config.ImageMarkerPattern)
+                result.Push(Map("text", block, "images", []))
+            return result
+        }
+
+        for message in messages {
+            if !(message is Map)
+                continue
+            text := message.Has("text") ? Trim(NormalizeNewlines(message["text"])) : ""
+            if text = ""
+                continue
+            images := message.Has("images") && message["images"] is Array
+                ? message["images"] : []
+            parts := ListingParser.SplitBlocks(
+                text, this.config.ListingStartPattern,
+                this.config.ImageMarkerPattern)
+            ; The web bridge already gives us one Zalo message at a time.
+            ; Real listings often begin with a project name or an emoji not
+            ; covered by the split-anchor regex. Keep that message boundary as
+            ; a safe fallback after the listing heuristic accepts the text.
+            if !parts.Length && ListingParser.LooksLikeListing(text)
+                parts.Push(text)
+            for part in parts
+                result.Push(Map("text", part, "images", this._MergeUrls([], images)))
+        }
+        return result
+    }
+
+    _MergeUrls(left, right) {
+        result := []
+        seen := Map()
+        for list in [left, right] {
+            for url in list {
+                value := Trim(String(url))
+                if value = "" || seen.Has(value)
+                    continue
+                seen[value] := true
+                result.Push(value)
+            }
+        }
+        return result
+    }
+
+    _CaptureHash(capture, fallbackText) {
+        signatures := []
+        if capture.Has("messages") && capture["messages"] is Array {
+            for message in capture["messages"] {
+                if !(message is Map)
+                    continue
+                text := message.Has("text") ? message["text"] : ""
+                images := message.Has("images") && message["images"] is Array
+                    ? StrJoin(message["images"], "|") : ""
+                signatures.Push(text "|" images)
+            }
+        }
+        payload := signatures.Length
+            ? StrJoin(signatures, "`n---message---`n") : fallbackText
+        ; Version the snapshot because older runs could persist this hash while
+        ; dropping valid structured messages before they were marked seen.
+        ; The prefix forces one safe rescan after upgrading.
+        return FnvHash("structured-candidate-v2`n" payload)
+    }
+
+    _Log(message) {
+        try FileAppend "[" NowStamp() "] " message "`n",
+            this.config.QueueLogFile, "UTF-8-RAW"
     }
 }

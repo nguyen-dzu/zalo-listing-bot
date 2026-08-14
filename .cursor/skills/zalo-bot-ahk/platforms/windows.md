@@ -35,4 +35,13 @@ Creates shortcuts for **Zalo Web (Chrome)** and **Zalo Listing Bot**.
 
 1. **JS** reads DOM, navigates groups, copies images
 2. **WebBridge** HTTP server on `127.0.0.1:8080`
-3. **ZaloUI** activates Chrome, sends Ctrl+V + Enter
+3. **ZaloUI** activates Chrome, bridge navigate, paste Ctrl+V + Enter
+
+## UI calibration (Aug 2026)
+
+- **Window:** `MaximizeBrowser=0`, tune `NormalizedWidth` / `NormalizedHeight` (~1100×850)
+- **Open group:** bridge `navigate` command (not sidebar mouse on PC Zalo)
+- **Compose focus:** bridge `focus_compose`; fallback client click ~42% × 88%
+- **Message pane:** harvest read focus ~55% × 45% (avoid image bubbles)
+- **Debug:** `[Diagnostics] Enabled=1` → `data/ui-diagnostic.jsonl`; agent log via `AgentDebugLog`
+- **E2E:** verify publish paste lands in compose, images before icon text, then `=======`

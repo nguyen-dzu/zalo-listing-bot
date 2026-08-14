@@ -8,11 +8,36 @@ description: >-
 
 # Zalo Listing Bot — Agent Skill
 
+## Context nhanh (Aug 2026)
+
+**Output publish:** 1 phòng → ảnh → text (icon format) → `=======` (tin riêng).
+
+**ZaloUI đã calibrate (Zalo Web, 1 tab Chrome):**
+
+- Cửa sổ normalized (`MaximizeBrowser=0`, `NormalizedWidth/Height` ~1100×850)
+- Mở nhóm qua bridge `navigate` (không click search sidebar PC)
+- Compose: bridge `focus_compose`, fallback click ~42%×88% client area
+- Message pane focus ~55%×45% khi harvest (tránh click giữa ảnh)
+- Publish session: `BeginPublishSession` → paste ảnh/text → `EndPublishSession`
+- Diagnostics: `[Diagnostics] Enabled=1` → `data/ui-diagnostic.jsonl`
+
+**Config UI quan trọng** (`config.example.ini`):
+
+| Key | Mục đích |
+|-----|----------|
+| `NormalizedWidth` / `NormalizedHeight` | Cỡ cửa sổ Chrome cố định |
+| `MaximizeBrowser` | `0` = normalized (khuyến nghị) |
+| `PasteDelayMs`, `SendDelayMs`, `BetweenMessagesMs` | Timing paste/send |
+| `CaptureSettleMs` | Chờ sau focus message pane |
+| `[Diagnostics] LogFile` | JSONL click/publish debug |
+
+**Backlog tóm tắt:** UI calibration **Done (needs E2E)**, output icon format **Done**.
+
 ## Platform
 
-- **Windows** — AutoHotkey v2 + **Zalo Web** (Chrome + Tampermonkey)
+- **Windows** — AutoHotkey v2 + **Zalo Web** (Chrome + Tampermonkey, **1 tab**)
 - Entry: `windows/src/Bot.ahk`
-- Userscript: `web/zalo-listing-bot.user.js`
+- Userscript: `web/zalo-listing-bot.user.js` (v4 single-tab)
 - Config: `windows/config/config.ini`
 
 ## Layers
@@ -20,7 +45,7 @@ description: >-
 | Layer | File | Allowed |
 |-------|------|---------|
 | UI | `ZaloUI.ahk`, `WebBridge.ahk` | Chrome focus, bridge, Send/Clipboard |
-| Parse | `Parser.ahk` | Regex, heuristic |
+| Parse | `Parser.ahk` | Regex, heuristic, `FormatBlock` (icon template) |
 | Harvest | `Harvester.ahk` | Loop nhóm, gọi UI + Parser |
 | Publish | `Publisher.ahk`, `Composer.ahk` | Queue, gửi tin |
 
@@ -32,7 +57,7 @@ description: >-
 [ ] AutoHotkey v2 (64-bit)
 [ ] Chrome + Tampermonkey + web/zalo-listing-bot.user.js
 [ ] config.example.ini → config.ini
-[ ] Đăng nhập https://chat.zalo.me vào đủ nhóm
+[ ] Đăng nhập https://chat.zalo.me/#bot (đúng 1 tab)
 [ ] run-tests.cmd → all pass
 [ ] Chạy Bot.ahk
 ```
@@ -47,4 +72,15 @@ Sửa `Parser.ahk` → thêm case vào `RunTests.ahk`.
 
 ## Output format
 
-Per room, per main group: paste ảnh → text → separator `=======`.
+Per room, per main group: paste ảnh → text (8 dòng icon) → separator `=======`.
+
+```text
+🏷️ tên nhóm: Nhóm nguồn A
+🏠 phòng: -
+🔑 mã phòng: P001
+📍 thông tin phòng: 123 Nguyễn Văn A
+💰 giá: 5tr
+🧾 giá dịch vụ: -
+⚡ giá điện nước: -
+📞 số điện thoại của chủ trọ: 090…
+```

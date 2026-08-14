@@ -29,23 +29,27 @@ class ListingMediaStore {
             if RegExMatch(generation, "^[A-Za-z0-9_.-]+$") {
                 generationDir := dir "\generations\" generation
                 if DirExist(generationDir)
-                    return this._ClipFilesIn(generationDir)
+                    return this._MediaFilesIn(generationDir)
             }
         }
-        return this._ClipFilesIn(dir)
+        return this._MediaFilesIn(dir)
     }
 
-    _ClipFilesIn(dir) {
-        bundle := dir "\bundle.clip"
+    _MediaFilesIn(dir) {
         result := []
-        if FileExist(bundle)
-            result.Push(bundle)
+        bundle := ""
         joined := ""
-        Loop Files dir "\*.clip", "F" {
-            if A_LoopFileName = "bundle.clip"
+        Loop Files dir "\*.*", "F" {
+            if !RegExMatch(A_LoopFileName, "i)\.(?:clip|png|jpe?g|webp)$")
                 continue
+            if RegExMatch(A_LoopFileName, "i)^bundle\.") {
+                bundle := A_LoopFileFullPath
+                continue
+            }
             joined .= (joined = "" ? "" : "`n") A_LoopFileFullPath
         }
+        if bundle != ""
+            result.Push(bundle)
         if joined = ""
             return result
 
@@ -56,11 +60,23 @@ class ListingMediaStore {
         return result
     }
 
-    PrepareArchive(listingId, append := false) {
+    PrepareArchive(listingId, append := false, extension := "clip") {
         listingDir := this.ListingDir(listingId)
-        generation := CompactStamp() "." ProcessExist() "." A_TickCount
-        generationDir := EnsureDir(
-            listingDir "\generations\" generation)
+        extension := StrLower(Trim(extension, " ."))
+        if !RegExMatch(extension, "^(?:clip|png|jpg|jpeg|webp)$")
+            extension := "png"
+        baseGeneration := CompactStamp() "." ProcessExist() "." A_TickCount
+        generation := baseGeneration
+        generationDir := listingDir "\generations\" generation
+        suffix := 0
+        ; Replacement + append can execute within the same Windows timer tick.
+        ; Never reuse an existing generation or FileCopy may target its source.
+        while DirExist(generationDir) {
+            suffix++
+            generation := baseGeneration "." suffix
+            generationDir := listingDir "\generations\" generation
+        }
+        EnsureDir(generationDir)
 
         if append {
             for sourcePath in this.FilesFor(listingId) {
@@ -70,8 +86,8 @@ class ListingMediaStore {
         }
 
         targetPath := append
-            ? this._NextNumberedInDir(generationDir)
-            : generationDir "\bundle.clip"
+            ? this._NextNumberedInDir(generationDir, extension)
+            : generationDir "\bundle." extension
         return Map(
             "listing_id", listingId,
             "listing_dir", listingDir,
@@ -91,8 +107,10 @@ class ListingMediaStore {
         WriteTextFile(
             prepared["listing_dir"] "\current.txt",
             prepared["generation"])
-        Loop Files prepared["listing_dir"] "\*.clip", "F"
-            try FileDelete A_LoopFileFullPath
+        Loop Files prepared["listing_dir"] "\*.*", "F" {
+            if RegExMatch(A_LoopFileName, "i)\.(?:clip|png|jpe?g|webp)$")
+                try FileDelete A_LoopFileFullPath
+        }
         this._CleanupOldGenerations(
             prepared["listing_dir"], prepared["generation"])
         return targetPath
@@ -106,11 +124,16 @@ class ListingMediaStore {
             DirDelete prepared["generation_dir"], true
     }
 
-    _NextNumberedInDir(dir) {
+    _NextNumberedInDir(dir, extension := "clip") {
         index := 1
         Loop {
-            path := dir "\" Format("{:03}", index) ".clip"
-            if !FileExist(path)
+            path := dir "\" Format("{:03}", index) "." extension
+            occupied := false
+            Loop Files dir "\" Format("{:03}", index) ".*", "F" {
+                occupied := true
+                break
+            }
+            if !occupied
                 return path
             index++
         }
@@ -157,8 +180,8 @@ class ListingMediaStore {
             && manifest
             && manifest.Has("capture_version")
             && manifest["capture_version"] >= 2
-            && manifest.Has("validated_bitmap")
-            && manifest["validated_bitmap"]
+            && ((manifest.Has("validated_bitmap") && manifest["validated_bitmap"])
+                || (manifest.Has("validated_file") && manifest["validated_file"]))
     }
 
     RelativePaths(listingId) {
@@ -190,8 +213,10 @@ class ListingMediaStore {
 
     DeleteFor(listingId) {
         dir := this.ListingDir(listingId)
-        Loop Files dir "\*.clip", "F"
-            FileDelete A_LoopFileFullPath
+        Loop Files dir "\*.*", "F" {
+            if RegExMatch(A_LoopFileName, "i)\.(?:clip|png|jpe?g|webp)$")
+                FileDelete A_LoopFileFullPath
+        }
         if FileExist(dir "\current.txt")
             FileDelete dir "\current.txt"
         if FileExist(dir "\manifest.json")

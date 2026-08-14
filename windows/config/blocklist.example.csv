@@ -1,7 +1,6 @@
 keyword,match_type,enabled,note
-LOCK,contains,1,Locked listing
-Chốt,contains,1,Deal closed
-Đã chốt,contains,1,Deal closed
+i)(?<!chưa\s)(?<!chua\s)\b(?:lock|locked)\b,regex,1,Locked listing but allow chưa lock/unlock
+i)\b(?:đã|da)\s+chốt\b|\bchốt\s+rồi\b,regex,1,Deal closed
 Đã cho thuê,contains,1,Room rented out
 Hết phòng,contains,1,No vacancy
 Cọc rồi,contains,1,Room already deposited
@@ -14,6 +13,8 @@ Tìm bạn ở ghép,contains,1,Roommate search — not room listing
 Tìm phòng,contains,1,Tenant demand — not supply
 Cần thuê,contains,1,Tenant demand — not supply
 Tài chính,contains,1,Unrelated finance post
+i)\b(?:vay\s*(?:vốn|tiền|tín\s*chấp|thế\s*chấp)|tín\s*dụng|giải\s*ngân|đáo\s*hạn|mở\s*thẻ|lãi\s*suất\s*\d|bảo\s*hiểm|chứng\s*khoán)\b,regex,1,Finance or bank advertising
+i)\bngân\s*hàng\b.*\b(?:vay|lãi\s*suất|thẻ|giải\s*ngân)\b|\b(?:vay|lãi\s*suất|thẻ|giải\s*ngân)\b.*\bngân\s*hàng\b,regex,1,Bank advertising but allow location near bank
 Pass đồ,contains,1,Second-hand goods
 Nhượng lại,contains,1,Transfer post
 Link group,contains,1,Group invitation spam

@@ -1,6 +1,6 @@
 #Requires AutoHotkey v2.0
 ; Publisher.ahk — resumable service: lease one room at a time
-; Per room / output group: each image → text → separator message
+; Single tab: navigate to sale group, then per room: images → text → separator
 
 class DurableListingPublisher {
     __New(config, ui, registry, composer, queueStore, repository, mediaStore) {
@@ -32,10 +32,6 @@ class DurableListingPublisher {
         mainGroups := this.registry.MainGroups()
         if !mainGroups.Length
             throw Error("Chưa khai báo nhóm type=main.")
-        if mainGroups.Length > 1
-            throw Error("Chế độ Publish 2-window v1 chỉ hỗ trợ 1 OutputGroups. "
-                . "Giữ đúng một nhóm output trong config.ini và mở nhóm đó "
-                . "ở cửa sổ [Publish] trước khi chạy.")
 
         this.running := true
         this.stopRequested := false

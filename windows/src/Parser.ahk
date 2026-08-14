@@ -33,6 +33,7 @@ class ListingParser {
     static PHONE_FRAGMENT_PATTERN := "(?:\+?84|0)(?:[\s.\-]*\d){9}"
     static DEFAULT_IMAGE_MARKER := "i)(?:\[(?:Hình ảnh|Ảnh|Image|Photo)\]|👇\s*Hình\s*ảnh|📷|🖼️|(?:^|\s)Hình ảnh(?:\s|$))"
     static DEFAULT_MIN_LISTING_SCORE := 3
+    static NON_RENTAL_PATTERN := "i)\b(?:vay\s*(?:vốn|tiền|tín\s*chấp|thế\s*chấp)|tín\s*dụng|giải\s*ngân|đáo\s*hạn|mở\s*thẻ|lãi\s*suất\s*\d|bảo\s*hiểm|chứng\s*khoán)\b"
     ; "Minh Anh 18:05" — Zalo prints a sender/time header above each message
     static DEFAULT_NOISE_PATTERN := "i)^\S.{0,60}\s\d{1,2}:\d{2}(?:\s*(?:AM|PM|SA|CH))?$"
 
@@ -152,6 +153,8 @@ class ListingParser {
         trimmed := Trim(haystack)
         if StrLen(trimmed) < 12
             return false
+        if RegExMatch(trimmed, ListingParser.NON_RENTAL_PATTERN)
+            return false
 
         if minScore <= 0
             minScore := ListingParser.DEFAULT_MIN_LISTING_SCORE
@@ -188,6 +191,8 @@ class ListingParser {
         ["sang chdv", 3], ["phòng trọ", 2], ["phong tro", 2], ["căn hộ", 2], ["can ho", 2],
         ["nhà nguyên căn", 2], ["chdv", 2], ["studio", 2], ["duplex", 2], ["phòng", 1],
         [" trống", 2], ["trống mã", 3], ["phòng mới", 2], ["còn phòng", 2],
+        ["phòng trống", 3], ["trống lại", 3], ["available", 3],
+        ["nhận khách", 2], ["dọn vào", 2],
         ["giá thuê", 2], ["giá", 1], ["gia ", 1], ["triệu", 2], ["tr/th", 2], ["/tháng", 1],
         ["địa chỉ", 2], ["dia chi", 2], ["quận", 1], ["phường", 1], ["đường", 1],
         ["điện", 1], ["nước", 1], ["dịch vụ", 1], ["pdv", 1], ["sđt", 1], ["liên hệ", 2],
@@ -606,7 +611,7 @@ class ListingParser {
             ? Trim(listing["source_group"]) : dash
         roomType := ListingParser._RoomTypeLabel(listing)
         roomCode := ListingParser.NormalizeRoomCode(
-            listing, listing.Has("id") ? listing["id"] : "")
+            listing, "")
         if roomCode != ""
             listing["room_code"] := roomCode
         else
@@ -621,16 +626,14 @@ class ListingParser {
         phone := ListingParser._PhoneLabel(listing, maskPhone, phoneHint, roomCode)
 
         return StrJoin([
-            "-----------------------------------",
-            "- tên nhóm: " groupName,
-            "- phòng: " roomType,
-            "- mã phòng: " roomCode,
-            "- thông tin phòng: " info,
-            "- giá: " price,
-            "- giá dịch vụ: " service,
-            "- giá điện nước: " utility,
-            "- số điện thoại của chủ trọ: " phone,
-            "-----------------------------------"
+            "🏷️ tên nhóm: " groupName,
+            "🏠 phòng: " roomType,
+            "🔑 mã phòng: " roomCode,
+            "📍 thông tin phòng: " info,
+            "💰 giá: " price,
+            "🧾 giá dịch vụ: " service,
+            "⚡ giá điện nước: " utility,
+            "📞 số điện thoại của chủ trọ: " phone
         ], "`n")
     }
 

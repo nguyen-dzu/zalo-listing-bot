@@ -99,7 +99,9 @@ class ListingRepository {
     SaveListing(listing, sourceGroup := "", hash := "") {
         contentHash := hash != "" ? hash : FnvHash(listing["raw_text"])
         id := ListingRepository.BuildListingId(sourceGroup, contentHash)
-        roomCode := ListingParser.NormalizeRoomCode(listing, id)
+        ; Keep the content hash in the listing ID only. Missing room codes must
+        ; remain empty so the outbound template can show "-".
+        roomCode := ListingParser.NormalizeRoomCode(listing, "")
         record := Map(
             "id", id,
             "content_hash", contentHash,
@@ -118,6 +120,7 @@ class ListingRepository {
             "info", listing["info"],
             "extra_info", listing["extra_info"],
             "image_count", listing["image_count"],
+            "image_urls", listing.Has("image_urls") ? listing["image_urls"] : [],
             "raw_text", listing["raw_text"]
         )
 

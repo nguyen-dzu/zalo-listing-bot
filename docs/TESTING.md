@@ -22,7 +22,9 @@ AutoHotkey is a GUI-subsystem app, so console output may not appear. Both script
 Covers parser/blocklist/composer, scheduler string timestamps, UI geometry/fingerprint
 guards, harvester/repository integration, and durable queue behavior: one-room production
 leases, journal/snapshot reload, retry/dead-letter, uncertain resolution, media gating,
-expired-lease reclaim, and migration from legacy `listings.json`.
+expired-lease reclaim, migration from legacy `listings.json`, and icon `FormatBlock` output.
+
+**230 tests** as of Aug 2026. Stress: `windows\tests\run-stress.cmd` (5,000 rooms).
 
 Exit code `1` if any test fails.
 
@@ -47,29 +49,29 @@ the remainder as inputs. `blocklist.csv` still supplies banned keywords.
 
 ---
 
-## Tier 2 — End-to-end with Zalo Web (2-window)
+## Tier 2 — End-to-end with Zalo Web (1 tab)
 
 ### Setup
 
 1. Install [AutoHotkey v2](https://www.autohotkey.com/)
-2. Install Chrome + Tampermonkey; import `web/zalo-listing-bot.user.js`
-3. Open **two Chrome windows** (bookmarks):
-   - `https://chat.zalo.me/#harvest` → tab title `[Harvest] Zalo`, sidebar on **source groups**
-   - `https://chat.zalo.me/#publish` → tab title `[Publish] Zalo`, sidebar on **output group**
-4. Log in with the **bot account** in both windows
-5. Copy `config.example.ini` → `config.ini`, verify `[Groups] OutputGroups` and `[ZaloWeb]` URLs
-6. Run `windows\src\Bot.ahk` — bot waits for **both** roles to register + ping
+2. Install Chrome + Tampermonkey; import `web/zalo-listing-bot.user.js` (v4)
+3. Open **one** Chrome tab: `https://chat.zalo.me/#bot` → title `[ZaloBot] Zalo`
+4. Log in with the **bot account** (member of source groups and the sale group)
+5. Copy `config.example.ini` → `config.ini`, set `[Groups] OutputGroups` to **one** sale group
+6. Run `windows\src\Bot.ahk` — bot waits for role `bot` to register + ping
 
-### Test cases (2-window)
+Do **not** open a second Zalo Web tab.
+
+### Test cases (1 tab)
 
 | # | Step | Expected |
 |---|------|----------|
-| 1 | Run `dump_dom` (via bridge) on a source group in Harvest window | `messageCount > 0`, `matchedSelector` set |
-| 2 | Run `Bot.ahk` with both windows open | TrayTip; bridge ping OK for harvest + publish |
-| 3 | Harvest one source group (`Ctrl+Shift+H` or watch loop) | Parser saves JSON; Harvest window stays on source chat |
-| 4 | Publish one room (`Ctrl+Shift+G`) | Images → text → separator on **Publish window only** |
-| 5 | Open extra Zalo tab without `#harvest` / `#publish` | Tab does not poll `/api/command` (no race) |
-| 6 | Real-time: new message in Harvest source group | `POST /api/event` → listing enqueued (dedupe via hash) |
+| 1 | Run `dump_dom` on a source group | `messageCount > 0`, `matchedSelector` set |
+| 2 | Run `Bot.ahk` with the tab open | TrayTip; bridge ping OK for role `bot` |
+| 3 | Harvest one source group | Parser saves JSON; tab navigates source → sale when publishing |
+| 4 | Publish one room | Images → text → separator in the **sale** group on the same tab |
+| 5 | Open a second Zalo tab | Zalo kicks the first session — do not do this |
+| 6 | Real-time: new message in a source group | `POST /api/event` → listing enqueued (sale-group events ignored) |
 
 ### Legacy test cases
 
@@ -94,7 +96,7 @@ the remainder as inputs. `blocklist.csv` still supplies banned keywords.
 | Post missing `Địa chỉ:` | Not split into a listing, skipped |
 | Post missing phone with `RequiredFields=owner_phone` | Counted as Invalid |
 | Zalo group-list capture is empty | Bot stops before harvest and points to `data\zalo-groups-capture.txt` |
-| Zalo not running / missing Harvest or Publish window | TrayTip error naming `#harvest` / `#publish` bookmark |
+| Zalo not running / missing Zalo Web tab | TrayTip error naming `#bot` bookmark |
 | No ready/retry records → `Ctrl+Shift+G` | TrayTip reports an empty queue or pending media |
 | Missing media with `MediaRequired=1` | Listing remains `media_pending`, never leased |
 | Send failure before Enter | Retry with backoff, then dead-letter at `MaxAttempts` |
@@ -112,8 +114,8 @@ BetweenMessagesMs=1500
 ```
 
 When click targets drift, enable `[Diagnostics] Enabled=1`, reproduce once, and inspect
-`data\ui-diagnostic.jsonl`. Confirm the cached main HWND remains maximized and
-`composeY` is near 92% of the Zalo client height. Disable diagnostics after verification.
+`data\ui-diagnostic.jsonl`. Confirm Chrome stays normalized (`MaximizeBrowser=0`) and
+compose focus succeeds (bridge `focus_compose` or fallback click). Disable diagnostics after verification.
 
 ---
 
@@ -136,7 +138,7 @@ Incremental watch tests cover:
 - unread marker parsing from copied Alt+3 group-list context;
 - publish jitter is disabled in fake publisher configs for deterministic tests.
 
-Windows E2E must verify both Chrome windows register with bridge (`GET /api/register`).
+Windows E2E must verify the Chrome tab registers with bridge (`GET /api/register`, role `bot`).
 If harvest returns empty groups, run `dump_dom` and verify Tampermonkey + DomEngine selectors.
 If unread state is unavailable, the audit shard still provides coverage.
 

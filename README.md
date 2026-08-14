@@ -3,14 +3,14 @@
 Bot Windows (AutoHotkey v2) thu thập tin **phòng cho thuê** từ nhiều nhóm Zalo Web nguồn, lọc tin cấm, lưu JSON local, rồi đăng lại sang nhóm output (main).
 
 ```
-Nhóm nguồn 1 ┐                              Nhóm output
-Nhóm nguồn 2 ├─► [Harvest] DOM scan ─► AHK ─► [Publish] paste/send
-Nhóm nguồn N ┘    (Tampermonkey)              (Ctrl+V + Enter)
+Nhóm nguồn 1 ┐
+Nhóm nguồn 2 ├─► [1 tab Zalo Web] DOM scan ─► AHK ─► cùng tab, nhóm sale
+Nhóm nguồn N ┘    (Tampermonkey)                    paste/send
 ```
 
-**2 cửa sổ Chrome** — harvest và publish tách riêng, không còn navigate lẫn chat khi đăng tin.
+**1 tab Chrome** — Zalo Web single-session: harvest rồi chuyển sidebar sang nhóm output, không mở tab thứ hai.
 
-Khi khởi động, bot mở popup để chọn hoặc kéo-thả file **CSV/XLSX** chứa tên nhóm input. Bot giữ nguyên thứ tự dòng trong file. Bản 2-window v1 dùng đúng **một** `OutputGroups`, là nhóm đang mở trong cửa sổ Publish; từ khóa cấm đọc từ `blocklist.csv`/Excel.
+Khi khởi động, bot mở popup để chọn hoặc kéo-thả file **CSV/XLSX** chứa tên nhóm input. Bot giữ nguyên thứ tự dòng trong file. Bản 1-tab dùng đúng **một** `OutputGroups` (nhóm sale); từ khóa cấm đọc từ `blocklist.csv`/Excel.
 
 ---
 
@@ -37,9 +37,10 @@ windows/config/config.ini      ← từ config.example.ini
 windows/config/blocklist.csv   ← từ blocklist.example.csv
 ```
 
-Cài Tampermonkey script → mở **2 bookmark**:
-- `https://chat.zalo.me/#harvest` (nhóm nguồn)
-- `https://chat.zalo.me/#publish` (nhóm output)
+Cài Tampermonkey script → mở **1 tab**:
+- `https://chat.zalo.me/#bot` (title `[ZaloBot] Zalo`)
+
+Không mở tab Zalo Web thứ hai (Zalo sẽ đá session).
 
 Hoặc chạy `windows\setup\install-startup.ps1` để tạo shortcut Startup.
 
@@ -63,7 +64,7 @@ windows\tests\run-tests.cmd
 |-------|------|---------|
 | **JS** | `web/zalo-listing-bot.user.js` | DomEngine, role hash, observer, copy ảnh |
 | **Bridge** | `WebBridge.ahk` | HTTP `127.0.0.1:8080`, route theo role |
-| **UI** | `ZaloUI.ahk` | Harvest window (read) + Publish window (send) |
+| **UI** | `ZaloUI.ahk` | 1 tab: navigate nguồn / sale + keystrokes |
 | **Logic** | Parser, Harvester, Queue, Publisher | Parse, lưu, publish |
 
 ```
@@ -86,10 +87,8 @@ web/
 ```ini
 [ZaloWeb]
 BrowserExe=chrome.exe
-HarvestWindowTitle=[Harvest]
-PublishWindowTitle=[Publish]
-HarvestUrl=https://chat.zalo.me/#harvest
-PublishUrl=https://chat.zalo.me/#publish
+WindowTitle=[ZaloBot]
+ChatUrl=https://chat.zalo.me/#bot
 BridgePort=8080
 
 [Groups]

@@ -6,7 +6,7 @@
 | Strategy | `TableLoader` | TableLoader.ahk | Load tables from Excel COM, fallback to CSV |
 | Repository | `GroupRegistry` | GroupRegistry.ahk | Source / main group lists |
 | Specification | `BlockList` | BlockList.ahk | Decide whether a post is blocked |
-| Strategy | `ListingParser` | Parser.ahk | Text → object, object → text |
+| Strategy | `ListingParser` | Parser.ahk | Text → object, object → text (`FormatBlock` icon lines) |
 | Repository | `ListingRepository` | Storage.ahk | Save/read objects + audit log |
 | Repository | `HarvestStateStore` | StateStore.ahk | Harvest cursor, seen hashes |
 | Repository | `PublishQueueStore` | QueueStore.ahk | Durable leases, journal, retries |

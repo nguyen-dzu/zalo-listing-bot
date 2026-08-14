@@ -61,6 +61,7 @@ class ListingBotService {
         this.watchRunning := false
         this.watchStopRequested := false
         this.emergencyStopped := false
+        this.autoStartRetryPending := false
         this._Build()
     }
 
@@ -369,6 +370,7 @@ class ListingBotService {
 
     ; Tự khởi động sau khi script load (Startup folder hoặc mở Bot.ahk thủ công).
     AutoStart() {
+        this.autoStartRetryPending := false
         if !this.config.StartupAutoRunWatch
             return false
         if this.emergencyStopped
@@ -380,9 +382,29 @@ class ListingBotService {
             if this.config.StartupDelayMs > 0
                 Sleep this.config.StartupDelayMs
             this._Notify("Auto-start",
-                "Zalo Web sẵn sàng — bật watch loop tự động.", 1)
+                "Zalo Web (1 tab) sẵn sàng — bật watch loop tự động.", 1)
+            ; #region agent log
+            AgentDebugLog("Bot.ahk:AutoStart", "auto_start_ok", Map(
+                "sources", this.registry.SourceGroups().Length), "H1")
+            ; #endregion
             return this.RunExclusive("watch", ObjBindMethod(this, "RunWatchLoop"))
         } catch as err {
+            ; #region agent log
+            AgentDebugLog("Bot.ahk:AutoStart", "auto_start_fail", Map(
+                "error", err.Message), "H1")
+            ; #endregion
+            transient := InStr(err.Message, "Chưa kết nối")
+                || InStr(err.Message, "Tampermonkey")
+                || InStr(err.Message, "Chrome/Zalo Web không mở")
+            if transient && !this.emergencyStopped {
+                this._Notify("Đang chờ Zalo Web",
+                    err.Message "`nBot sẽ tự thử lại sau 3 giây.", 2)
+                if !this.autoStartRetryPending {
+                    this.autoStartRetryPending := true
+                    SetTimer(ObjBindMethod(this, "AutoStart"), -3000)
+                }
+                return false
+            }
             this._Notify("Auto-start lỗi", err.Message, 3)
             return false
         }
@@ -394,6 +416,8 @@ class ListingBotService {
         group := payload.Has("group") ? payload["group"] : ""
         text := payload.Has("text") ? payload["text"] : ""
         if group = "" || Trim(text) = ""
+            return
+        if this._IsOutputGroupName(group)
             return
         ; Image capture needs a follow-up bridge command and must not run inside
         ; the HTTP event handler. Leave image posts unseen so the scheduled scan
@@ -423,6 +447,18 @@ class ListingBotService {
         this.state.Save()
     }
 
+    _IsOutputGroupName(name) {
+        actual := StrLower(Trim(name))
+        if actual = ""
+            return false
+        for group in this.registry.MainGroups() {
+            expected := StrLower(Trim(group["group_name"]))
+            if expected != "" && (InStr(actual, expected) || InStr(expected, actual))
+                return true
+        }
+        return false
+    }
+
     _WaitForZaloReady() {
         exe := this.config.BrowserExeName
         timeout := this.config.StartupWaitForBrowserSeconds
@@ -434,47 +470,47 @@ class ListingBotService {
             this._EnsureBrowserWindows()
         if !WinWait("ahk_exe " exe,, timeout)
             throw Error("Chrome/Zalo Web không mở sau " timeout " giây.")
-        this._PingWebBridge(timeout)
+        ; Bring Zalo to the foreground before waiting for userscript timers.
+        ; Chrome throttles background-tab intervals, which can make registration
+        ; and command polling appear disconnected during startup.
+        this.ui.Activate()
         this._PrepareBrowserWindow()
+        this._PingWebBridge(timeout)
         return true
     }
 
     _EnsureBrowserWindows() {
         exe := this.config.BrowserExeName
         path := this._ResolveChromePath()
-        if !WinExist(this.config.HarvestWindowTitle " ahk_exe " exe) {
-            if path != ""
-                Run Format('"{1}" --new-window "{2}"', path, this.config.HarvestUrl)
-            else
-                Run this.config.HarvestUrl
-            Sleep 800
-        }
-        if !WinExist(this.config.PublishWindowTitle " ahk_exe " exe) {
-            if path != ""
-                Run Format('"{1}" --new-window "{2}"', path, this.config.PublishUrl)
-            else
-                Run this.config.PublishUrl
-            Sleep 800
-        }
+        title := this.config.WebWindowTitle
+        if WinExist(title " ahk_exe " exe)
+            return
+        ; The Zalo tab can exist before Tampermonkey adds [ZaloBot].
+        if WinExist("Zalo ahk_exe " exe)
+            return
+        if path = ""
+            throw Error(
+                "Không tìm thấy chrome.exe.`n"
+                . "Điền [ZaloWeb] ChromePath trong config.ini.`n"
+                . "Không mở Zalo bằng trình duyệt mặc định (Cốc Cốc).")
+        ; Always launch through the configured Chrome executable. Existing
+        ; unrelated Chrome windows must not prevent opening the required URL.
+        Run Format('"{1}" --new-window "{2}"', path, this.config.WebChatUrl)
+        Sleep 800
     }
 
     _PingWebBridge(timeoutSeconds := 30) {
         this.bridge.WaitForRoles(timeoutSeconds)
-        deadline := A_TickCount + (timeoutSeconds * 1000)
-        while A_TickCount < deadline {
-            try {
-                harvest := this.bridge.RunCommand("ping", Map(), 3000, "harvest")
-                publish := this.bridge.RunCommand("ping", Map(), 3000, "publish")
-                if harvest.Has("role") && harvest["role"] = "harvest"
-                    && publish.Has("role") && publish["role"] = "publish"
-                    return true
-            } catch {
-                Sleep 1000
-            }
+        pingTimeoutMs := Min(timeoutSeconds * 1000, 8000)
+        try {
+            ping := this.bridge.RunCommand("ping", Map(), pingTimeoutMs, "bot")
+            if (ping is Map) && ping.Has("role") && ping["role"] = "bot"
+                return true
+        } catch {
         }
         throw Error(
-            "Tampermonkey userscript chưa kết nối cả 2 cửa sổ.`n"
-            . "Mở bookmark #harvest và #publish trên https://chat.zalo.me/")
+            "Tampermonkey userscript chưa kết nối tab Zalo Web.`n"
+            . "Mở đúng 1 tab https://chat.zalo.me/#bot và bật script v4.")
     }
 
     _ResolveChromePath() {
@@ -535,10 +571,9 @@ class ListingBotService {
         this.watchRunning := true
         this.watchStopRequested := false
         cycles := 0
-        fullScanCompleted := false
-        this._Notify("Watch bật",
-            "Harvest → publish → nghỉ "
-            . Round(this.config.WatchIntervalMs / 60000) " phút."
+        this._Notify("Watch 24/7 bật",
+            "Hết danh sách nhóm nguồn thì quay lại từ đầu. Nghỉ "
+            . Round(this.config.WatchIntervalMs / 60000) " phút giữa mỗi vòng."
             . (this.config.StartupEnableHotkeys
                 ? " " this.config.HotkeyToggleWatch " tắt."
                 : " " this.config.HotkeyStopPublish " dừng khẩn cấp."), 1)
@@ -554,36 +589,28 @@ class ListingBotService {
 
                 cycles++
                 try {
-                    ; Cycle 1 scans the complete spreadsheet in row order.
-                    ; Cycle 2+ selects only spreadsheet groups marked unread.
                     if (this.config.SourceGroupReloadEachCycle
                         || !this.groupsDiscovered)
                         this._LoadSourceGroups()
                     sources := this.registry.SourceGroups()
-                    if (!fullScanCompleted
-                        || !this.config.WatchOnlyUnreadAfterFirstCycle) {
-                        plan := Map(
-                            "mode", "source_file_full",
-                            "groups", sources,
-                            "unread", 0,
-                            "audit", 0)
-                    } else {
-                        ; Acc sidebar badges (+ flat-text DetectUnread fallback inside).
-                        ; Scheduler adds oldest-first audit when Acc returns nothing.
-                        unreadNames := this.ui.FindUnreadSidebarGroups(sources)
-                        plan := this.harvestScheduler.BuildPlan(
-                            sources, this.state, unreadNames)
-                        if plan["mode"] != "empty"
-                            plan["mode"] := "source_file_unread"
+                    ; #region agent log
+                    AgentDebugLog("Bot.ahk:RunWatchLoop", "watch_cycle_start", Map(
+                        "cycle", cycles, "sourceCount", sources.Length), "H1")
+                    ; #endregion
+                    unreadNames := []
+                    try unreadNames := this.ui.FindUnreadSidebarGroups(sources)
+                    catch {
                     }
+                    plan := this.harvestScheduler.BuildContinuousPlan(
+                        sources, unreadNames)
+                    this._Notify("Watch vòng " cycles " bắt đầu",
+                        plan["groups"].Length " nhóm nguồn"
+                        . (plan["unread"] ? " | unread: " plan["unread"] : "")
+                        . "`nHết vòng sẽ lặp lại từ đầu.", 1)
                     this.watchPublishBatchesRemaining :=
                         this.config.PublishBatchesPerWatchCycle
                     harvest := this.harvester.HarvestGroups(
                         plan["groups"], ObjBindMethod(this, "_AfterWatchGroup"))
-                    if (plan["mode"] = "source_file_full"
-                        && harvest["groups"] = plan["groups"].Length
-                        && !this.watchStopRequested)
-                        fullScanCompleted := true
                     mediaRepair := this.mediaCapturer.RepairPending(
                         this.repo, this.config.AutoCaptureRepairPerCycle)
                 } catch as err {
@@ -604,8 +631,8 @@ class ListingBotService {
                 if this.watchStopRequested
                     break
 
-                this._Notify("Watch vòng " cycles " xong",
-                    Format("{1}: {2} nhóm | unread: {3}`nMới: {4} | Ảnh OK: {5} | sửa cache: {6} | lỗi: {7}`nNghỉ {8} phút…",
+                this._Notify("Watch vòng " cycles " xong — lặp lại",
+                    Format("{1}: {2} nhóm | unread: {3}`nMới: {4} | Ảnh OK: {5} | sửa cache: {6} | lỗi: {7}`nNghỉ {8} phút rồi quét lại từ đầu.",
                         plan["mode"], plan["groups"].Length, plan["unread"],
                         harvest["saved"], harvest["media_captured"],
                         mediaRepair["captured"],
@@ -672,9 +699,8 @@ class ListingBotService {
                 break
             if (this.config.WatchStopOnUncertain
                 && this.queue.UncertainEntries().Length) {
-                this.watchStopRequested := true
-                this._Notify("Watch dừng",
-                    "Queue có delivery uncertain. Dùng ResolveUncertain.", 3)
+                this._Notify("Watch bỏ qua publish",
+                    "Queue có delivery uncertain. Harvest 24/7 vẫn chạy. Dùng ResolveUncertain.", 2)
                 break
             }
             status := this.publisher.Status()
@@ -688,8 +714,6 @@ class ListingBotService {
                     break
             } catch as err {
                 this._Notify("Watch publish lỗi", err.Message, 3)
-                if InStr(err.Message, "uncertain")
-                    this.watchStopRequested := true
                 break
             }
         }
@@ -895,7 +919,7 @@ try {
 
     _autoMode := cfg.StartupAutoRunWatch ? "tu dong" : "thu cong (hotkey)"
     TrayTip Format(
-        "San sang — {1} nhom nguon, {2} nhom chinh`n{3}`nZalo Web`nChe do: {4}",
+        "San sang — {1} nhom nguon, {2} nhom chinh`n{3}`nZalo Web 1 tab`nChe do: {4}",
         bot.registry.SourceGroups().Length,
         bot.registry.MainGroups().Length,
         bot.QueueStatus(), _autoMode),

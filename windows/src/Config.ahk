@@ -40,16 +40,17 @@ class AppConfig {
         ; Keep one explicit UTF-8 decode and read values from it first.
         this._IniUtf8Text := ReadTextFile(ini)
 
-        ; ── Zalo Web (Chrome + Tampermonkey, 2-window) ──
+        ; ── Zalo Web (Chrome + Tampermonkey, single tab) ──
         this.BrowserExeName := this._Read(ini, "ZaloWeb", "BrowserExe", "chrome.exe")
-        this.HarvestWindowTitle := this._Read(ini, "ZaloWeb", "HarvestWindowTitle", "[Harvest]")
-        this.PublishWindowTitle := this._Read(ini, "ZaloWeb", "PublishWindowTitle", "[Publish]")
-        this.HarvestUrl := this._Read(ini, "ZaloWeb", "HarvestUrl", "https://chat.zalo.me/#harvest")
-        this.PublishUrl := this._Read(ini, "ZaloWeb", "PublishUrl", "https://chat.zalo.me/#publish")
-        this.WebWindowTitle := this.HarvestWindowTitle
+        this.WebWindowTitle := this._Read(ini, "ZaloWeb", "WindowTitle", "[ZaloBot]")
+        this.WebChatUrl := this._Read(ini, "ZaloWeb", "ChatUrl",
+            this._Read(ini, "ZaloWeb", "HarvestUrl", "https://chat.zalo.me/#bot"))
+        this.HarvestWindowTitle := this.WebWindowTitle
+        this.PublishWindowTitle := this.WebWindowTitle
+        this.HarvestUrl := this.WebChatUrl
+        this.PublishUrl := this.WebChatUrl
         this.WebBridgeHost := this._Read(ini, "ZaloWeb", "BridgeHost", "127.0.0.1")
         this.WebBridgePort := Max(1024, this._Int(ini, "ZaloWeb", "BridgePort", 8080))
-        this.WebChatUrl := this.HarvestUrl
         this.WebChromePath := this._Read(ini, "ZaloWeb", "ChromePath", "")
 
         ; ── Paths ──
@@ -158,10 +159,10 @@ class AppConfig {
             this._Int(ini, "Watch", "IntervalMs", 300000))
         this.WatchDrainQueueEachCycle := this._Bool(ini, "Watch", "DrainQueueEachCycle", true)
         this.WatchOnlyUnreadAfterFirstCycle := this._Bool(
-            ini, "Watch", "OnlyUnreadAfterFirstCycle", true)
+            ini, "Watch", "OnlyUnreadAfterFirstCycle", false)
         this.WatchBypassSessionCooldown := this._Bool(
             ini, "Watch", "BypassSessionCooldown", true)
-        this.WatchStopOnUncertain := this._Bool(ini, "Watch", "StopOnUncertain", true)
+        this.WatchStopOnUncertain := this._Bool(ini, "Watch", "StopOnUncertain", false)
         this.WatchActiveHoursStart := this._Read(ini, "Watch", "ActiveHoursStart", "")
         this.WatchActiveHoursEnd := this._Read(ini, "Watch", "ActiveHoursEnd", "")
 

@@ -63,8 +63,15 @@ class ListingMediaCapturer {
                     ? imageCount : this.config.AutoCaptureProbeMaxImages
                 allowHeuristic := imageCount > 0
                     || this.config.AutoCaptureProbeImages
-                locations := this.ui.FindImageBubblesNearMessage(
-                    anchor, limit, allowHeuristic)
+                locations := []
+                if record.Has("image_urls") && record["image_urls"] is Array {
+                    for index, url in record["image_urls"]
+                        locations.Push(Map(
+                            "x", 0, "y", 0, "index", index, "url", url))
+                }
+                if !locations.Length
+                    locations := this.ui.FindImageBubblesNearMessage(
+                        anchor, limit, allowHeuristic)
                 if !locations.Length {
                     if imageCount > 0
                         throw Error("Không tìm thấy ảnh gần listing.")
@@ -117,15 +124,28 @@ class ListingMediaCapturer {
 
         captured := 0
         for location in locations {
-            prepared := this.media.PrepareArchive(id, captured > 0)
+            prepared := 0
             try {
-                if !this.ui.CopyImageAt(location)
-                    throw Error("Không copy ảnh vào clipboard.")
-                this.ui.SaveClipboardArchive(prepared["temp_path"])
+                try {
+                    image := this.ui.FetchImageAt(location)
+                    extension := this._ImageExtension(
+                        image.Has("mime") ? image["mime"] : "")
+                    prepared := this.media.PrepareArchive(
+                        id, captured > 0, extension)
+                    this.ui.SaveFetchedImage(image, prepared["temp_path"])
+                } catch as fetchErr {
+                    if prepared
+                        this.media.AbortGeneration(prepared)
+                    prepared := this.media.PrepareArchive(id, captured > 0)
+                    if !this.ui.CopyImageAt(location)
+                        throw Error("Không tải/copy được ảnh: " fetchErr.Message)
+                    this.ui.SaveClipboardArchive(prepared["temp_path"])
+                }
                 this.media.CommitGeneration(prepared)
                 captured++
             } catch as err {
-                this.media.AbortGeneration(prepared)
+                if prepared
+                    this.media.AbortGeneration(prepared)
                 if !captured
                     throw err
                 this._Log("auto_capture_partial id=" id
@@ -138,8 +158,8 @@ class ListingMediaCapturer {
 
         this.media.WriteManifest(id, Map(
             "capture_version", 2,
-            "validated_bitmap", 1,
-            "capture_mode", "web_dom",
+            "validated_file", 1,
+            "capture_mode", "web_dom_download",
             "source_group", groupName,
             "anchor", anchor,
             "image_count", captured,
@@ -152,6 +172,15 @@ class ListingMediaCapturer {
             throw Error("Manifest hợp lệ nhưng không có archive media.")
         this.queue.AttachMedia(id, files, this.media.MetadataFor(id))
         return captured
+    }
+
+    _ImageExtension(mime) {
+        value := StrLower(Trim(mime))
+        if InStr(value, "jpeg") || InStr(value, "jpg")
+            return "jpg"
+        if InStr(value, "webp")
+            return "webp"
+        return "png"
     }
 
     ArchiveFromSelection(record, append := false) {

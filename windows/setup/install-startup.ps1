@@ -1,4 +1,4 @@
-# Create Chrome (Zalo Web Harvest + Publish) + Zalo Listing Bot shortcuts in Startup.
+# Create Chrome (Zalo Web single tab) + Zalo Listing Bot shortcuts in Startup.
 
 $ErrorActionPreference = "Stop"
 
@@ -83,8 +83,10 @@ if ((Test-Path $portableExe) -or (Test-Path $portableConfig) -or (Test-Path $por
 }
 
 $iniPath = if (Test-Path $configIni) { $configIni } else { $configExample }
-$harvestUrl = Read-IniValue $iniPath "ZaloWeb" "HarvestUrl" "https://chat.zalo.me/#harvest"
-$publishUrl = Read-IniValue $iniPath "ZaloWeb" "PublishUrl" "https://chat.zalo.me/#publish"
+$chatUrl = Read-IniValue $iniPath "ZaloWeb" "ChatUrl" ""
+if (-not $chatUrl) {
+    $chatUrl = Read-IniValue $iniPath "ZaloWeb" "HarvestUrl" "https://chat.zalo.me/#bot"
+}
 $chromePath = Find-Chrome (Read-IniValue $iniPath "ZaloWeb" "ChromePath" "")
 
 $startup = [Environment]::GetFolderPath("Startup")
@@ -113,12 +115,11 @@ $botShortcut.Save()
 Write-Host "Created: $botLink"
 
 if ($chromePath) {
-    New-ChromeShortcut $startup $shell $chromePath $harvestUrl "Zalo Harvest" "Zalo Web Harvest window (#harvest)"
-    New-ChromeShortcut $startup $shell $chromePath $publishUrl "Zalo Publish" "Zalo Web Publish window (#publish)"
+    New-ChromeShortcut $startup $shell $chromePath $chatUrl "Zalo Web Bot" "Zalo Web single tab (#bot)"
 } else {
     Write-Warning "Chrome not found - only bot shortcut was created. Set [ZaloWeb] ChromePath in config.ini."
 }
 
 Write-Host ""
 Write-Host "Startup folder: $startup"
-Write-Host "After login: 2 Chrome windows (Harvest + Publish) and the bot start automatically."
+Write-Host "After login: 1 Chrome tab (Zalo Web) and the bot start automatically."

@@ -14,16 +14,17 @@ class WebBridge {
         this.running := false
         this.pollCallback := ObjBindMethod(this, "_Poll")
         this.pendingByRole := Map(
-            "harvest", Map(),
-            "publish", Map()
+            "bot", Map()
         )
         this.commandSeq := 0
         this.lastResults := Map()
         this.eventHandlers := []
         this.clients := []
+        this._polling := false
         this.registered := Map(
-            "harvest", Map("role", "harvest", "title", "", "url", "", "ts", 0),
-            "publish", Map("role", "publish", "title", "", "url", "", "ts", 0)
+            "bot", Map(
+                "role", "bot", "version", "",
+                "title", "", "url", "", "ts", 0)
         )
     }
 
@@ -63,8 +64,7 @@ class WebBridge {
 
     RegisterStatus() {
         return Map(
-            "harvest", this._RoleSnapshot("harvest"),
-            "publish", this._RoleSnapshot("publish")
+            "bot", this._RoleSnapshot("bot")
         )
     }
 
@@ -72,7 +72,8 @@ class WebBridge {
         entry := this.registered[role]
         ageMs := entry["ts"] ? (A_TickCount - entry["ts"]) : -1
         return Map(
-            "registered", entry["ts"] > 0 && ageMs < 15000,
+            "registered", entry["ts"] > 0 && ageMs < 45000,
+            "version", entry.Has("version") ? entry["version"] : "",
             "title", entry["title"],
             "url", entry["url"],
             "age_ms", ageMs
@@ -81,53 +82,49 @@ class WebBridge {
 
     WaitForRoles(timeoutSeconds := 30) {
         deadline := A_TickCount + (timeoutSeconds * 1000)
-        missing := []
         while A_TickCount < deadline {
-            missing := []
-            for role in ["harvest", "publish"] {
-                snap := this._RoleSnapshot(role)
-                if !snap["registered"]
-                    missing.Push(role)
-            }
-            if !missing.Length
+            this._Poll()
+            snap := this._RoleSnapshot("bot")
+            if snap["registered"]
                 return true
-            Sleep 500
+            Sleep 50
         }
-        msg := "Thiếu cửa sổ Zalo Web: "
-        for role in missing {
-            if role = "harvest"
-                msg .= "`n- Mở bookmark https://chat.zalo.me/#harvest ([Harvest] Zalo)"
-            else
-                msg .= "`n- Mở bookmark https://chat.zalo.me/#publish ([Publish] Zalo)"
-        }
-        throw Error(msg)
+        throw Error(
+            "Chưa kết nối tab Zalo Web.`n"
+            . "Mở đúng 1 tab https://chat.zalo.me/ (bookmark #bot) "
+            . "và bật Tampermonkey userscript v4.")
     }
 
     _Poll(*) {
-        if !this.running || !this.server
+        if !this.running || !this.server || this._polling
             return
+        this._polling := true
         try {
-            ready := this.server.Select(0)
-            for sock in ready {
-                if sock = this.server {
-                    client := this.server.Accept()
-                    this.clients.Push(client)
+            try {
+                ready := this.server.Select(0)
+                for sock in ready {
+                    if sock = this.server {
+                        client := this.server.Accept()
+                        this.clients.Push(client)
+                    }
+                }
+            } catch {
+                return
+            }
+
+            alive := []
+            for client in this.clients {
+                try {
+                    if this._ServeClient(client)
+                        alive.Push(client)
+                } catch {
+                    try client.Close()
                 }
             }
-        } catch {
-            return
+            this.clients := alive
+        } finally {
+            this._polling := false
         }
-
-        alive := []
-        for client in this.clients {
-            try {
-                if this._ServeClient(client)
-                    alive.Push(client)
-            } catch {
-                try client.Close()
-            }
-        }
-        this.clients := alive
     }
 
     _ServeClient(client) {
@@ -224,7 +221,9 @@ class WebBridge {
                     return this._HandleRegister(body)
                 return this._JsonResponse(200, this.RegisterStatus())
             case "/api/command":
-                role := query.Has("role") ? query["role"] : "harvest"
+                role := query.Has("role") ? query["role"] : "bot"
+                if role = "harvest" || role = "publish"
+                    role := "bot"
                 pending := this.pendingByRole.Has(role)
                     ? this.pendingByRole[role] : Map()
                 if pending.Has("action")
@@ -245,10 +244,13 @@ class WebBridge {
         try {
             payload := JSON.parse(body)
             role := payload.Has("role") ? payload["role"] : ""
-            if role != "harvest" && role != "publish"
+            if role = "harvest" || role = "publish"
+                role := "bot"
+            if role != "bot"
                 return this._JsonResponse(400, Map("error", "invalid role"))
             this.registered[role] := Map(
                 "role", role,
+                "version", payload.Has("version") ? payload["version"] : "",
                 "title", payload.Has("title") ? payload["title"] : "",
                 "url", payload.Has("url") ? payload["url"] : "",
                 "ts", A_TickCount
@@ -287,20 +289,25 @@ class WebBridge {
     }
 
     _PublicConfig() {
+        groups := []
+        if this.config.HasProp("OutputGroupNames") {
+            for name in this.config.OutputGroupNames
+                groups.Push(name)
+        }
         return Map(
             "platform", "web",
-            "bridge_port", this.port
+            "mode", "single_tab",
+            "bridge_port", this.port,
+            "output_groups", groups
         )
     }
 
     _DefaultRoleForAction(action) {
-        if action = "focus_compose"
-            return "publish"
-        return "harvest"
+        return "bot"
     }
 
     IssueCommand(action, params := 0, targetRole := "") {
-        if targetRole = ""
+        if targetRole = "" || targetRole = "harvest" || targetRole = "publish"
             targetRole := this._DefaultRoleForAction(action)
         if !this.pendingByRole.Has(targetRole)
             throw Error("WebBridge role không hợp lệ: " targetRole)
@@ -312,21 +319,27 @@ class WebBridge {
             for key, value in params
                 cmd[key] := value
         this.pendingByRole[targetRole] := cmd
-        this.lastResults.Delete(cmd["id"])
+        if this.lastResults.Has(cmd["id"])
+            this.lastResults.Delete(cmd["id"])
         return cmd["id"]
     }
 
     WaitForResult(id, timeoutMs := 15000) {
         deadline := A_TickCount + timeoutMs
         while A_TickCount < deadline {
+            this._Poll()
             if this.lastResults.Has(id) {
-                result := this.lastResults[id]
+                payload := this.lastResults[id]
                 this.lastResults.Delete(id)
-                if result.Has("ok") && !result["ok"]
-                    throw Error(result.Has("error") ? result["error"] : "JS command failed")
-                return result.Has("result") ? result["result"] : result
+                if payload.Has("ok") && !payload["ok"]
+                    throw Error(payload.Has("error") ? payload["error"] : "JS command failed")
+                if payload.Has("result") && (payload["result"] is Map)
+                    return payload["result"]
+                if payload is Map
+                    return payload
+                return Map()
             }
-            Sleep 60
+            Sleep 30
         }
         for role in this.pendingByRole {
             pending := this.pendingByRole[role]
@@ -334,7 +347,7 @@ class WebBridge {
                 this.pendingByRole[role] := Map()
         }
         throw Error("WebBridge timeout chờ JS (" id "): kiểm tra tab "
-            . "Harvest/Publish và Tampermonkey.")
+            . "Zalo Web [ZaloBot] và Tampermonkey.")
     }
 
     RunCommand(action, params := 0, timeoutMs := 15000, targetRole := "") {

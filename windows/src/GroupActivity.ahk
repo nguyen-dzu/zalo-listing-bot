@@ -198,6 +198,38 @@ class HarvestScheduler {
         this.config := config
     }
 
+    ; 24/7: every cycle walks every source group. Unread names are only
+    ; reordered to the front; they never replace the rest of the list.
+    BuildContinuousPlan(groups, unreadNames := 0) {
+        if !groups.Length
+            return Map("mode", "empty", "groups", [], "unread", 0, "audit", 0)
+
+        selected := []
+        selectedKeys := Map()
+        unreadCount := 0
+        if unreadNames {
+            groupLookup := Map()
+            for group in groups
+                groupLookup[GroupRegistry._Key(group["group_name"])] := group
+            for name in unreadNames {
+                key := GroupRegistry._Key(name)
+                if !groupLookup.Has(key) || selectedKeys.Has(key)
+                    continue
+                this._PushUnique(selected, selectedKeys, groupLookup[key])
+                unreadCount++
+            }
+        }
+        for group in groups
+            this._PushUnique(selected, selectedKeys, group)
+
+        return Map(
+            "mode", "continuous",
+            "groups", selected,
+            "unread", unreadCount,
+            "audit", 0
+        )
+    }
+
     BuildPlan(groups, state, unreadNames := 0) {
         if !groups.Length
             return Map("mode", "empty", "groups", [], "unread", 0, "audit", 0)

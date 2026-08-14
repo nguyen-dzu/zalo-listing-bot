@@ -62,8 +62,7 @@ class MessageComposer {
             "info", "extra_info", "raw_text", "source_group", "id"]
             listing[key] := record.Has(key) ? record[key] : ""
 
-        hash := record.Has("id") ? record["id"] : ""
-        listing["room_code"] := ListingParser.NormalizeRoomCode(listing, hash)
+        listing["room_code"] := ListingParser.NormalizeRoomCode(listing, "")
         if listing["owner_phone"] != "" && listing["phone_carrier"] = ""
             listing["phone_carrier"] := ListingParser.ClassifyCarrier(
                 listing["owner_phone"])

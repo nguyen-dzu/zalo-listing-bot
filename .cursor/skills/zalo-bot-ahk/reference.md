@@ -45,6 +45,22 @@ blocks  := ListingParser.SplitBlocks(text, startPattern, imageMarker)
 listing := ListingParser.Parse(block, imageMarker)
 errors  := ListingParser.Validate(listing, cfg.RequiredFields)
 text    := ListingParser.FormatBlock(listing, cfg.MaskPhone, cfg.PhoneHint)
+```
+
+**`FormatBlock` output (icon template):**
+
+```text
+🏷️ tên nhóm: Nhóm Cho Thuê Quận 1
+🏠 phòng: Studio
+🔑 mã phòng: P001
+📍 thông tin phòng: 123 Nguyễn Văn A, Quận 1
+💰 giá: 5 triệu/tháng
+🧾 giá dịch vụ: 150k/tháng
+⚡ giá điện nước: 3.500đ/kWh / 100k/người
+📞 số điện thoại của chủ trọ: 0901234567
+```
+
+```autohotkey
 code    := ListingParser.ParsePhoneRequest("SĐT P001")
 ```
 
@@ -108,7 +124,8 @@ files := media.RelativePaths(listingId)
 ```autohotkey
 ui := ZaloUIAdapter(cfg)
 ui.IsRunning()
-ui.OpenGroup(name)
+ui.EnsureNormalized()              ; fixed Chrome size when MaximizeBrowser=0
+ui.OpenGroup(name, focus := "read") ; bridge navigate; focus "send" → compose
 ui.CaptureConversationText(method := "")
 ui.SendTextChunks(group, chunks)
 ui.RelayClipboardImage(group)
@@ -116,10 +133,14 @@ ui.ForwardSelection(group)
 ui.PasteToActiveChat(text)
 ui.SaveClipboardArchive(path)
 ui.RestoreClipboardArchive(path)
-ui.BeginPublishSession(group)
+ui.BeginPublishSession(group)      ; navigate output + focus compose
 ui.PasteArchiveInSession(path)
 ui.SendTextInSession(text)
 ```
+
+**Layout helpers (internal):** `_FocusComposeBox()` (bridge or ~42%/88% click),
+`_FocusMessagePane()` (~55%/45%), `_NavigateToGroup()` (bridge `navigate`),
+`_GuardStickyConversation()` (detect stuck chat after open).
 
 ### DurableListingPublisher
 

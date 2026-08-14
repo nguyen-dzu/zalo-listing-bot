@@ -4,7 +4,7 @@
 
 The bot collects room listings from **multiple source groups** on Zalo Web, filters out closed/deal posts, stores each post as a local JSON object, then publishes to **main groups**.
 
-Windows only. AutoHotkey v2 + Chrome (Tampermonkey userscript) + local HTTP bridge — no server component.
+Windows only. AutoHotkey v2 + Chrome (Tampermonkey userscript, **1 tab**) + local HTTP bridge — no server component. Zalo Web single-session: harvest then switch to the sale group in-place.
 
 | Aspect | Description |
 |--------|-------------|
@@ -133,14 +133,19 @@ Select `SĐT P001` → look up the per-listing JSON store → paste phone into a
 
 ```text
 [image messages for room 1]
-- tên nhóm: Nhóm nguồn A
-- mã phòng: P001
-- thông tin phòng: 123 Nguyễn Văn A, Quận 1
-…
+🏷️ tên nhóm: Nhóm nguồn A
+🏠 phòng: Studio
+🔑 mã phòng: P001
+📍 thông tin phòng: 123 Nguyễn Văn A, Quận 1
+💰 giá: 5 triệu/tháng
+🧾 giá dịch vụ: -
+⚡ giá điện nước: -
+📞 số điện thoại của chủ trọ: 0901234567
 =======          ← separate Zalo message
 [image messages for room 2]
-- mã phòng: P002
-- thông tin phòng: 45 Lê Lợi, Quận 1
+🏷️ tên nhóm: Nhóm nguồn A
+🔑 mã phòng: P002
+📍 thông tin phòng: 45 Lê Lợi, Quận 1
 …
 =======
 ```

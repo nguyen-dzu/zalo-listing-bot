@@ -1,81 +1,67 @@
 # Zalo Web Bridge — Tampermonkey
 
-Userscript kết nối **2 cửa sổ Zalo Web (Chrome)** với **AHK v2** qua HTTP localhost.
+Userscript kết nối **1 tab Zalo Web (Chrome)** với **AHK v2** qua HTTP localhost.
 
-## Cài đặt
+Zalo Web chỉ cho **một phiên đăng nhập**. Mở 2 tab cùng tài khoản sẽ đá tab cũ (`Session Expired`). Bot dùng **1 tab in-place**: harvest nhóm nguồn → chuyển sidebar sang nhóm sale → AHK dán/gửi → quay lại nhóm nguồn.
+
+## Cài đặt Tampermonkey (Chrome mới hay báo script chưa chạy)
 
 1. Cài [Tampermonkey](https://www.tampermonkey.net/) trên Chrome
-2. Import `web/zalo-listing-bot.user.js`
-3. Tạo **2 bookmark** (hoặc shortcut startup):
-   - **Harvest:** `https://chat.zalo.me/#harvest` → title tab: `[Harvest] Zalo`
-   - **Publish:** `https://chat.zalo.me/#publish` → title tab: `[Publish] Zalo`
-4. Trong cửa sổ Harvest: sidebar mở các **nhóm nguồn**
-5. Trong cửa sổ Publish: sidebar mở **nhóm output** (main) cố định
-6. Chạy `windows\src\Bot.ahk`
+2. **Bắt buộc trên Chrome 138+:**
+   - Mở `chrome://extensions`
+   - Tampermonkey → **Details**
+   - Bật **Allow User Scripts** (Cho phép User Scripts)
+3. Import / cập nhật `web/zalo-listing-bot.user.js` (**v4.0.1**)
+4. Tampermonkey Dashboard → script **Enabled**
+5. Đóng hết tab Zalo Web, mở **đúng 1 tab** `https://chat.zalo.me/#bot` rồi **F5**
+6. Thành công khi:
+   - Title tab bắt đầu bằng `[ZaloBot]`
+   - Góc phải có nhãn xanh `ZaloBot ON`
+   - Tampermonkey **không** còn dòng "Tập lệnh này chưa từng được chạy"
 
-Tab Zalo thường (không có `#harvest` / `#publish`) **không poll** lệnh bridge — tránh race condition.
+Nếu vẫn chưa chạy: click icon Tampermonkey trên tab Zalo → chọn script → **Reload this page**.
 
-## Kiến trúc 2 cửa sổ
+## Luồng 1 tab
 
 ```
-[ Chrome #harvest ]                    [ AHK v2 ]
-  DomEngine + MutationObserver           WebBridge :8080
-  Poll commands (harvest role)    ◄──►   Harvester / Parser / Queue
-  POST /api/event
-
-[ Chrome #publish ]
-  Poll ping + focus_compose only  ◄──►   ZaloUI paste Ctrl+V + Enter
+[ Chrome #bot — 1 tab ]                 [ AHK v2 ]
+  DomEngine + MutationObserver            WebBridge :8080
+  navigate nhóm nguồn  → scan/copy ảnh    Harvester / Parser / Queue
+  navigate nhóm sale   → focus_compose    Publisher: Ctrl+V + Enter
 ```
 
-| Cửa sổ  | URL hash   | Title            | Vai trò                                       |
-| ------- | ---------- | ---------------- | --------------------------------------------- |
-| Harvest | `#harvest` | `[Harvest] Zalo` | Đọc DOM, navigate nhóm nguồn, copy ảnh        |
-| Publish | `#publish` | `[Publish] Zalo` | Focus compose, paste/gửi tin (AHK keystrokes) |
+| Bước | Ai làm | Chi tiết |
+|------|--------|----------|
+| 1 | JS + AHK | Mở nhóm nguồn, quét tin, archive ảnh |
+| 2 | JS | Click sidebar sang **1** nhóm `OutputGroups` |
+| 3 | AHK | Dán ảnh → text → `=======` |
+| 4 | AHK | Harvest nhóm nguồn tiếp theo trên cùng tab |
 
 ## API Bridge
 
-| Endpoint                        | Mô tả                                   |
-| ------------------------------- | --------------------------------------- |
-| `GET /api/health`               | Health + trạng thái 2 role              |
-| `POST /api/register`            | JS đăng ký role (`harvest` / `publish`) |
-| `GET /api/register`             | AHK xem client đã sẵn sàng chưa         |
-| `GET /api/command?role=harvest` | Harvest poll lệnh                       |
-| `GET /api/command?role=publish` | Publish poll lệnh (ping, focus_compose) |
-| `POST /api/command-result`      | JS trả kết quả                          |
-| `POST /api/event`               | Push tin mới (chỉ Harvest observer)     |
+Role duy nhất: `bot` (`POST /api/register`, `GET /api/command?role=bot`).
+
+| Endpoint | Mô tả |
+|----------|-------|
+| `GET /api/health` | Health + role `bot` |
+| `POST /api/register` | JS đăng ký tab |
+| `GET /api/command?role=bot` | Poll lệnh |
+| `POST /api/command-result` | JS trả kết quả |
+| `POST /api/event` | Push tin mới (bỏ qua khi đang ở nhóm sale) |
+| `GET /api/config` | `output_groups` để JS không ingest tin nhóm sale |
 
 ### Lệnh JS
 
-| action          | Role    | Mô tả                                           |
-| --------------- | ------- | ----------------------------------------------- |
-| `ping`          | cả hai  | Health check                                    |
-| `navigate`      | harvest | Mở nhóm nguồn (`group`)                         |
-| `scan`          | harvest | Quét tin trong chat                             |
-| `dump_dom`      | harvest | Diagnostic: selector, messageCount, sampleTexts |
-| `unread`        | harvest | Nhóm có badge chưa đọc                          |
-| `find_images`   | harvest | Tìm URL ảnh gần anchor                          |
-| `copy_image`    | harvest | Copy 1 ảnh vào clipboard                        |
-| `focus_compose` | publish | Focus ô soạn tin                                |
-
-### DomEngine
-
-Userscript dùng **selector tiers** có thứ tự ưu tiên + scoring (text, ảnh, message pane). Fallback cuối: `div[contenteditable="false"]` trong message pane (loại trừ compose/sidebar/header).
-
-Chạy diagnostic trên máy thật:
-
-```text
-AHK gọi bridge RunCommand("dump_dom") → xem matchedSelector, messageCount
-```
-
-Nếu `messageCount = 0`, cập nhật `SELECTORS.messageItemTiers` trong userscript theo DOM Zalo Web hiện tại.
+`ping`, `navigate`, `scan`, `dump_dom`, `unread`, `find_images`, `copy_image`, `focus_compose`, `title`, `pause_events`, `resume_events`
 
 ## Config AHK
 
 ```ini
 [ZaloWeb]
-HarvestWindowTitle=[Harvest]
-PublishWindowTitle=[Publish]
-HarvestUrl=https://chat.zalo.me/#harvest
-PublishUrl=https://chat.zalo.me/#publish
+WindowTitle=[ZaloBot]
+ChatUrl=https://chat.zalo.me/#bot
 BridgePort=8080
+
+[Groups]
+OutputGroups=Tên nhóm sale (đúng 1 nhóm)
 ```
