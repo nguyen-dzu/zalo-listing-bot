@@ -184,6 +184,14 @@ class ListingMediaStore {
                 || (manifest.Has("validated_file") && manifest["validated_file"]))
     }
 
+    ; Legacy helper: one single group per archived file (publish ignores groups).
+    ImageGroupsFor(listingId) {
+        groups := []
+        for path in this.RelativePaths(listingId)
+            groups.Push(Map("mode", "single", "files", [path]))
+        return groups
+    }
+
     RelativePaths(listingId) {
         result := []
         prefix := this.root "\"

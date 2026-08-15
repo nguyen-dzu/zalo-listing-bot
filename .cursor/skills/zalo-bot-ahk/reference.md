@@ -126,6 +126,7 @@ ui := ZaloUIAdapter(cfg)
 ui.IsRunning()
 ui.EnsureNormalized()              ; fixed Chrome size when MaximizeBrowser=0
 ui.OpenGroup(name, focus := "read") ; bridge navigate; focus "send" → compose
+ui.CaptureConversation(method := "", maxMessages := 0)
 ui.CaptureConversationText(method := "")
 ui.SendTextChunks(group, chunks)
 ui.RelayClipboardImage(group)
@@ -134,12 +135,13 @@ ui.PasteToActiveChat(text)
 ui.SaveClipboardArchive(path)
 ui.RestoreClipboardArchive(path)
 ui.BeginPublishSession(group)      ; navigate output + focus compose
+ui.ForwardListingMessage(sourceGroup, targetGroup, messageHash, roomCode)
 ui.PasteArchiveInSession(path)
 ui.SendTextInSession(text)
 ```
 
 **Layout helpers (internal):** `_FocusComposeBox()` (bridge or ~42%/88% click),
-`_FocusMessagePane()` (~55%/45%), `_NavigateToGroup()` (bridge `navigate`),
+`_FocusMessagePane()` (bridge `focus_pane` / header click, not photo area), `_NavigateToGroup()` (bridge `navigate`),
 `_GuardStickyConversation()` (detect stuck chat after open).
 
 ### DurableListingPublisher

@@ -52,7 +52,7 @@ Role duy nhất: `bot` (`POST /api/register`, `GET /api/command?role=bot`).
 
 ### Lệnh JS
 
-`ping`, `navigate`, `scan`, `dump_dom`, `unread`, `find_images`, `copy_image`, `focus_compose`, `title`, `pause_events`, `resume_events`
+`ping`, `navigate`, `scan`, `dump_dom`, `unread`, `forward_message`, `find_images`, `copy_image`, `focus_compose`, `focus_pane`, `title`, `pause_events`, `resume_events`
 
 ## Config AHK
 

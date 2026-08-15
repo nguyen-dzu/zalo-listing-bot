@@ -303,6 +303,14 @@ class PublishQueueStore {
         ))
     }
 
+    CheckpointForward(id, groupName) {
+        this._Append(Map(
+            "type", "forward_sent",
+            "id", id,
+            "group", groupName
+        ))
+    }
+
     CheckpointText(ids, groupName) {
         this._Append(Map(
             "type", "text_sent",
@@ -575,6 +583,18 @@ class PublishQueueStore {
         return result
     }
 
+    WaiveUnarchivedMedia(reason := "unarchived") {
+        waived := 0
+        for entry in this.MediaPendingEntries() {
+            files := entry.Has("media_files") ? entry["media_files"] : []
+            if files.Length
+                continue
+            this.InvalidateMedia(entry["id"], reason, false)
+            waived++
+        }
+        return waived
+    }
+
     Compact() {
         ; JSONL snapshot v2 keeps each record independently parseable. Parsing
         ; one giant pretty-printed JSON array became the dominant cost at
@@ -704,6 +724,15 @@ class PublishQueueStore {
                     delivery["last_action"] := ""
                 }
 
+            case "forward_sent":
+                if this.records.Has(event["id"]) {
+                    delivery := this._Delivery(this.records[event["id"]], event["group"])
+                    delivery["forward_sent"] := 1
+                    delivery["uncertain"] := 0
+                    delivery["delivery_id"] := ""
+                    delivery["last_action"] := ""
+                }
+
             case "text_sent":
                 for id in event["ids"] {
                     if !this.records.Has(id)
@@ -775,6 +804,8 @@ class PublishQueueStore {
                         if event["choice"] = "skip" {
                             if delivery["last_action"] = "text"
                                 delivery["text_sent"] := 1
+                            else if delivery["last_action"] = "forward"
+                                delivery["forward_sent"] := 1
                             else if delivery["last_action"] = "media"
                                 delivery["media_index_sent"] := Max(
                                     delivery["media_index_sent"],
@@ -804,6 +835,8 @@ class PublishQueueStore {
                         if event["choice"] = "skip" {
                             if delivery["last_action"] = "text"
                                 delivery["text_sent"] := 1
+                            else if delivery["last_action"] = "forward"
+                                delivery["forward_sent"] := 1
                             else if delivery["last_action"] = "media"
                                 delivery["media_index_sent"] := Max(
                                     delivery["media_index_sent"],
@@ -872,6 +905,7 @@ class PublishQueueStore {
             entry["deliveries"][groupName] := Map(
                 "media_index_sent", 0,
                 "text_sent", 0,
+                "forward_sent", 0,
                 "uncertain", 0,
                 "delivery_id", "",
                 "last_action", "",

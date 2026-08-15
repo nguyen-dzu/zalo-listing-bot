@@ -6,17 +6,22 @@ Updated: Aug 2026. Agent **must read this file** before changing publish/parser/
 
 ## P0 — Required (operational)
 
-### 1. Output format — 1 room per cycle: images → text → separator (Aug 2026)
+### 1. Output format — 1 room per cycle: one image per message → text → separator (Aug 2026)
 
 **Forced:** `OneMessagePerListing=1`, `SendSeparatorAsMessage=1`, `LeaseSize=1`,
 `PublishAfterGroups=1`. Multi-room blob / harvest batch-5 đã gỡ.
 
-Per room in each main group:
+**Routing (4 nhóm output, bỏ NNC):** mỗi phòng vào **một** nhóm theo thứ tự ưu tiên
+quận số → ngoại thành → giá (`ListingOutputRouter`, `[OutputRouting]` trong config).
 
-1. Paste từng ảnh đã archive
+Per room in the routed output group:
+
+1. Paste archived images **one `.clip` per Zalo message** (Enter after each)
 2. Send formatted text for that room
 3. Send `=======` as its own message
 4. Next room
+
+**Debug note (Aug 2026):** reverted from `image_groups` batch/cluster paste to per-image send while fixing harvest image detection.
 
 ---
 
@@ -55,6 +60,8 @@ Per room in each main group:
    invalidated and never published; `media_pending` items are retried each cycle.
 6. Listing IDs include normalized source group + content hash, preventing
    cross-group posts from sharing the same media directory.
+7. AutoCapture fail waives `media_pending` (`InvalidateMedia` required=false)
+   so watch still pastes text + `=======` instead of stalling on input groups.
 
 **Manual fallback:** `Ctrl+Shift+M` (archive by room code) or `Ctrl+Shift+I` (RelayImages).
 
@@ -98,6 +105,20 @@ Added to `blocklist.example.csv` + tests:
 
 ---
 
+### 5b. Rental-only filter + room info whitelist — DONE (Aug 2026)
+
+**Parser (`ListingParser`):**
+
+- Strip promo lines: tham gia cộng đồng, chốt/thưởng nóng, link nhóm, vay tài chính, …
+- `thông tin phòng` chỉ giữ thuộc tính phòng (nội thất, duplex, hẻm xe hơi, số người, …)
+- `QualifiesAsRentalListing`: gate harvest — cần ≥2 lõi (giá, địa chỉ, mã, dịch vụ/điện/nước, SĐT, info)
+- Text-only vẫn harvest nếu đủ lõi; không bắt buộc ảnh lúc capture
+- Pure promo / link nhóm → `invalid`, mark seen
+
+**Tests:** section `rental-only filter` in `RunTests.ahk` (G01 regression + P401 promo strip).
+
+---
+
 ### 6. Durable queue for 1,000–5,000 rooms — IMPLEMENTED / NEEDS WINDOWS TEST
 
 - Append-only `events.jsonl` + periodic `snapshot.json`
@@ -117,8 +138,13 @@ Added to `blocklist.example.csv` + tests:
   `HarvestScheduler` (unread + oldest-first audit). Flat-text DetectUnread is fallback.
 - Badge numbers `1–999` count as unread even without “tin nhắn mới”.
 - In-chat: newest-first scan **breaks** on first seen hash (no full-history re-walk).
+- DOM `scan` is capped (`[Capture] MaxScanMessages=20`, newest mounted bubbles only).
+  Harvest does **not** scroll chat history bubble-by-bubble. `_VerifyGroupOpened`
+  uses `title`, not a second full scan.
 - `MaxGroupsPerCycle` and `MaxBatchesPerWatchCycle` bound GUI/send work.
 - State saves after each group; a group with new rooms is published before the next source.
+- Watch publish pastes in the output group (no `forward_message` back to source).
+  AutoCapture fail waives `media_pending` → `ready` so text + `=======` still paste.
 - Publish delays use configurable jitter; watch no longer rechecks all groups.
 - `[Relay] TextOnly=0` keeps AutoCapture on so publish can send images before text.
   Set `TextOnly=1` only for text-debug. Output names stay UTF-8 clipboard paste.
@@ -143,7 +169,7 @@ oldest-first audit shard still provides eventual coverage.
 - [x] `EnsureNormalized()` — restore ~1100×850, không maximize mỗi activate
 - [x] `OpenGroup` qua bridge `navigate` + verify title/scan
 - [x] `_FocusComposeBox` — bridge `focus_compose`, fallback click 42%/88%
-- [x] `_FocusMessagePane` — click 55%/45% (harvest read focus)
+- [x] `_FocusMessagePane` — bridge `focus_pane` (header); fallback click ~52%×10% + Esc, không click giữa ảnh
 - [x] Publish session clipboard-first paste (`_PasteAndSend`)
 - [x] Sticky-conversation guard (`_GuardStickyConversation`)
 - [x] Agent debug log → `AgentDebugLog` / `ui-diagnostic.jsonl`
@@ -159,6 +185,18 @@ Field thiếu vẫn hiển thị `-`. Tests assert `🏷️`, `🔑`, `💰`, `�
 
 ---
 
+### 11. Forward tin có ảnh kề + bỏ header nhóm — DONE (Aug 2026)
+
+- [x] Gỡ `IncludeGroupHeader` / `Separator({group})` — tên nhóm chỉ trong `🏷️ tên nhóm`
+- [x] `associateImagesWithText` gộp ảnh trước/sau bubble text → `forward_eligible`
+- [x] Bridge `forward_message` (userscript v4.1.8) + `ZaloUI.ForwardListingMessage`
+- [x] Publisher: forward trước text; fallback archive paste nếu forward fail
+- [x] Queue checkpoint `forward_sent` cho resume
+
+**Cần E2E:** forward bubble gốc trên Zalo Web thật (menu Chuyển tiếp).
+
+---
+
 ## P1 — Parser improvements (partially done)
 
 - [x] Heuristic `LooksLikeListing`
@@ -166,7 +204,7 @@ Field thiếu vẫn hiển thị `-`. Tests assert `🏷️`, `🔑`, `💰`, `�
 - [x] Phone with dots `0377.785.784`
 - [x] Google Maps link signal
 - [x] Abbreviations Nc, Dv, PDV
-- [ ] Split blocks when image and text are separate bubbles (MyHouse) — may need adjacent-block merge
+- [x] Split blocks when image and text are separate bubbles — **nearest-text adjacency** at scan + `message_hash` capture lookup; multi-listing split không chia sẻ ảnh
 - [ ] Store `maps_url` field when link present
 
 ---
@@ -182,7 +220,7 @@ Field thiếu vẫn hiển thị `-`. Tests assert `🏷️`, `🔑`, `💰`, `�
 ## Pre-ship checklist
 
 ```
-[x] RunTests.ahk on Windows — 230 parser/UI-guard/harvest/queue/media cases
+[x] RunTests.ahk on Windows — parser/UI-guard/harvest/queue/media/publish per-image cases
 [x] Simulate.ahk on Windows — 5,000 rooms → 1,000 batches (`run-stress.cmd`)
 [ ] Manual test: 1 source group → main (record in commit/PR)
 [x] blocklist.example.csv — new keywords + tests

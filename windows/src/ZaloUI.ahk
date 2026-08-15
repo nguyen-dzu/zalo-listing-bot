@@ -12,6 +12,7 @@ class ZaloUIAdapter {
         this.lastConversationFingerprint := ""
         this.lastConversationGroup := ""
         this.lastOpenedGroup := ""
+        this.botWindowHwnd := 0
         CoordMode("Mouse", "Screen")
     }
 
@@ -39,18 +40,47 @@ class ZaloUIAdapter {
 
     Activate() {
         match := this._WindowMatch()
-        if !this._WindowExists(match) {
+        hwnd := this._WindowExists(match)
+        if hwnd {
+            this.botWindowHwnd := hwnd
+            match := "ahk_id " hwnd
+        } else if this.botWindowHwnd && WinExist("ahk_id " this.botWindowHwnd) {
+            match := "ahk_id " this.botWindowHwnd
+        } else {
             fallback := "ahk_exe " this.config.BrowserExeName
                 . " ahk_class Chrome_WidgetWin_1"
-            if !WinExist(fallback)
+            hwnd := WinExist(fallback)
+            if !hwnd
                 throw Error("Chưa mở tab Zalo Web. Bookmark: " this.config.WebChatUrl)
-            match := fallback
+            this.botWindowHwnd := hwnd
+            match := "ahk_id " hwnd
         }
         WinActivate match
         if !WinWaitActive("ahk_exe " this.config.BrowserExeName,, 4)
             throw Error("Không kích hoạt được cửa sổ Zalo Web.")
         Sleep 150
         return true
+    }
+
+    ; A Zalo click can occasionally leave an external link in a new active
+    ; Chrome tab. Close only that tab in the browser window already owned by
+    ; the bot, then reveal the registered [ZaloBot] tab and continue scanning.
+    _CloseUnexpectedActiveTab() {
+        if !this.botWindowHwnd || !WinExist("ahk_id " this.botWindowHwnd)
+            return false
+        WinActivate "ahk_id " this.botWindowHwnd
+        if !WinWaitActive("ahk_id " this.botWindowHwnd,, 2)
+            return false
+        title := WinGetTitle("ahk_id " this.botWindowHwnd)
+        if InStr(title, this._WindowTitle())
+            return false
+        processName := ""
+        try processName := WinGetProcessName("ahk_id " this.botWindowHwnd)
+        if StrLower(processName) != StrLower(this.config.BrowserExeName)
+            return false
+        Send "^w"
+        Sleep 500
+        return InStr(WinGetTitle("ahk_id " this.botWindowHwnd), this._WindowTitle()) > 0
     }
 
     ActivateHarvest() {
@@ -130,37 +160,13 @@ class ZaloUIAdapter {
     }
 
     _VerifyGroupOpened(groupName) {
-        title := ""
-        try {
-            this._EnsureBridgeReady(8)
-            result := this.bridge.RunCommand("title", Map(), 8000, "bot")
-            title := result.Has("group") ? result["group"] : ""
-        } catch {
-        }
-        if this._GroupNamesMatch(title, groupName)
-            return true
-        try {
-            scan := this.bridge.RunCommand("scan", Map(), 20000, "bot")
-            scanGroup := scan.Has("group") ? scan["group"] : ""
-            textLen := scan.Has("text") ? StrLen(Trim(scan["text"])) : 0
-            msgCount := scan.Has("messages") ? scan["messages"].Length : 0
-            ; #region agent log
-            AgentDebugLog("ZaloUI.ahk:_VerifyGroupOpened", "verify_scan", Map(
-                "group", groupName, "scanGroup", scanGroup,
-                "textLen", textLen, "msgCount", msgCount, "title", title
-            ), "H6", "post-fix")
-            ; #endregion
-            if this._GroupNamesMatch(scanGroup, groupName)
+        Loop 3 {
+            title := this._ReadConversationTitle("")
+            if this._GroupNamesMatch(title, groupName)
                 return true
-            return false
-        } catch as err {
-            ; #region agent log
-            AgentDebugLog("ZaloUI.ahk:_VerifyGroupOpened", "verify_fail", Map(
-                "group", groupName, "error", err.Message, "title", title
-            ), "H6", "post-fix")
-            ; #endregion
-            return false
+            Sleep 200
         }
+        return false
     }
 
     _NavigateToGroup(groupName) {
@@ -193,11 +199,28 @@ class ZaloUIAdapter {
 
     _FocusMessagePane() {
         this.Activate()
+        ; Prefer DOM focus on the chat header. A client-area click at ~45%
+        ; lands on listing photos and opens the image viewer, aborting harvest.
+        try {
+            this.bridge.RunCommand("focus_pane", Map(), 5000, "bot")
+            ; #region agent log
+            AgentDbg("H4", "ZaloUI.ahk:_FocusMessagePane", "bridge_ok", "{}")
+            ; #endregion
+            Sleep this.config.CaptureSettleMs
+            return
+        } catch as err {
+            ; #region agent log
+            AgentDbg("H4", "ZaloUI.ahk:_FocusMessagePane", "bridge_fail_click_header",
+                '{"error":"' StrReplace(StrReplace(err.Message, "`n", " "), '"', '\"') '"}')
+            ; #endregion
+        }
         hwnd := WinExist(this._WindowMatch())
         if !hwnd
             hwnd := WinExist("ahk_exe " this.config.BrowserExeName)
         WinGetClientPos(&x, &y, &w, &h, "ahk_id " hwnd)
-        Click x + Round(w * 0.55), y + Round(h * 0.45)
+        Click x + Round(w * 0.52), y + Round(h * 0.10)
+        Sleep 80
+        Send "{Esc}"
         Sleep this.config.CaptureSettleMs
     }
 
@@ -205,14 +228,11 @@ class ZaloUIAdapter {
         this.Activate()
         this.EnsureNormalized()
         openedGroup := this._NavigateToGroup(groupName)
+        this._CloseUnexpectedActiveTab()
         if Trim(openedGroup) = ""
             throw Error("Không mở được nhóm: " groupName)
         this.currentGroup := openedGroup
         this.lastOpenedGroup := openedGroup
-        ; #region agent log
-        AgentDebugLog("ZaloUI.ahk:OpenGroup", "open_group_ok", Map(
-            "requested", groupName, "openedAs", openedGroup), "H2", "post-fix")
-        ; #endregion
         if focus = "send"
             this._FocusComposeBox()
         else
@@ -220,16 +240,30 @@ class ZaloUIAdapter {
         return true
     }
 
-    CaptureConversation(method := "") {
-        this.Activate()
-        this._EnsureBridgeReady(10)
-        result := this.bridge.RunCommand("scan", Map(), 20000, "bot")
-        captured := result.Has("text") ? result["text"] : ""
-        this._GuardStickyConversation(captured)
-        if !result.Has("messages") || !(result["messages"] is Array)
-            result["messages"] := []
-        if !result.Has("group")
-            result["group"] := this.currentGroup
+    CaptureConversation(method := "", maxMessages := 0) {
+        result := Map("text", "", "messages", [], "group", this.currentGroup)
+        limit := maxMessages > 0 ? maxMessages
+            : (this.config.HasProp("MaxScanMessages")
+                ? this.config.MaxScanMessages : 20)
+        params := Map("max_messages", Max(1, limit))
+        Loop 3 {
+            this.Activate()
+            this._EnsureBridgeReady(10)
+            this._CloseUnexpectedActiveTab()
+            result := this.bridge.RunCommand("scan", params, 45000, "bot")
+            if !result.Has("messages") || !(result["messages"] is Array)
+                result["messages"] := []
+            if !result.Has("group")
+                result["group"] := this.currentGroup
+            captured := result.Has("text") ? result["text"] : ""
+            if Trim(captured) != "" || result["messages"].Length {
+                this._GuardStickyConversation(captured)
+                return result
+            }
+            this._CloseUnexpectedActiveTab()
+            this._FocusMessagePane()
+            Sleep 500 * A_Index
+        }
         return result
     }
 
@@ -257,8 +291,14 @@ class ZaloUIAdapter {
 
     FindUnreadSidebarGroups(knownGroups) {
         this.Activate()
+        knownNames := []
+        for group in knownGroups
+            knownNames.Push(group["group_name"])
         try {
-            result := this.bridge.RunCommand("unread", Map(), 8000, "bot")
+            result := this.bridge.RunCommand(
+                "unread", Map("known_groups", knownNames), 8000, "bot")
+            if result.Has("items") && result["items"].Length
+                return result["items"]
             if result.Has("groups") && result["groups"].Length
                 return result["groups"]
         } catch {
@@ -274,13 +314,16 @@ class ZaloUIAdapter {
         return true
     }
 
-    FindImageBubblesNearMessage(anchor, limit := 1, allowHeuristic := true) {
+    FindImageBubblesNearMessage(anchor, limit := 1, allowHeuristic := true, messageHash := "") {
         this.Activate()
         try {
-            result := this.bridge.RunCommand("find_images", Map(
+            params := Map(
                 "anchor", anchor,
                 "limit", limit
-            ), 30000, "bot")
+            )
+            if Trim(messageHash) != ""
+                params["message_hash"] := messageHash
+            result := this.bridge.RunCommand("find_images", params, 30000, "bot")
             urls := result.Has("urls") ? result["urls"] : []
             locations := []
             for index, url in urls
@@ -333,7 +376,28 @@ class ZaloUIAdapter {
 
     _ClipboardHasPublishMedia() {
         return this._ClipboardHasImage()
-            || DllCall("IsClipboardFormatAvailable", "UInt", 15)
+    }
+
+    ; Bitmap via Tampermonkey bridge — never CF_HDROP (Zalo uploads that to cloud drive).
+    SetClipboardImageFromFile(path) {
+        if !FileExist(path)
+            return false
+        mime := "image/png"
+        if RegExMatch(path, "i)\.jpe?g$")
+            mime := "image/jpeg"
+        else if RegExMatch(path, "i)\.webp$")
+            mime := "image/webp"
+        encoded := FileToBase64(path)
+        if encoded = ""
+            return false
+        try {
+            this.bridge.RunCommand("set_clipboard_image",
+                Map("data_base64", encoded, "mime", mime), 45000, "bot")
+        } catch {
+            return false
+        }
+        Sleep 150
+        return this._ClipboardHasImage()
     }
 
     SaveClipboardArchive(path) {
@@ -356,19 +420,21 @@ class ZaloUIAdapter {
     RestoreClipboardArchive(path) {
         if !FileExist(path)
             throw Error("Không tìm thấy archive ảnh: " path)
-        if !RegExMatch(path, "i)\.clip$") {
-            if !SetClipboardFile(path)
-                throw Error("Không đưa được file ảnh vào clipboard: " path)
+        if RegExMatch(path, "i)\.clip$") {
+            rawClip := FileRead(path, "RAW")
+            A_Clipboard := ClipboardAll(rawClip)
             if !ClipWait(this.config.ClipWaitSeconds, true)
-                throw Error("Clipboard không nhận file ảnh: " path)
+                throw Error("Không restore được archive ảnh: " path)
+            if !this._ClipboardHasImage()
+                throw Error("Archive không chứa định dạng ảnh: " path)
             return true
         }
-        rawClip := FileRead(path, "RAW")
-        A_Clipboard := ClipboardAll(rawClip)
+        if !this.SetClipboardImageFromFile(path)
+            throw Error("Không đưa được ảnh vào clipboard dạng bitmap: " path)
         if !ClipWait(this.config.ClipWaitSeconds, true)
-            throw Error("Không restore được archive ảnh: " path)
+            throw Error("Clipboard không nhận ảnh bitmap: " path)
         if !this._ClipboardHasImage()
-            throw Error("Archive không chứa định dạng ảnh: " path)
+            throw Error("Clipboard không có định dạng ảnh inline: " path)
         return true
     }
 
@@ -432,11 +498,71 @@ class ZaloUIAdapter {
         return true
     }
 
+    ; Paste one archived image as its own message.
+    PasteOneMediaInSession(path, beforeSend := 0) {
+        if this.publishGroup = ""
+            throw Error("Chưa mở publish session.")
+        if !FileExist(path)
+            throw Error("Không tìm thấy archive ảnh: " path)
+        this._FocusComposeBox()
+        Send "^a{Backspace}"
+        Sleep 100
+        this.RestoreClipboardArchive(path)
+        Send "^v"
+        Sleep this.config.PasteDelayMs + 200
+        if beforeSend
+            beforeSend.Call()
+        Send "{Enter}"
+        Sleep this.config.SendDelayMs
+        return true
+    }
+
+    ; Paste every archived image into compose, then send once.
+    PasteMediaBatchInSession(paths, beforeSend := 0) {
+        if this.publishGroup = ""
+            throw Error("Chưa mở publish session.")
+        if !paths.Length
+            return true
+        this._FocusComposeBox()
+        Send "^a{Backspace}"
+        Sleep 100
+        for path in paths {
+            this.RestoreClipboardArchive(path)
+            Send "^v"
+            Sleep this.config.PasteDelayMs + 200
+        }
+        if beforeSend
+            beforeSend.Call()
+        Send "{Enter}"
+        Sleep this.config.SendDelayMs
+        return true
+    }
+
     SendTextInSession(message, beforeSend := 0) {
         if this.publishGroup = ""
             throw Error("Chưa mở publish session.")
         this._PasteAndSend(message, true, beforeSend)
         Sleep this.config.BetweenMessagesMs
+        return true
+    }
+
+    ForwardListingMessage(sourceGroup, targetGroup, messageHash, roomCode := "") {
+        if this.publishGroup = ""
+            throw Error("Chưa mở publish session.")
+        params := Map(
+            "source_group", sourceGroup,
+            "target_group", targetGroup,
+            "message_hash", messageHash
+        )
+        if Trim(roomCode) != ""
+            params["room_code"] := roomCode
+        result := this.bridge.RunCommand("forward_message", params, 90000, "bot")
+        opened := result.Has("group") ? result["group"] : targetGroup
+        if !this._GroupNamesMatch(opened, targetGroup)
+            throw Error("Forward xong nhưng chưa ở nhóm output: '" opened "'")
+        this.publishGroup := targetGroup
+        this.currentGroup := opened
+        this._FocusComposeBox()
         return true
     }
 

@@ -11,6 +11,7 @@
 #Include ../src/SourceGroupFile.ahk
 #Include ../src/BlockList.ahk
 #Include ../src/Parser.ahk
+#Include ../src/OutputRouter.ahk
 #Include ../src/Composer.ahk
 #Include ../src/StateStore.ahk
 #Include ../src/GroupActivity.ahk
@@ -47,14 +48,12 @@ Section(name) {
 
 ; Cấu hình giả lập, chỉ chứa những property các class dưới test thực sự dùng.
 class TestConfig {
-    Separator := "------------{group}------------"
     MaxMessageChars := 1800
     MaskPhone := true
     PhoneHint := 'Nhắn bot "SĐT {room_code}" để lấy số'
     OneMessagePerListing := true
     ListingsPerMessage := 1
     ListingSeparator := "======="
-    IncludeGroupHeader := false
     BlocklistXlsx := ""
     BlocklistSheet := "Blocklist"
     BlocklistCsv := ""
@@ -117,6 +116,11 @@ class SchedulerTestConfig {
     HarvestInitialFullScan := true
     HarvestMaxGroupsPerCycle := 2
     HarvestAuditGroupsPerCycle := 1
+    WatchOnlyUnreadAfterFirstCycle := false
+}
+
+class UnreadOnlySchedulerTestConfig extends SchedulerTestConfig {
+    WatchOnlyUnreadAfterFirstCycle := true
 }
 
 class FakeHarvestScheduleState {
@@ -135,6 +139,7 @@ class HarvesterTestConfig {
     ImageMarkerPattern := ""
     RequiredFields := []
     MaxMessagesPerGroup := 50
+    MaxScanMessages := 20
     AutoCapture := false
     AutoCaptureProbeImages := false
     HarvestSaveStateEachGroup := true
@@ -155,8 +160,19 @@ class ForwardCaptureTestConfig {
 }
 
 class FakeCaptureUI {
-    FindImageBubblesNearMessage(anchor, limit, allowHeuristic) {
-        return [Map("x", 100, "y", 100)]
+    currentGroup := ""
+
+    OpenGroup(groupName, focus := "read") {
+        this.currentGroup := groupName
+        return true
+    }
+
+    _GroupNamesMatch(actual, expected) {
+        return StrLower(Trim(actual)) = StrLower(Trim(expected))
+    }
+
+    FindImageBubblesNearMessage(anchor, limit, allowHeuristic, messageHash := "") {
+        return [Map("x", 100, "y", 100, "url", "https://photo.zdn.vn/probe.jpg")]
     }
 
     CopyImageAt(location) {
@@ -169,8 +185,15 @@ class FakeCaptureUI {
     }
 }
 
+class EmptyImageCaptureUI extends FakeCaptureUI {
+    FindImageBubblesNearMessage(anchor, limit, allowHeuristic, messageHash := "") {
+        return []
+    }
+}
+
 class FakeCaptureMedia {
     __New() {
+        this.root := ""
         this.trusted := Map()
         this.files := Map()
     }
@@ -183,14 +206,29 @@ class FakeCaptureMedia {
         return this.files.Has(id)
     }
 
-    PrepareArchive(id, append := false) {
+    PrepareArchive(id, append := false, extension := "clip") {
         dir := A_Temp "\zalo-fake-capture\" id
-        EnsureDir(dir)
-        return Map("id", id, "temp_path", dir "\bundle.clip", "append", append)
+        genDir := dir "\generations\test-gen"
+        EnsureDir(genDir)
+        ext := extension != "" ? extension : "clip"
+        return Map(
+            "listing_id", id,
+            "id", id,
+            "listing_dir", dir,
+            "generation", "test-gen",
+            "generation_dir", genDir,
+            "temp_path", genDir "\incoming.tmp",
+            "target_path", genDir "\bundle." ext)
     }
 
     CommitGeneration(prepared) {
-        this.files[prepared["id"]] := [prepared["id"] "\bundle.clip"]
+        if FileExist(prepared["temp_path"])
+            FileMove prepared["temp_path"], prepared["target_path"], 1
+        rel := prepared["listing_id"] "\" RegExReplace(prepared["target_path"], "^.*\\", "")
+        listingId := prepared["listing_id"]
+        if !this.files.Has(listingId)
+            this.files[listingId] := []
+        this.files[listingId].Push(rel)
     }
 
     AbortGeneration(prepared) {
@@ -220,10 +258,15 @@ class FakeCaptureMedia {
 class FakeCaptureQueue {
     __New() {
         this.attached := []
+        this.invalidated := []
     }
 
     AttachMedia(id, files, metadata := 0) {
         this.attached.Push(id)
+    }
+
+    InvalidateMedia(id, reason := "", required := true) {
+        this.invalidated.Push(Map("id", id, "reason", reason, "required", required))
     }
 }
 
@@ -232,6 +275,8 @@ class FakeHarvesterUI {
         this.captures := captures
         this.captureIndex := 0
         this.opened := []
+        this.lastMaxMessages := 0
+        this.maxMessagesLog := []
     }
 
     OpenGroup(groupName, focus := "read") {
@@ -239,7 +284,9 @@ class FakeHarvesterUI {
         return true
     }
 
-    CaptureConversation(method := "") {
+    CaptureConversation(method := "", maxMessages := 0) {
+        this.lastMaxMessages := maxMessages
+        this.maxMessagesLog.Push(maxMessages)
         this.captureIndex++
         if this.captureIndex > this.captures.Length
             value := this.captures[this.captures.Length]
@@ -322,6 +369,12 @@ class FakeHarvesterBlockList {
     }
 }
 
+class AtAllHarvestBlockList {
+    Match(text) {
+        return InStr(text, "@All") ? "@All" : ""
+    }
+}
+
 class FakeHarvesterRegistry {
     SourceGroups() {
         return []
@@ -346,9 +399,12 @@ class FakePublisherUI {
     __New() {
         this.events := []
         this.failText := false
+        this.failForward := false
+        this.currentGroup := ""
     }
 
     BeginPublishSession(groupName) {
+        this.currentGroup := groupName
         this.events.Push("begin:" groupName)
     }
 
@@ -367,6 +423,23 @@ class FakePublisherUI {
         this.events.Push("enter:media")
     }
 
+    PasteMediaBatchInSession(paths, beforeSend := 0) {
+        for path in paths
+            this.events.Push("restore:" path)
+        this.events.Push("paste:batch:" this.currentGroup)
+        if beforeSend
+            beforeSend.Call()
+        this.events.Push("enter:media")
+    }
+
+    PasteOneMediaInSession(path, beforeSend := 0) {
+        this.events.Push("restore:" path)
+        this.events.Push("paste:single:" this.currentGroup)
+        if beforeSend
+            beforeSend.Call()
+        this.events.Push("enter:media")
+    }
+
     SendTextInSession(message, beforeSend := 0) {
         this.events.Push("paste:text")
         if beforeSend
@@ -374,6 +447,14 @@ class FakePublisherUI {
         if this.failText
             throw Error("simulated crash after text intent")
         this.events.Push("enter:text")
+    }
+
+    ForwardListingMessage(sourceGroup, targetGroup, messageHash, roomCode := "") {
+        this.currentGroup := sourceGroup
+        this.events.Push("forward:" sourceGroup "->" targetGroup ":" messageHash)
+        if this.failForward
+            throw Error("simulated forward failure")
+        this.currentGroup := targetGroup
     }
 }
 
@@ -398,10 +479,16 @@ class FakeFivePublisherRegistry {
             Map("group_name", "Main A"),
             Map("group_name", "Main B"),
             Map("group_name", "Main C"),
-            Map("group_name", "Main D"),
-            Map("group_name", "Main E")
+            Map("group_name", "Main D")
         ]
     }
+}
+
+ApplyPublisherRoutingConfig(cfg) {
+    cfg.OutputRouteGroupQuanSo := "Main C"
+    cfg.OutputRouteGroupNgoaiThanh := "Main D"
+    cfg.OutputRouteGroupUnder59 := "Main A"
+    cfg.OutputRouteGroupOver6 := "Main B"
 }
 
 class FakePublisherRepository {
@@ -432,12 +519,26 @@ class FakePublisherRepository {
 }
 
 class FakePublisherMedia {
+    __New() {
+        this.groupMap := Map()
+    }
+
+    SetGroups(id, groups) {
+        this.groupMap[id] := groups
+    }
+
     Resolve(path) {
         return path
     }
 
     IsTrusted(id) {
         return true
+    }
+
+    ImageGroupsFor(id) {
+        if this.groupMap.Has(id)
+            return this.groupMap[id]
+        return []
     }
 }
 
@@ -450,11 +551,16 @@ MakeQueueRecord(index, imageCount := 0) {
     )
 }
 
-MakePublisherRecord(index, imageCount := 0) {
+MakePublisherRecord(index, imageCount := 0, forwardEligible := 0, price := "4tr", address := "") {
     record := MakeQueueRecord(index, imageCount)
     for key in ["address", "price", "electric_price", "water_price",
         "utility_price", "service_price", "owner_phone", "info", "extra_info"]
-        record[key] := key = "address" ? "Address " index : ""
+        record[key] := ""
+    record["price"] := price
+    record["address"] := address != "" ? address : "Address " index
+    record["source_group"] := "Nhóm Nguồn"
+    record["message_hash"] := "hash" index
+    record["forward_eligible"] := forwardEligible
     return record
 }
 
@@ -663,14 +769,15 @@ Check("MaskPhone=1 không lộ SĐT", !InStr(masked, "0901234567"))
 Check("output có mã phòng", InStr(masked, "🔑 mã phòng: P009") > 0, masked)
 Check("output template tên nhóm", InStr(masked, "🏷️ tên nhóm: Nhóm Test") > 0, masked)
 shown := ListingParser.FormatBlock(listing, false, cfg.PhoneHint)
-Check("MaskPhone=0 hiện SĐT chủ trọ",
-    InStr(shown, "📞 số điện thoại của chủ trọ: 0901234567") > 0, shown)
-Check("MaskPhone=0 kèm nhà mạng", InStr(shown, "Mobifone") > 0, shown)
+Check("output loại bỏ dòng SĐT",
+    !InStr(masked, "số điện thoại của chủ trọ")
+    && !InStr(shown, "số điện thoại của chủ trọ")
+    && !InStr(shown, "0901234567"), shown)
 emptyPhone := ListingParser.FormatBlock(
     Map("address", "X", "room_code", "P1", "price", "5tr", "owner_phone", "",
         "source_group", "G"), false, "")
-Check("thiếu SĐT thành -",
-    InStr(emptyPhone, "📞 số điện thoại của chủ trọ: -") > 0, emptyPhone)
+Check("output không thêm SĐT khi thiếu",
+    !InStr(emptyPhone, "số điện thoại của chủ trọ"), emptyPhone)
 missingFields := ListingParser.FormatBlock(
     Map("raw_text", "Phòng trống", "source_group", "Nhóm Thiếu"),
     false, "")
@@ -681,6 +788,272 @@ Check("field thiếu hiển thị dấu gạch",
     missingFields)
 Check("output không có viền gạch",
     !InStr(missingFields, "-----------------------------------"), missingFields)
+
+Section("clean listing promo + utilities")
+g01Raw := "
+(
+Mã phòng: G01
+Còn 2 mã phòng, nhờ mọi người chạy giúp nhé! Thanks all!📍1042 CMT8 Phường Tân Sơn NhấtBấm vào đây để tham gia cộng đồng trên Zalo zalo.me/g/auu0jd5iz2o50n1xr5r6
+🧺Full nội thất, máy giặt mới 100% riêng từng phòng | 2 người 2 xe | 🚿 Máy nước nóng | ⭐️ Dịch vụ: 200k, Điện: 4k, Nước: 100k/ người | 📱Liên hệ: 0981643438 | 🎉 Link nhóm: https://zalo.me/g/auu0jd5iz2o50n1xr5r6
+Giá: 5tr
+)"
+g01 := ListingParser.Parse(g01Raw)
+g01["source_group"] := "Cộng đồng CHDV"
+g01Out := ListingParser.FormatBlock(g01, false, "")
+Check("G01 bỏ text nhờ chạy giúp",
+    !InStr(g01Out, "nhờ mọi người") && !InStr(g01Out, "zalo.me"))
+Check("G01 địa chỉ từ pin",
+    InStr(g01["address"], "1042 CMT8") > 0
+    && InStr(g01["address"], "Tân Sơn Nhất") > 0)
+Check("G01 giá dịch vụ",
+    g01["service_price"] = "200k", g01["service_price"])
+Check("G01 giá điện nước inline",
+    g01["electric_price"] = "4k" && g01["water_price"] = "100k/ người")
+Check("G01 format giá điện nước",
+    InStr(g01Out, "⚡ giá điện nước: 4k điện, 100k nước/người") > 0, g01Out)
+Check("G01 format giá dịch vụ",
+    InStr(g01Out, "🧾 giá dịch vụ: 200k") > 0, g01Out)
+Check("G01 giữ info nội thất",
+    InStr(g01["info"], "Full nội thất") > 0, g01["info"])
+
+Section("rental-only filter")
+emojiPromoRaw := "
+(
+♨️ Đầu tháng 9 trống phòng ngủ tách bếp
+🔥 Chốt đúng giá thưởng nóng 500k
+• Mã phòng: 401
+• Giá: 5tr5
+• Địa chỉ: 12 Lê Lợi, Quận 1
+)"
+emojiPromo := ListingParser.Parse(emojiPromoRaw)
+emojiPromoOut := ListingParser.FormatBlock(emojiPromo, false, "")
+Check("P401 qualify as rental",
+    ListingParser.QualifiesAsRentalListing(emojiPromo))
+Check("P401 bỏ thưởng nóng khỏi output",
+    !InStr(emojiPromoOut, "thưởng nóng") && !InStr(emojiPromoOut, "Chốt đúng giá"),
+    emojiPromoOut)
+Check("P401 giữ mô tả phòng",
+    InStr(emojiPromoOut, "trống phòng") > 0 || InStr(emojiPromo["info"], "trống phòng") > 0,
+    emojiPromoOut " | " emojiPromo["info"])
+
+thuongRaw := "Trương HùngTHƯỞNG NÓNG 2 TRIỆU TRÊN MỖI PHÒNG 🔥 🔥 🔥"
+thuongListing := ListingParser.Parse(thuongRaw)
+thuongOut := ListingParser.FormatBlock(thuongListing, false, "")
+Check("THƯỞNG NÓNG dính tên vẫn strip",
+    !InStr(thuongOut, "THƯỞNG") && !InStr(thuongOut, "thưởng nóng") && !InStr(thuongOut, "🔥"),
+    thuongOut)
+Check("THƯỞNG NÓNG không lấy giá 2tr",
+    thuongListing["price"] = "" || !RegExMatch(thuongListing["price"], "i)^2\s*tr$"),
+    thuongListing["price"])
+Check("THƯỞNG NÓNG thông tin phòng sạch",
+    !InStr(thuongOut, "TRÊN MỖI PHÒNG"), thuongOut)
+
+purePromoRaw := "
+(
+🎉 Link nhóm: https://zalo.me/g/abc123
+Mời tham gia cộng đồng CHDV trên Zalo
+Bấm vào đây để tham gia cộng đồng zalo.me/g/abc123
+)"
+purePromo := ListingParser.Parse(purePromoRaw)
+Check("pure promo không qualify",
+    !ListingParser.QualifiesAsRentalListing(purePromo))
+Check("pure promo IsPromoOnlyMessage",
+    ListingParser.IsPromoOnlyMessage(purePromoRaw))
+
+amenityRaw := "hẻm xe hơi | 2 người 2 xe | duplex full nội thất"
+amenityListing := ListingParser.Parse("Giá: 5tr`nĐịa chỉ: 10 ABC, Q1`n" amenityRaw)
+Check("amenity whitelist giữ thuộc tính phòng",
+    InStr(amenityListing["info"], "hẻm xe hơi") > 0
+    && InStr(amenityListing["info"], "2 người") > 0
+    && InStr(amenityListing["info"], "duplex") > 0,
+    amenityListing["info"])
+Check("text-only freeform vẫn qualify",
+    ListingParser.QualifiesAsRentalListing(listing))
+
+promoHarvestCapture := Map(
+    "text", purePromoRaw,
+    "group", "Nhóm Promo",
+    "messages", [Map(
+        "text", purePromoRaw,
+        "images", [],
+        "hash", "promo-only-hash")])
+promoHarvestRepo := FakeHarvesterRepository()
+promoHarvestResult := MessageHarvester(
+    HarvesterTestConfig(), FakeHarvesterUI([promoHarvestCapture]),
+    FakeHarvesterRegistry(), FakeHarvesterBlockList(),
+    FakeHarvesterState(), promoHarvestRepo).HarvestGroup("Nhóm Promo")
+Check("harvester bỏ qua pure promo",
+    promoHarvestResult["saved"] = 0 && promoHarvestResult["invalid"] = 1,
+    promoHarvestResult["saved"] " invalid=" promoHarvestResult["invalid"])
+
+Section("listing examples")
+ex1Raw := "
+(
+Gần công viên làng hoa
+478 lê văn thọ gò vấp
+💸 giá 4tr
+-Nội thất: tủ lạnh, kệ bếp, bàn, tủ quần áo , máy lạnh, máy giặt chung
+✅ điện 4k, nước 100k, dv 150k, free 2xe
+-P301 lầu 3: trống sẵn
+🌹 hđ 12 tháng - hh 80%
+)"
+ex1 := ListingParser.Parse(ex1Raw)
+ex1Out := ListingParser.FormatBlock(ex1, false, "")
+Check("ex1 qualify P301",
+    ListingParser.QualifiesAsRentalListing(ex1))
+Check("ex1 giá 4tr",
+    ex1["price"] = "4tr", ex1["price"])
+Check("ex1 mã P301",
+    ex1["room_code"] = "P301", ex1["room_code"])
+Check("ex1 địa chỉ gò vấp",
+    InStr(ex1["address"], "478") > 0 && InStr(ex1["address"], "gò vấp") > 0,
+    ex1["address"])
+Check("ex1 điện nước dv",
+    ex1["electric_price"] = "4k"
+    && ex1["water_price"] = "100k"
+    && ex1["service_price"] = "150k",
+    ex1["electric_price"] " / " ex1["water_price"] " / " ex1["service_price"])
+Check("ex1 bỏ hh/hđ",
+    !InStr(ex1Out, "hh 80") && !InStr(ex1Out, "hđ 12"), ex1Out)
+
+ex2Raw := "
+(
+💥 CĂN HỘ STUDIO Q3 - TRỐNG SẴN
+🌹 HH 40/70% (HĐ 8/14th)
+⚡ Mã G0: Studio, Full NT, wc riêng 👉 5Tr5
+📍 152/8/4 Lý Chính Thắng Quận 3
+• Dịch vụ: 200k/căn hộ (người 3+100k)
+• Điện: 4.3k/kw
+• Nước: 100k/ người
+https://zalo.me/g/zkyspu099
+☎️ SaiGonTro: 0938934842
+)"
+ex2 := ListingParser.Parse(ex2Raw)
+Check("ex2 qualify studio G0",
+    ListingParser.QualifiesAsRentalListing(ex2))
+Check("ex2 mã G0",
+    ex2["room_code"] = "G0", ex2["room_code"])
+Check("ex2 giá 5tr5",
+    InStr(ex2["price"], "5") > 0 && InStr(StrLower(ex2["price"]), "tr") > 0,
+    ex2["price"])
+Check("ex2 địa chỉ Q3",
+    InStr(ex2["address"], "Lý Chính Thắng") > 0, ex2["address"])
+
+ex3Raw := "
+(
+🔥 Tháng 9 trống phòng Duplex gác cao
+➖ Mã Phòng : 105 , 107
+➖ Giá : 4tr5
+👉 Full Nội Thất Như Hình
+👉 Điện 4k , Nước 100k/Ng , PDV 150k
+🌹 80% (HĐ 12 tháng)
+📞 0902812378 - Thiện
+🏡 Địa chỉ : 105 Nguyễn Xí ,P.26,Q.BT
+https://zalo.me/g/xkcxhy938
+)"
+ex3 := ListingParser.Parse(ex3Raw)
+Check("ex3 qualify duplex",
+    ListingParser.QualifiesAsRentalListing(ex3))
+Check("ex3 giá 4tr5",
+    InStr(ex3["price"], "4") > 0 && InStr(StrLower(ex3["price"]), "tr") > 0,
+    ex3["price"])
+Check("ex3 địa chỉ Nguyễn Xí",
+    InStr(ex3["address"], "Nguyễn Xí") > 0, ex3["address"])
+
+ex4Raw := "
+(
+Giá 10tr bancong riêng phòng mới
+2pn full nội thất
+P501 Lầu 5 thang máy
+Đc : 412D Tân kỳ tân quý, tân phú
+Điện 4k
+Nước 100k/ng
+PDV 200k/phòng
+)"
+ex4 := ListingParser.Parse(ex4Raw)
+Check("ex4 qualify P501",
+    ListingParser.QualifiesAsRentalListing(ex4))
+Check("ex4 mã P501",
+    ex4["room_code"] = "P501", ex4["room_code"])
+Check("ex4 giá 10tr",
+    InStr(ex4["price"], "10") > 0, ex4["price"])
+Check("ex4 địa chỉ tân phú",
+    InStr(ex4["address"], "Tân kỳ") > 0 || InStr(ex4["address"], "tân phú") > 0,
+    ex4["address"])
+Check("ex4 pdv 200k",
+    InStr(ex4["service_price"], "200k") > 0, ex4["service_price"])
+
+exCompactRaw := "P201 - 2PN : 8.200.000 ( 20/8 trống )"
+exCompact := ListingParser.Parse(exCompactRaw)
+Check("compact P201 qualify",
+    ListingParser.QualifiesAsRentalListing(exCompact))
+Check("compact P201 mã",
+    exCompact["room_code"] = "P201", exCompact["room_code"])
+Check("compact P201 giá 8tr2",
+    exCompact["price"] = "8tr2", exCompact["price"])
+Check("compact P201 loại 2PN",
+    exCompact["info"] = "2PN", exCompact["info"])
+Check("compact P201 trống 20/8",
+    InStr(exCompact["extra_info"], "20/8 trống") > 0, exCompact["extra_info"])
+Check("compact P201 looks like listing",
+    ListingParser.LooksLikeListing(exCompactRaw))
+
+exNhiRaw := "
+(
+1/9 trống
+
+201/8 Vĩnh Viễn quận 10
+
+Nước 100k/ng
+Phí dv :150k/phòng
+Điện 4k/kwh
+
+P202 full nt , có gác
+
+Giá : 5tr5
+)"
+exNhi := ListingParser.Parse(exNhiRaw)
+Check("nhi qualify",
+    ListingParser.QualifiesAsRentalListing(exNhi))
+Check("nhi mã P202",
+    exNhi["room_code"] = "P202", exNhi["room_code"])
+Check("nhi giá 5tr5",
+    InStr(exNhi["price"], "5tr5") > 0 || InStr(exNhi["price"], "5") > 0,
+    exNhi["price"])
+Check("nhi địa chỉ Vĩnh Viễn Q10",
+    InStr(exNhi["address"], "Vĩnh Viễn") > 0 && InStr(exNhi["address"], "quận 10") > 0,
+    exNhi["address"])
+Check("nhi phí dv 150k",
+    InStr(exNhi["service_price"], "150k") > 0, exNhi["service_price"])
+Check("nhi điện 4k",
+    InStr(exNhi["electric_price"], "4k") > 0, exNhi["electric_price"])
+Check("nhi nước 100k",
+    InStr(exNhi["water_price"], "100k") > 0, exNhi["water_price"])
+Check("nhi info full nt gác",
+    InStr(exNhi["info"], "full nt") > 0 && InStr(exNhi["info"], "gác") > 0,
+    exNhi["info"])
+
+studioGovapRaw := "
+(
+Studio 4xxx
+254/17/2 Lê Văn Thọ P11 Gò Vấp
+102 3.900.000 studio cửa sổ
+202 3.900.000 studio cửa sổ
+Trống sẵn
+Nội thất : máy lạnh tủ áo tủ bếp
+Điện 4k/kw
+Nước 100k/người
+Phí Dv 150k/phòng bao gồm rác wifi phí vệ sinh nhà hàng tuần
+Máy giặt 50k/người. Nếu sài máy giặt riêng thì ko tính
+Cọc 1 50-60
+)"
+studioGovap := ListingParser.Parse(studioGovapRaw)
+Check("studio gò vấp qualify",
+    ListingParser.QualifiesAsRentalListing(studioGovap))
+Check("studio gò vấp có giá",
+    studioGovap["price"] != "", studioGovap["price"])
+Check("studio gò vấp có địa chỉ",
+    InStr(studioGovap["address"], "Lê Văn Thọ") > 0, studioGovap["address"])
 
 ; ── Tách tin + gán ảnh ────────────────────────────────────
 Section("tách tin")
@@ -838,6 +1211,24 @@ continuousRound2 := scheduler.BuildContinuousPlan(schedulerGroups, [])
 Check("vòng 2 24/7 quét lại từ đầu đủ nhóm",
     continuousRound2["groups"].Length = 3
     && continuousRound2["groups"][1]["group_name"] = "Nhóm A")
+unreadOnlyScheduler := HarvestScheduler(UnreadOnlySchedulerTestConfig())
+initialLatestPlan := unreadOnlyScheduler.BuildContinuousPlan(
+    schedulerGroups, [], true)
+Check("vòng đầu quét đủ nhóm và giới hạn một tin mới nhất",
+    initialLatestPlan["mode"] = "initial_latest"
+    && initialLatestPlan["groups"].Length = 3
+    && initialLatestPlan["groups"][1]["unread_count"] = 1
+    && initialLatestPlan["groups"][3]["unread_count"] = 1)
+unreadOnlyPlan := unreadOnlyScheduler.BuildContinuousPlan(
+    schedulerGroups, [Map("name", "Nhóm C", "count", 2)])
+Check("unread-only chỉ chọn nhóm unread và giữ số tin mới",
+    unreadOnlyPlan["mode"] = "unread_only"
+    && unreadOnlyPlan["groups"].Length = 1
+    && unreadOnlyPlan["groups"][1]["group_name"] = "Nhóm C"
+    && unreadOnlyPlan["groups"][1]["unread_count"] = 2)
+emptyUnreadPlan := unreadOnlyScheduler.BuildContinuousPlan(schedulerGroups, [])
+Check("unread-only không quét nhóm khi không có badge",
+    emptyUnreadPlan["groups"].Length = 0)
 
 incrementalState := FakeHarvestScheduleState(Map(
     "Nhóm A", "2026-08-01 10:00:00",
@@ -851,6 +1242,13 @@ Check("vòng sau ưu tiên unread rồi audit nhóm cũ nhất",
     && incrementalPlan["groups"].Length = 2
     && incrementalPlan["groups"][1]["group_name"] = "Nhóm C"
     && incrementalPlan["groups"][2]["group_name"] = "Nhóm A")
+uncappedCfg := SchedulerTestConfig()
+uncappedCfg.HarvestMaxGroupsPerCycle := 0
+uncappedCfg.HarvestAuditGroupsPerCycle := 10
+uncappedPlan := HarvestScheduler(uncappedCfg).BuildPlan(
+    schedulerGroups, incrementalState, ["Nhóm C"])
+Check("MaxGroupsPerCycle=0 harvest đủ nhóm nguồn",
+    uncappedPlan["groups"].Length = 3)
 
 equalStampState := FakeHarvestScheduleState(Map(
     "Nhóm A", "2026-08-01 10:00:00",
@@ -939,6 +1337,13 @@ Check("early-stop: chỉ lấy tin mới hơn seen",
     pickNew["items"].Length = 1
     && pickNew["items"][1]["block"] = newBlock
     && pickNew["stopped_on_seen"])
+pickBelowSeen := MessageActivityScanner.PickUnseenNewestFirst(
+    scanBlocks, (hash) => hash = FnvHash(newBlock), 50)
+Check("cửa sổ scan vẫn lấy tin cũ unseen dưới tin đã seen",
+    pickBelowSeen["items"].Length = 2
+    && pickBelowSeen["stopped_on_seen"]
+    && pickBelowSeen["items"][1]["block"] = midBlock
+    && pickBelowSeen["items"][2]["block"] = oldBlock)
 pickAllNew := MessageActivityScanner.PickUnseenNewestFirst(
     scanBlocks, (hash) => false, 50)
 Check("chưa seen nào thì lấy tất cả newest-first",
@@ -971,6 +1376,31 @@ Check("harvester capture conversation lưu listing",
     harvestResult["saved"] = 1
     && harvestRepo.records.Length = 1
     && harvestUi.captureIndex = 1)
+Check("harvester scan truyền max_messages",
+    harvestUi.lastMaxMessages = 20, harvestUi.lastMaxMessages)
+unreadScanUi := FakeHarvesterUI([validHarvestText])
+unreadScanResult := MessageHarvester(
+    harvestCfg, unreadScanUi, FakeHarvesterRegistry(),
+    FakeHarvesterBlockList(), FakeHarvesterState(), FakeHarvesterRepository()
+).HarvestGroup("Nhóm Test", 1)
+Check("harvester scan cap theo unreadLimit",
+    unreadScanResult["saved"] = 1 && unreadScanUi.lastMaxMessages = 20,
+    unreadScanUi.lastMaxMessages)
+
+atAllText := "@All `n" studioGovapRaw
+atAllCapture := Map(
+    "text", atAllText,
+    "group", "Nhóm All",
+    "messages", [Map("text", atAllText, "images", [], "hash", "atall-hash")])
+atAllResult := MessageHarvester(
+    harvestCfg, FakeHarvesterUI([atAllCapture]),
+    FakeHarvesterRegistry(), AtAllHarvestBlockList(),
+    FakeHarvesterState(), FakeHarvesterRepository()
+).HarvestGroup("Nhóm All")
+Check("harvester không bỏ tin cho thuê chỉ vì @All",
+    atAllResult["saved"] >= 1 && atAllResult["blocked"] = 0,
+    "saved=" atAllResult["saved"] " blocked=" atAllResult["blocked"])
+
 unchangedResult := harvester.HarvestGroup("Nhóm Test")
 Check("harvester capture hash không đổi thì bỏ qua",
     unchangedResult["saved"] = 0
@@ -1028,6 +1458,154 @@ Check("structured message không khớp start regex vẫn được harvest",
     && emojiStructuredRepo.records.Length = 1
     && emojiStructuredRepo.records[1]["room_code"] = "P401"
     && emojiStructuredRepo.records[1]["image_count"] = 1)
+
+dualListingText := "
+(
+Địa chỉ: 10 Nam Kỳ Khởi Nghĩa, Quận 3
+Giá: 4tr
+SĐT: 0901111111
+Địa chỉ: 88 Võ Văn Tần, Quận 3
+Giá: 5tr
+SĐT: 0902222222
+)"
+dualCapture := Map(
+    "text", dualListingText,
+    "group", "Nhóm Dual",
+    "messages", [Map(
+        "text", dualListingText,
+        "images", ["https://photo.zdn.vn/a.jpg", "https://photo.zdn.vn/b.jpg"],
+        "hash", "dual-hash")])
+dualRepo := FakeHarvesterRepository()
+dualResult := MessageHarvester(
+    harvestCfg, FakeHarvesterUI([dualCapture]),
+    FakeHarvesterRegistry(), FakeHarvesterBlockList(),
+    FakeHarvesterState(), dualRepo).HarvestGroup("Nhóm Dual")
+Check("multi-listing một message: lưu 2 phòng",
+    dualResult["saved"] = 2 && dualRepo.records.Length = 2,
+    dualResult["saved"])
+if dualRepo.records.Length = 2 {
+    imgByAddress := Map()
+    for record in dualRepo.records {
+        if InStr(record["address"], "Nam Kỳ")
+            imgByAddress["namky"] := record["image_count"]
+        else if InStr(record["address"], "Võ Văn Tần")
+            imgByAddress["vovan"] := record["image_count"]
+    }
+    Check("ảnh message chỉ gán phòng đầu khi không có marker",
+        imgByAddress["namky"] = 2 && imgByAddress["vovan"] = 0,
+        imgByAddress["namky"] " / " imgByAddress["vovan"])
+}
+
+markedDualText := "
+(
+[Hình ảnh]
+Địa chỉ: 10 A, Quận 1
+Giá: 4tr
+SĐT: 0901111111
+[Hình ảnh]
+Địa chỉ: 20 B, Quận 2
+Giá: 5tr
+SĐT: 0902222222
+)"
+markedDualCapture := Map(
+    "text", markedDualText,
+    "group", "Nhóm Marked Dual",
+    "messages", [Map(
+        "text", markedDualText,
+        "images", ["https://photo.zdn.vn/a.jpg", "https://photo.zdn.vn/b.jpg"],
+        "hash", "marked-dual-hash")])
+markedDualRepo := FakeHarvesterRepository()
+markedDualResult := MessageHarvester(
+    harvestCfg, FakeHarvesterUI([markedDualCapture]),
+    FakeHarvesterRegistry(), FakeHarvesterBlockList(),
+    FakeHarvesterState(), markedDualRepo).HarvestGroup("Nhóm Marked Dual")
+Check("multi-listing có marker: chia ảnh theo marker",
+    markedDualResult["saved"] = 2 && markedDualRepo.records.Length = 2)
+if markedDualRepo.records.Length = 2 {
+    imgMarked := Map()
+    for record in markedDualRepo.records {
+        if InStr(record["address"], "10 A")
+            imgMarked["a"] := record["image_count"]
+        else if InStr(record["address"], "20 B")
+            imgMarked["b"] := record["image_count"]
+    }
+    Check("marker chia 1 ảnh / phòng",
+        imgMarked["a"] = 1 && imgMarked["b"] = 1)
+}
+
+batchGroupCapture := Map(
+    "text", "Địa chỉ: 1 A`nGiá: 4tr",
+    "group", "Nhóm Batch Group",
+    "messages", [Map(
+        "text", "Địa chỉ: 1 A`nGiá: 4tr",
+        "images", [
+            "https://photo.zdn.vn/a.jpg",
+            "https://photo.zdn.vn/b.jpg",
+            "https://photo.zdn.vn/c.jpg",
+            "https://photo.zdn.vn/d.jpg"],
+        "hash", "batch-group-hash")])
+batchGroupRepo := FakeHarvesterRepository()
+batchGroupResult := MessageHarvester(
+    harvestCfg, FakeHarvesterUI([batchGroupCapture]),
+    FakeHarvesterRegistry(), FakeHarvesterBlockList(),
+    FakeHarvesterState(), batchGroupRepo).HarvestGroup("Nhóm Batch Group")
+Check("harvest flat images: lưu 4 URL ảnh",
+    batchGroupResult["saved"] = 1
+    && batchGroupRepo.records[1]["image_count"] = 4
+    && batchGroupRepo.records[1]["image_groups"].Length = 0)
+
+singleGroupCapture := Map(
+    "text", "Địa chỉ: 2 B`nGiá: 5tr",
+    "group", "Nhóm Single Groups",
+    "messages", [Map(
+        "text", "Địa chỉ: 2 B`nGiá: 5tr",
+        "images", [
+            "https://photo.zdn.vn/u1.jpg",
+            "https://photo.zdn.vn/u2.jpg",
+            "https://photo.zdn.vn/u3.jpg"],
+        "hash", "single-group-hash")])
+singleGroupRepo := FakeHarvesterRepository()
+singleGroupResult := MessageHarvester(
+    harvestCfg, FakeHarvesterUI([singleGroupCapture]),
+    FakeHarvesterRegistry(), FakeHarvesterBlockList(),
+    FakeHarvesterState(), singleGroupRepo).HarvestGroup("Nhóm Single Groups")
+Check("harvest flat images: lưu 3 URL ảnh",
+    singleGroupResult["saved"] = 1
+    && singleGroupRepo.records[1]["image_count"] = 3)
+
+groupDualText := "
+(
+Địa chỉ: 10 A, Quận 1
+Giá: 4tr
+SĐT: 0901111111
+Địa chỉ: 20 B, Quận 2
+Giá: 5tr
+SĐT: 0902222222
+)"
+groupDualCapture := Map(
+    "text", groupDualText,
+    "group", "Nhóm Group Dual",
+    "messages", [Map(
+        "text", groupDualText,
+        "images", ["https://photo.zdn.vn/a.jpg", "https://photo.zdn.vn/b.jpg"],
+        "hash", "group-dual-hash")])
+groupDualRepo := FakeHarvesterRepository()
+groupDualResult := MessageHarvester(
+    harvestCfg, FakeHarvesterUI([groupDualCapture]),
+    FakeHarvesterRegistry(), FakeHarvesterBlockList(),
+    FakeHarvesterState(), groupDualRepo).HarvestGroup("Nhóm Group Dual")
+if groupDualRepo.records.Length = 2 {
+    groupImg := Map()
+    for record in groupDualRepo.records {
+        if InStr(record["address"], "10 A")
+            groupImg["a"] := record["image_count"]
+        else if InStr(record["address"], "20 B")
+            groupImg["b"] := record["image_count"]
+    }
+    Check("multi-listing flat: ảnh vào phòng đầu khi không marker",
+        groupDualResult["saved"] = 2
+        && groupImg["a"] = 2 && groupImg["b"] = 0)
+}
 
 blockedState := FakeHarvesterState()
 blockedRepo := FakeHarvesterRepository()
@@ -1153,6 +1731,14 @@ Check("SaveListing ghi per-listing JSON",
     FileExist(repositoryCfg.ListingsDir "\" storedFirst["id"] ".json"))
 Check("GetByRoomCode tìm mã chuẩn hóa",
     repository.GetByRoomCode("202")["id"] = storedFirst["id"])
+forwardListing := ListingParser.Parse(validHarvestText)
+forwardListing["message_hash"] := "abc123"
+forwardListing["forward_eligible"] := 1
+forwardListing["image_count"] := 1
+forwardListing["room_code"] := "PFWD99"
+storedForward := repository.SaveListing(forwardListing, "Nhóm F", "fwd-hash")
+Check("SaveListing giữ forward_eligible", storedForward["forward_eligible"] = 1)
+Check("SaveListing giữ message_hash", storedForward["message_hash"] = "abc123")
 
 ; ── Harvest state (capture snapshot + revisit) ────────────
 Section("harvest state")
@@ -1360,6 +1946,16 @@ mediaStore.WriteManifest("q0010", Map(
 ))
 Check("media bitmap có manifest v2 là trusted",
     mediaStore.IsTrusted("q0010"))
+WriteTextFile(mediaStore.BundlePath("groups-per-file"), "bundle")
+WriteTextFile(mediaStore.NumberedPath("groups-per-file", 1), "second")
+groupsPerFile := mediaStore.ImageGroupsFor("groups-per-file")
+Check("ImageGroupsFor trả 1 group / file",
+    groupsPerFile.Length = 2
+    && groupsPerFile[1]["mode"] = "single"
+    && groupsPerFile[2]["mode"] = "single")
+legacyGroups := mediaStore.ImageGroupsFor("legacy-batch")
+Check("ImageGroupsFor listing không file trả rỗng",
+    legacyGroups.Length = 0)
 Check("media store giữ bundle + numbered",
     mediaStore.FilesFor("q0010").Length = 2)
 Check("media paths lưu relative",
@@ -1495,10 +2091,54 @@ Check("migration sort giữ version phòng mới nhất",
     && migrateQueue.Get("legacy-new")["status"] = "ready")
 
 ; Publisher integration with fake UI: media before text, single output group.
+Section("output routing")
+Check("ParsePriceVnd 5tr9", ListingOutputRouter.ParsePriceVnd("5tr9") = 5900000)
+Check("ParsePriceVnd 4tr5", ListingOutputRouter.ParsePriceVnd("4tr5") = 4500000)
+Check("ParsePriceVnd 6 triệu", ListingOutputRouter.ParsePriceVnd("6 triệu") = 6000000)
+Check("ParsePriceVnd 5.9 triệu", ListingOutputRouter.ParsePriceVnd("5.9 triệu") = 5900000)
+Check("ParsePriceVnd 5950000 raw", ListingOutputRouter.ParsePriceVnd("5950000") = 5950000)
+Check("ClassifyDistrict quận số", ListingOutputRouter.ClassifyDistrict("123 X, Quận 1") = "quan_so")
+Check("ClassifyDistrict Q10", ListingOutputRouter.ClassifyDistrict("254 Hoàng, Q10") = "quan_so")
+Check("ClassifyDistrict Bình Thạnh", ListingOutputRouter.ClassifyDistrict("Nguyễn X, Bình Thạnh") = "quan_so")
+Check("ClassifyDistrict Phú Nhuận", ListingOutputRouter.ClassifyDistrict("Phú Nhuận") = "quan_so")
+Check("ClassifyDistrict ngoại thành", ListingOutputRouter.ClassifyDistrict("Quận Gò Vấp") = "ngoai_thanh")
+Check("ClassifyDistrict none", ListingOutputRouter.ClassifyDistrict("123 đường X") = "none")
+
+routingCfg := QueueTestConfig(A_Temp "\zalo-router-tests")
+ApplyPublisherRoutingConfig(routingCfg)
+routeQuan1 := ListingOutputRouter.ResolveOutputGroup(
+    Map("address", "Quận 1", "price", "7tr", "raw_text", ""), routingCfg)
+Check("route ưu tiên quận số trước giá",
+    routeQuan1["group"] = "Main C" && routeQuan1["reason"] = "quan_so")
+routeGoVap := ListingOutputRouter.ResolveOutputGroup(
+    Map("address", "Quận Gò Vấp", "price", "7tr", "raw_text", ""), routingCfg)
+Check("route ngoại thành",
+    routeGoVap["group"] = "Main D" && routeGoVap["reason"] = "ngoai_thanh")
+routeCheap := ListingOutputRouter.ResolveOutputGroup(
+    Map("address", "", "price", "4tr", "raw_text", "Giá: 4tr"), routingCfg)
+Check("route giá dưới 5tr9",
+    routeCheap["group"] = "Main A" && routeCheap["reason"] = "price_under59")
+routeExp := ListingOutputRouter.ResolveOutputGroup(
+    Map("address", "", "price", "6tr", "raw_text", ""), routingCfg)
+Check("route giá từ 6tr",
+    routeExp["group"] = "Main B" && routeExp["reason"] = "price_over6")
+routeGap := ListingOutputRouter.ResolveOutputGroup(
+    Map("address", "", "price", "5tr95", "raw_text", ""), routingCfg)
+Check("route khoảng giá không khớp",
+    routeGap["group"] = "" && routeGap["reason"] = "no_match")
+soloRouteCfg := QueueTestConfig(A_Temp "\zalo-router-single")
+soloRouteCfg.OutputGroupNames := ["Nguyễn Hoàng Vũ"]
+soloRoute := ListingOutputRouter.ResolveOutputGroup(
+    Map("address", "", "price", "5tr95", "raw_text", ""), soloRouteCfg)
+Check("1 output fallback no_match",
+    soloRoute["group"] = "Nguyễn Hoàng Vũ"
+    && soloRoute["reason"] = "fallback_single_output")
+
 publisherRoot := A_Temp "\zalo-publisher-tests"
 if DirExist(publisherRoot)
     DirDelete publisherRoot, true
 publisherCfg := QueueTestConfig(publisherRoot)
+ApplyPublisherRoutingConfig(publisherCfg)
 publisherCfg.MaxBatchesPerSession := 5
 publisherQueue := PublishQueueStore(publisherCfg)
 publisherRecords := []
@@ -1521,19 +2161,161 @@ Check("publisher hoàn thành 5 phòng / 1 nhóm (1 phòng/lease)",
         publisherSummary["rooms"], publisherSummary["messages"]))
 Check("publisher gửi media trước text",
     InStr(publisherTrace, "restore:") > 0
-    && InStr(publisherTrace, "restore:") < InStr(publisherTrace, "paste:text"))
+    && InStr(publisherTrace, "paste:batch") > 0
+    && InStr(publisherTrace, "paste:batch") < InStr(publisherTrace, "paste:text"))
 Check("checkpoint đủ output group",
     publisherQueue.Get("q0101")["deliveries"]["Main A"]["text_sent"] = 1)
 
-; One tab navigates through every configured output group sequentially.
+forwardRoot := A_Temp "\zalo-publisher-forward-tests"
+if DirExist(forwardRoot)
+    DirDelete forwardRoot, true
+forwardCfg := QueueTestConfig(forwardRoot)
+ApplyPublisherRoutingConfig(forwardCfg)
+forwardCfg.MaxBatchesPerSession := 1
+forwardQueue := PublishQueueStore(forwardCfg)
+forwardRecord := MakePublisherRecord(800, 2, 1)
+forwardQueue.Enqueue(forwardRecord)
+forwardUi := FakePublisherUI()
+forwardSvc := DurableListingPublisher(
+    forwardCfg, forwardUi, FakePublisherRegistry(),
+    MessageComposer(cfg), forwardQueue,
+    FakePublisherRepository([forwardRecord]), FakePublisherMedia())
+forwardSummary := forwardSvc.RunSession()
+forwardTrace := StrJoin(forwardUi.events, "|")
+Check("forward_eligible gửi forward trước text",
+    forwardSummary["rooms"] = 1
+    && InStr(forwardTrace, "forward:") > 0
+    && InStr(forwardTrace, "forward:") < InStr(forwardTrace, "paste:text"))
+Check("checkpoint forward_sent",
+    forwardQueue.Get(forwardRecord["id"])["deliveries"]["Main A"]["forward_sent"] = 1)
+
+waiveRoot := A_Temp "\zalo-publisher-waive-media-tests"
+if DirExist(waiveRoot)
+    DirDelete waiveRoot, true
+waiveCfg := QueueTestConfig(waiveRoot)
+ApplyPublisherRoutingConfig(waiveCfg)
+waiveCfg.MediaRequired := true
+waiveCfg.MaxBatchesPerSession := 1
+waiveQueue := PublishQueueStore(waiveCfg)
+waiveRecord := MakePublisherRecord(820, 3)
+waiveQueue.Enqueue(waiveRecord)
+Check("enqueue có ảnh = media_pending",
+    waiveQueue.Get(waiveRecord["id"])["status"] = "media_pending")
+waiveQueue.InvalidateMedia(waiveRecord["id"], "capture_failed", false)
+Check("capture fail waive → ready",
+    waiveQueue.Get(waiveRecord["id"])["status"] = "ready"
+    && waiveQueue.Get(waiveRecord["id"])["media_status"] = "none")
+waiveUi := FakePublisherUI()
+waiveSvc := DurableListingPublisher(
+    waiveCfg, waiveUi, FakePublisherRegistry(),
+    MessageComposer(cfg), waiveQueue,
+    FakePublisherRepository([waiveRecord]), FakePublisherMedia())
+waiveSummary := waiveSvc.RunSession()
+waiveTrace := StrJoin(waiveUi.events, "|")
+Check("waived media paste text không throw",
+    waiveSummary["rooms"] = 1 && waiveSummary["failed"] = 0
+    && InStr(waiveTrace, "paste:text") > 0
+    && InStr(waiveTrace, "restore:") = 0)
+
+noFwdRoot := A_Temp "\zalo-publisher-skip-forward-tests"
+if DirExist(noFwdRoot)
+    DirDelete noFwdRoot, true
+noFwdCfg := QueueTestConfig(noFwdRoot)
+ApplyPublisherRoutingConfig(noFwdCfg)
+noFwdCfg.MaxBatchesPerSession := 1
+noFwdQueue := PublishQueueStore(noFwdCfg)
+noFwdRecord := MakePublisherRecord(821, 2, 1)
+noFwdQueue.Enqueue(noFwdRecord)
+noFwdQueue.AttachMedia(noFwdRecord["id"], ["821\001.clip"])
+noFwdUi := FakePublisherUI()
+noFwdSvc := DurableListingPublisher(
+    noFwdCfg, noFwdUi, FakePublisherRegistry(),
+    MessageComposer(cfg), noFwdQueue,
+    FakePublisherRepository([noFwdRecord]), FakePublisherMedia())
+noFwdSummary := noFwdSvc.RunSession(1, true, false)
+noFwdTrace := StrJoin(noFwdUi.events, "|")
+Check("watch skip forward, paste archive tại output",
+    noFwdSummary["rooms"] = 1
+    && InStr(noFwdTrace, "forward:") = 0
+    && InStr(noFwdTrace, "paste:batch") > 0
+    && InStr(noFwdTrace, "paste:text") > 0)
+
+fallbackRoot := A_Temp "\zalo-publisher-forward-fallback-tests"
+if DirExist(fallbackRoot)
+    DirDelete fallbackRoot, true
+fallbackCfg := QueueTestConfig(fallbackRoot)
+ApplyPublisherRoutingConfig(fallbackCfg)
+fallbackCfg.MaxBatchesPerSession := 1
+fallbackQueue := PublishQueueStore(fallbackCfg)
+fallbackRecord := MakePublisherRecord(801, 1, 1)
+fallbackQueue.Enqueue(fallbackRecord)
+fallbackQueue.AttachMedia(fallbackRecord["id"], ["801\001.clip"])
+fallbackUi := FakePublisherUI()
+fallbackUi.failForward := true
+fallbackSvc := DurableListingPublisher(
+    fallbackCfg, fallbackUi, FakePublisherRegistry(),
+    MessageComposer(cfg), fallbackQueue,
+    FakePublisherRepository([fallbackRecord]), FakePublisherMedia())
+fallbackSummary := fallbackSvc.RunSession()
+fallbackTrace := StrJoin(fallbackUi.events, "|")
+Check("forward lỗi mở lại output trước khi paste archive",
+    fallbackSummary["rooms"] = 1
+    && InStr(fallbackTrace, "forward:") > 0
+    && InStr(fallbackTrace, "begin:Main A", false,
+        InStr(fallbackTrace, "forward:")) > 0
+    && InStr(fallbackTrace, "paste:batch:Main A") > 0,
+    fallbackTrace)
+
+; Publish: paste toàn bộ archive rồi gửi một lần.
+groupsRoot := A_Temp "\zalo-publisher-image-groups-tests"
+if DirExist(groupsRoot)
+    DirDelete groupsRoot, true
+groupsCfg := QueueTestConfig(groupsRoot)
+ApplyPublisherRoutingConfig(groupsCfg)
+groupsCfg.MaxBatchesPerSession := 2
+groupsQueue := PublishQueueStore(groupsCfg)
+
+multiImageRecord := MakePublisherRecord(901, 4)
+groupsQueue.Enqueue(multiImageRecord)
+groupsQueue.AttachMedia(multiImageRecord["id"], [
+    "901\001.clip", "901\002.clip", "901\003.clip", "901\004.clip"])
+multiImageUi := FakePublisherUI()
+multiImageSvc := DurableListingPublisher(
+    groupsCfg, multiImageUi, FakePublisherRegistry(),
+    MessageComposer(cfg), groupsQueue,
+    FakePublisherRepository([multiImageRecord]), FakePublisherMedia())
+multiImageSvc.RunSession()
+multiImageTrace := StrJoin(multiImageUi.events, "|")
+Check("publish 4 ảnh trong một batch",
+    InStr(multiImageTrace, "paste:batch") > 0
+    && !InStr(multiImageTrace, "paste:single")
+    && InStr(multiImageTrace, "901\004.clip") > 0)
+
+legacyGroupRecord := MakePublisherRecord(904, 2)
+groupsQueue.Enqueue(legacyGroupRecord)
+groupsQueue.AttachMedia(legacyGroupRecord["id"], [
+    "904\001.clip", "904\002.clip"])
+legacyGroupUi := FakePublisherUI()
+legacyGroupSvc := DurableListingPublisher(
+    groupsCfg, legacyGroupUi, FakePublisherRegistry(),
+    MessageComposer(cfg), groupsQueue,
+    FakePublisherRepository([legacyGroupRecord]), FakePublisherMedia())
+legacyGroupSvc.RunSession()
+legacyGroupTrace := StrJoin(legacyGroupUi.events, "|")
+Check("publish 2 ảnh trong một batch",
+    InStr(legacyGroupTrace, "paste:batch") > 0
+    && !InStr(legacyGroupTrace, "paste:single"))
+
+; Routing sends each listing to exactly one output group.
 multiRoot := A_Temp "\zalo-publisher-multi-output-tests"
 if DirExist(multiRoot)
     DirDelete multiRoot, true
 multiCfg := QueueTestConfig(multiRoot)
+ApplyPublisherRoutingConfig(multiCfg)
 multiCfg.MaxBatchesPerSession := 1
 multiCfg.MediaRequired := true
 multiQueue := PublishQueueStore(multiCfg)
-multiRecord := MakePublisherRecord(650, 0)
+multiRecord := MakePublisherRecord(650, 0, 0, "7tr", "123 X, Quận 1")
 multiQueue.Enqueue(multiRecord)
 multiUi := FakePublisherUI()
 multiSvc := DurableListingPublisher(
@@ -1542,26 +2324,27 @@ multiSvc := DurableListingPublisher(
 multiSummary := multiSvc.RunSession()
 multiTrace := StrJoin(multiUi.events, "|")
 multiEntry := multiQueue.Get(multiRecord["id"])
-Check("single-tab publish tuần tự nhiều output",
+Check("routing quận số chỉ gửi một nhóm",
     multiSummary["rooms"] = 1
-    && multiSummary["messages"] = 2
-    && InStr(multiTrace, "begin:Main A") > 0
-    && InStr(multiTrace, "begin:Main B") > InStr(multiTrace, "begin:Main A"))
+    && multiSummary["messages"] = 1
+    && InStr(multiTrace, "begin:Main C") > 0
+    && !InStr(multiTrace, "begin:Main A"))
 Check("publisher cho phép text-only khi image_count=0",
     !InStr(multiTrace, "restore:") && InStr(multiTrace, "paste:text") > 0)
-Check("checkpoint đủ từng output",
-    multiEntry["deliveries"]["Main A"]["text_sent"] = 1
-    && multiEntry["deliveries"]["Main B"]["text_sent"] = 1)
+Check("checkpoint chỉ nhóm quận số",
+    multiEntry["deliveries"]["Main C"]["text_sent"] = 1
+    && !multiEntry["deliveries"].Has("Main A"))
 
 fiveRoot := A_Temp "\zalo-publisher-five-output-tests"
 if DirExist(fiveRoot)
     DirDelete fiveRoot, true
 fiveCfg := QueueTestConfig(fiveRoot)
+ApplyPublisherRoutingConfig(fiveCfg)
 fiveCfg.MaxBatchesPerSession := 1
 fiveCfg.MediaRequired := true
 fiveQueue := PublishQueueStore(fiveCfg)
-fiveTextRecord := MakePublisherRecord(651, 0)
-fiveImageRecord := MakePublisherRecord(652, 2)
+fiveTextRecord := MakePublisherRecord(651, 0, 0, "4tr", "")
+fiveImageRecord := MakePublisherRecord(652, 2, 0, "6tr", "")
 fiveQueue.Enqueue(fiveTextRecord)
 fiveQueue.Enqueue(fiveImageRecord)
 Check("fixture không ảnh vào ready, có ảnh chờ media",
@@ -1574,12 +2357,12 @@ fiveSvc := DurableListingPublisher(
 fiveSummary := fiveSvc.RunSession()
 fiveTrace := StrJoin(fiveUi.events, "|")
 fiveEntry := fiveQueue.Get(fiveTextRecord["id"])
-Check("text-only gửi tuần tự 5 nhóm output",
+Check("routing giá dưới 5tr9 chỉ gửi một nhóm",
     fiveSummary["rooms"] = 1
-    && fiveSummary["messages"] = 5
+    && fiveSummary["messages"] = 1
     && InStr(fiveTrace, "begin:Main A") > 0
-    && InStr(fiveTrace, "begin:Main E") > InStr(fiveTrace, "begin:Main D")
-    && fiveEntry["deliveries"]["Main E"]["text_sent"] = 1)
+    && !InStr(fiveTrace, "begin:Main B")
+    && fiveEntry["deliveries"]["Main A"]["text_sent"] = 1)
 Check("listing có ảnh chưa archive không bị lease cùng text-only",
     fiveQueue.Get(fiveImageRecord["id"])["status"] = "media_pending")
 
@@ -1588,6 +2371,7 @@ oneRoot := A_Temp "\zalo-publisher-one-room-tests"
 if DirExist(oneRoot)
     DirDelete oneRoot, true
 oneCfg := QueueTestConfig(oneRoot)
+ApplyPublisherRoutingConfig(oneCfg)
 oneCfg.MaxBatchesPerSession := 2
 oneCfg.SendSeparatorAsMessage := true
 oneCfg.ListingSeparator := "======="
@@ -1599,24 +2383,36 @@ Loop 2 {
     oneQueue.Enqueue(record)
     oneQueue.AttachMedia(record["id"], [record["id"] "\bundle.clip"])
 }
+batchRecord := MakePublisherRecord(750, 2)
+oneRecords.Push(batchRecord)
+oneQueue.Enqueue(batchRecord)
+oneQueue.AttachMedia(batchRecord["id"], [
+    batchRecord["id"] "\001.clip",
+    batchRecord["id"] "\002.clip"])
 oneUi := FakePublisherUI()
 oneComposer := MessageComposer(cfg)
 oneComposer.config.ListingSeparator := "======="
 oneSvc := DurableListingPublisher(
     oneCfg, oneUi, FakePublisherRegistry(), oneComposer,
     oneQueue, FakePublisherRepository(oneRecords), FakePublisherMedia())
-oneSummary := oneSvc.RunSession(2)
+oneSummary := oneSvc.RunSession(3)
 oneTrace := StrJoin(oneUi.events, "|")
-Check("one-room session gửi 2 phòng",
-    oneSummary["rooms"] = 2, oneSummary["rooms"])
+Check("one-room session gửi 3 phòng",
+    oneSummary["rooms"] = 3, oneSummary["rooms"])
 Check("one-room: ảnh rồi text rồi separator",
-    RegExMatch(oneTrace, "restore:.*paste:text.*paste:text"))
+    RegExMatch(oneTrace, "restore:.*paste:batch.*paste:text.*paste:text"))
+Check("mọi ảnh của phòng gửi chung một batch",
+    InStr(oneTrace, "q0750\001.clip") > 0
+    && InStr(oneTrace, "q0750\002.clip") > 0
+    && InStr(oneTrace, "paste:batch") > 0
+    && !InStr(oneTrace, "paste:single"))
 
 ; ImagesBeforeText=false sends the same media after text instead of dropping it.
 afterRoot := A_Temp "\zalo-publisher-after-text-tests"
 if DirExist(afterRoot)
     DirDelete afterRoot, true
 afterCfg := QueueTestConfig(afterRoot)
+ApplyPublisherRoutingConfig(afterCfg)
 afterCfg.ImagesBeforeText := false
 afterCfg.MaxBatchesPerSession := 5
 afterQueue := PublishQueueStore(afterCfg)
@@ -1642,6 +2438,7 @@ uncertainRoot := A_Temp "\zalo-publisher-uncertain-tests"
 if DirExist(uncertainRoot)
     DirDelete uncertainRoot, true
 uncertainCfg := QueueTestConfig(uncertainRoot)
+ApplyPublisherRoutingConfig(uncertainCfg)
 uncertainQueue := PublishQueueStore(uncertainCfg)
 uncertainRecords := []
 record := MakePublisherRecord(301)
@@ -1668,6 +2465,7 @@ missingRoot := A_Temp "\zalo-publisher-missing-tests"
 if DirExist(missingRoot)
     DirDelete missingRoot, true
 missingCfg := QueueTestConfig(missingRoot)
+ApplyPublisherRoutingConfig(missingCfg)
 missingCfg.LeaseSize := 5
 missingQueue := PublishQueueStore(missingCfg)
 missingRecords := []
@@ -1689,6 +2487,7 @@ oversizeRoot := A_Temp "\zalo-publisher-oversize-tests"
 if DirExist(oversizeRoot)
     DirDelete oversizeRoot, true
 oversizeCfg := QueueTestConfig(oversizeRoot)
+ApplyPublisherRoutingConfig(oversizeCfg)
 oversizeCfg.MaxMessageChars := 50
 oversizeCfg.MaxBatchesPerSession := 5
 oversizeQueue := PublishQueueStore(oversizeCfg)
@@ -1714,6 +2513,7 @@ cooldownRoot := A_Temp "\zalo-publisher-cooldown-tests"
 if DirExist(cooldownRoot)
     DirDelete cooldownRoot, true
 cooldownCfg := QueueTestConfig(cooldownRoot)
+ApplyPublisherRoutingConfig(cooldownCfg)
 cooldownCfg.SessionCooldownMs := 3600000
 cooldownCfg.MaxBatchesPerSession := 5
 cooldownQueue := PublishQueueStore(cooldownCfg)
@@ -1749,6 +2549,15 @@ rawOnlyRecord := Map(
     "raw_text", "Địa chỉ: 9 Trần Hưng Đạo`nGiá: 6 triệu")
 Check("anchor fallback dòng địa chỉ",
     ListingMediaCapturer.BuildSearchAnchor(rawOnlyRecord, anchorCfg) = "9 Trần Hưng Đạo")
+durableLocations := ListingMediaCapturer.BuildLocationsFromRecord(Map(
+    "image_urls", [
+        "blob:https://chat.zalo.me/expired",
+        "https://photo.zdn.vn/live.jpg"
+    ]
+))
+Check("media repair bỏ URL blob đã hết hạn",
+    durableLocations.Length = 1
+    && durableLocations[1]["url"] = "https://photo.zdn.vn/live.jpg")
 forwardQueue := FakeCaptureQueue()
 forwardCapture := ListingMediaCapturer(
     ForwardCaptureTestConfig(), FakeCaptureUI(),
@@ -1760,6 +2569,52 @@ Check("web probe không phóng đại số ảnh",
     forwardCapture.CaptureForRecord("Nhóm Probe", forwardProbeRecord)
     && forwardProbeRecord["image_count"] = 1
     && forwardQueue.attached.Length = 1)
+
+captureFailRoot := A_Temp "\zalo-capture-fail-waive-tests"
+if DirExist(captureFailRoot)
+    DirDelete captureFailRoot, true
+captureFailCfg := QueueTestConfig(captureFailRoot)
+captureFailCfg.MediaRequired := true
+captureFailCfg.AutoCapture := true
+captureFailCfg.AutoCaptureProbeImages := true
+captureFailCfg.AutoCaptureProbeMaxImages := 6
+captureFailCfg.AutoCaptureMaxRetries := 0
+captureFailCfg.AutoCaptureAnchor := "room_code"
+captureFailQueue := PublishQueueStore(captureFailCfg)
+captureFailRecord := Map(
+    "id", "fail-cap-1",
+    "room_code", "P302",
+    "address", "x",
+    "raw_text", "Mã phòng: P302",
+    "image_count", 2,
+    "image_urls", [],
+    "captured_at", NowStamp()
+)
+captureFailQueue.Enqueue(captureFailRecord)
+Check("listing có ảnh chờ archive trước capture",
+    captureFailQueue.Get("fail-cap-1")["status"] = "media_pending")
+captureFailOk := ListingMediaCapturer(
+    captureFailCfg, EmptyImageCaptureUI(),
+    FakeCaptureMedia(), captureFailQueue
+).CaptureForRecord("Nhóm Fail", captureFailRecord)
+Check("capture fail waive media_pending → ready",
+    !captureFailOk
+    && captureFailQueue.Get("fail-cap-1")["status"] = "ready"
+    && captureFailQueue.Get("fail-cap-1")["media_status"] = "none")
+stalePendingRoot := A_Temp "\zalo-waive-stale-pending-tests"
+if DirExist(stalePendingRoot)
+    DirDelete stalePendingRoot, true
+staleCfg := QueueTestConfig(stalePendingRoot)
+staleCfg.MediaRequired := true
+staleQueue := PublishQueueStore(staleCfg)
+staleRecord := MakeQueueRecord(930, 2)
+staleQueue.Enqueue(staleRecord)
+Check("stale pending chưa archive",
+    staleQueue.Get("q0930")["status"] = "media_pending")
+Check("watch waive unarchived pending → ready",
+    staleQueue.WaiveUnarchivedMedia("watch_unarchived") = 1
+    && staleQueue.Get("q0930")["status"] = "ready"
+    && staleQueue.Get("q0930")["media_status"] = "none")
 
 Section("watch hours")
 Check("watch hours trống = luôn bật",
@@ -1775,8 +2630,8 @@ Check("watch hours qua nửa đêm",
 
 for tempDir in [queueRoot, legacySnapshotRoot, corruptRoot, retryRoot, legacyIntentRoot,
     supersedeRoot, reclaimRoot, migrateRoot, repositoryRoot,
-    publisherRoot, multiRoot, fiveRoot, oneRoot, afterRoot, uncertainRoot, missingRoot, oversizeRoot,
-    cooldownRoot] {
+    publisherRoot, forwardRoot, fallbackRoot, groupsRoot, multiRoot, fiveRoot, oneRoot, afterRoot, uncertainRoot, missingRoot, oversizeRoot,
+    cooldownRoot, waiveRoot, noFwdRoot, captureFailRoot, stalePendingRoot, A_Temp "\zalo-router-single"] {
     if DirExist(tempDir)
         DirDelete tempDir, true
 }

@@ -1,6 +1,8 @@
 #Requires AutoHotkey v2.0
 ; Publisher.ahk — resumable service: lease one room at a time
-; Single tab: navigate to sale group, then per room: images → text → separator
+; Single tab: route to one output group, then per room: images → text → separator
+
+#Include OutputRouter.ahk
 
 class DurableListingPublisher {
     __New(config, ui, registry, composer, queueStore, repository, mediaStore) {
@@ -15,9 +17,10 @@ class DurableListingPublisher {
         this.stopRequested := false
         this.running := false
         this.nextSessionAt := ""
+        this.allowForward := true
     }
 
-    RunSession(maxBatches := 0, bypassCooldown := false) {
+    RunSession(maxBatches := 0, bypassCooldown := false, allowForward := true) {
         if this.running
             throw Error("Publish session đang chạy.")
         if (!bypassCooldown
@@ -35,6 +38,7 @@ class DurableListingPublisher {
 
         this.running := true
         this.stopRequested := false
+        this.allowForward := allowForward
         this.queue.ReclaimExpiredLeases()
         this.queue.ExpireStale()
 
@@ -61,68 +65,76 @@ class DurableListingPublisher {
             for lease in leases
                 successful[lease["token"]] := true
 
-            for groupIndex, group in mainGroups {
+            leaseIndex := 0
+            for lease in leases {
+                leaseIndex++
+                this._WaitWhilePaused()
                 if this.stopRequested
                     break
-                groupName := group["group_name"]
-                try {
-                    this.ui.BeginPublishSession(groupName)
-                } catch as err {
-                    this._Log("open_output_failed group=" groupName
-                        " error=" err.Message)
-                    throw err
+                token := lease["token"]
+                if !successful[token]
+                    continue
+
+                records := this.repo.GetMany(lease["ids"])
+                if records.Length != lease["ids"].Length {
+                    missingIds := []
+                    validIds := []
+                    for id in lease["ids"] {
+                        if this.repo.Get(id)
+                            validIds.Push(id)
+                        else
+                            missingIds.Push(id)
+                    }
+                    message := "Thiếu listing payload: " StrJoin(missingIds, ",")
+                    this.queue.DeadLetter(missingIds, message)
+                    this.queue.ReleaseIds(validIds)
+                    successful[token] := false
+                    summary["failed"]++
+                    summary["errors"].Push(message)
+                    continue
                 }
 
-                for leaseIndex, lease in leases {
-                    this._WaitWhilePaused()
-                    if this.stopRequested
-                        break
-                    token := lease["token"]
-                    if !successful[token]
-                        continue
-
-                    records := this.repo.GetMany(lease["ids"])
-                    if records.Length != lease["ids"].Length {
-                        missingIds := []
-                        validIds := []
-                        for id in lease["ids"] {
-                            if this.repo.Get(id)
-                                validIds.Push(id)
-                            else
-                                missingIds.Push(id)
-                        }
-                        message := "Thiếu listing payload: " StrJoin(missingIds, ",")
-                        this.queue.DeadLetter(missingIds, message)
-                        this.queue.ReleaseIds(validIds)
+                routed := false
+                for record in records {
+                    route := ListingOutputRouter.ResolveOutputGroup(record, this.config)
+                    groupName := route["group"]
+                    if groupName = "" {
+                        this.queue.DeadLetter(
+                            [record["id"]],
+                            "no_output_route:" route["reason"])
+                        this._Log("route_skip id=" record["id"]
+                            " reason=" route["reason"])
                         successful[token] := false
                         summary["failed"]++
-                        summary["errors"].Push(message)
                         continue
                     }
 
+                    this._Log("route id=" record["id"]
+                        " group=" groupName " reason=" route["reason"])
                     try {
-                        this._SendBatch(lease, records, groupName)
+                        this.ui.BeginPublishSession(groupName)
+                        this._SendBatch(lease, [record], groupName)
+                        this.ui.EndPublishSession()
                         summary["messages"]++
+                        routed := true
                         this._Log("batch_checkpoint group=" groupName
-                            " lease=" token " rooms=" records.Length)
-                        if leaseIndex < leases.Length
-                            this._RateDelay(
-                                this.config.PublishSendDelayMinMs,
-                                this.config.PublishSendDelayMaxMs)
+                            " lease=" token " rooms=1")
                     } catch as err {
+                        this.ui.EndPublishSession()
                         this.queue.FailLease(token, err.Message)
                         successful[token] := false
                         summary["failed"]++
                         summary["errors"].Push(groupName ": " err.Message)
                         this._Log("batch_failed group=" groupName
                             " lease=" token " error=" err.Message)
+                        break
                     }
                 }
-                this.ui.EndPublishSession()
-                if groupIndex < mainGroups.Length && !this.stopRequested
+
+                if routed && leaseIndex < leases.Length && !this.stopRequested
                     this._RateDelay(
-                        this.config.PublishGroupDelayMinMs,
-                        this.config.PublishGroupDelayMaxMs)
+                        this.config.PublishSendDelayMinMs,
+                        this.config.PublishSendDelayMaxMs)
             }
 
             for lease in leases {
@@ -177,13 +189,37 @@ class DurableListingPublisher {
             this._SendOneRoom(record, groupName, true)
     }
 
-    ; Per room: archive images first, then formatted text, then separator bubble.
+    ; Per room: forward (if eligible) or archive images, then text, then separator.
     _SendOneRoom(record, groupName, sendSeparatorAfter := true) {
         id := record["id"]
         entry := this.queue.Get(id)
         delivery := this._DeliveryOrDefault(entry, groupName)
 
-        if this.config.ImagesBeforeText && !delivery["text_sent"]
+        forwardEligible := this.allowForward
+            && record.Has("forward_eligible") && record["forward_eligible"]
+        if forwardEligible && !delivery["forward_sent"] {
+            try {
+                sourceGroup := record.Has("source_group") ? record["source_group"] : ""
+                messageHash := record.Has("message_hash") ? record["message_hash"] : ""
+                roomCode := record.Has("room_code") ? record["room_code"] : ""
+                beforeSend := ObjBindMethod(
+                    this.queue, "MarkDeliveryIntent", [id], groupName, "forward")
+                beforeSend.Call()
+                this.ui.ForwardListingMessage(
+                    sourceGroup, groupName, messageHash, roomCode)
+                this.queue.CheckpointForward(id, groupName)
+            } catch as err {
+                this._Log("forward_fallback id=" id " error=" err.Message)
+                ; Forward navigates back to the source conversation first.
+                ; On any forward failure, restore the output before archive paste.
+                this.ui.BeginPublishSession(groupName)
+                if this.config.ImagesBeforeText
+                    this._SendRecordMedia(record, groupName)
+            }
+            entry := this.queue.Get(id)
+            delivery := this._DeliveryOrDefault(entry, groupName)
+        } else if this.config.ImagesBeforeText && !delivery["text_sent"]
+            && !delivery["forward_sent"]
             this._SendRecordMedia(record, groupName)
 
         if !delivery["text_sent"] {
@@ -197,7 +233,7 @@ class DurableListingPublisher {
             this.queue.CheckpointText([id], groupName)
         }
 
-        if !this.config.ImagesBeforeText
+        if !this.config.ImagesBeforeText && !delivery["forward_sent"]
             this._SendRecordMedia(record, groupName)
 
         if sendSeparatorAfter
@@ -213,7 +249,10 @@ class DurableListingPublisher {
         id := record["id"]
         entry := this.queue.Get(id)
         files := entry && entry.Has("media_files") ? entry["media_files"] : []
+        mediaStatus := entry && entry.Has("media_status") ? entry["media_status"] : ""
         imageCount := record.Has("image_count") ? record["image_count"] : 0
+        if mediaStatus = "none"
+            return
         if files.Length && !this.media.IsTrusted(id)
             throw Error("Phòng " record["room_code"]
                 . " có image cache cũ/chưa xác thực; cần capture lại.")
@@ -222,25 +261,32 @@ class DurableListingPublisher {
             throw Error("Phòng " record["room_code"] " chưa archive ảnh.")
 
         delivery := this._DeliveryOrDefault(entry, groupName)
-        index := delivery["media_index_sent"] + 1
+        if delivery["forward_sent"]
+            return
+
+        startIndex := delivery["media_index_sent"] + 1
+        if startIndex > files.Length
+            return
+
+        paths := []
+        index := startIndex
         while index <= files.Length {
-            path := this.media.Resolve(files[index])
-            this.ui.RestoreClipboardArchive(path)
-            beforeSend := ObjBindMethod(
-                this.queue, "MarkDeliveryIntent",
-                [id], groupName, "media", index)
-            this.ui.PasteClipboardInSession(beforeSend)
-            this.queue.CheckpointMedia(id, groupName, index)
+            paths.Push(this.media.Resolve(files[index]))
             index++
         }
+        beforeSend := ObjBindMethod(
+            this.queue, "MarkDeliveryIntent",
+            [id], groupName, "media", files.Length)
+        this.ui.PasteMediaBatchInSession(paths, beforeSend)
+        this.queue.CheckpointMedia(id, groupName, files.Length)
     }
 
     _DeliveryOrDefault(entry, groupName) {
         if entry && entry.Has("deliveries") && entry["deliveries"].Has(groupName)
             return entry["deliveries"][groupName]
         return Map(
-            "media_index_sent", 0, "text_sent", 0, "uncertain", 0,
-            "last_action", "", "last_media_index", 0
+            "media_index_sent", 0, "text_sent", 0, "forward_sent", 0,
+            "uncertain", 0, "last_action", "", "last_media_index", 0
         )
     }
 

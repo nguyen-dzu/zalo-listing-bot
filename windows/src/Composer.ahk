@@ -7,10 +7,6 @@ class MessageComposer {
         this.config := config
     }
 
-    Separator(groupName) {
-        return StrReplace(this.config.Separator, "{group}", groupName)
-    }
-
     ListingSeparator() {
         if this.config.HasProp("ListingSeparator") && this.config.ListingSeparator != ""
             return this.config.ListingSeparator
@@ -41,14 +37,7 @@ class MessageComposer {
         for record in records
             blocks.Push(this.RenderBlock(record))
 
-        body := StrJoin(blocks, "`n" this.ListingSeparator() "`n")
-
-        if this.config.HasProp("IncludeGroupHeader") && this.config.IncludeGroupHeader {
-            group := records[1].Has("source_group") ? records[1]["source_group"] : ""
-            if group != ""
-                return StrJoin([this.Separator(group), body], "`n")
-        }
-        return body
+        return StrJoin(blocks, "`n" this.ListingSeparator() "`n")
     }
 
     ComposeOne(record) {
@@ -59,7 +48,8 @@ class MessageComposer {
         listing := Map()
         for key in ["address", "room_code", "price", "electric_price", "water_price",
             "utility_price", "service_price", "owner_phone", "phone_carrier",
-            "info", "extra_info", "raw_text", "source_group", "id"]
+            "info", "extra_info", "raw_text", "source_group", "id",
+            "message_hash", "forward_eligible"]
             listing[key] := record.Has(key) ? record[key] : ""
 
         listing["room_code"] := ListingParser.NormalizeRoomCode(listing, "")

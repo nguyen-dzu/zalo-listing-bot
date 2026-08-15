@@ -182,7 +182,8 @@ class MessageActivityScanner {
             hash := FnvHash(block)
             if isSeenFn.Call(hash) {
                 stoppedOnSeen := true
-                break
+                index--
+                continue
             }
             if items.Length >= maxMessages
                 break
@@ -198,32 +199,53 @@ class HarvestScheduler {
         this.config := config
     }
 
-    ; 24/7: every cycle walks every source group. Unread names are only
-    ; reordered to the front; they never replace the rest of the list.
-    BuildContinuousPlan(groups, unreadNames := 0) {
+    ; Continuous watch can operate strictly on unread groups. Unread entries
+    ; may be names or {name,count} maps returned by the browser bridge.
+    BuildContinuousPlan(groups, unreadNames := 0, forceInitialLatest := false) {
         if !groups.Length
             return Map("mode", "empty", "groups", [], "unread", 0, "audit", 0)
 
         selected := []
         selectedKeys := Map()
         unreadCount := 0
+        if forceInitialLatest {
+            for group in groups
+                this._PushUnique(
+                    selected, selectedKeys, this._WithUnreadCount(group, 1))
+            return Map(
+                "mode", "initial_latest",
+                "groups", selected,
+                "unread", 0,
+                "audit", 0
+            )
+        }
+        onlyUnread := this.config.HasProp("WatchOnlyUnreadAfterFirstCycle")
+            && this.config.WatchOnlyUnreadAfterFirstCycle
         if unreadNames {
             groupLookup := Map()
             for group in groups
                 groupLookup[GroupRegistry._Key(group["group_name"])] := group
-            for name in unreadNames {
+            for unreadItem in unreadNames {
+                name := unreadItem is Map && unreadItem.Has("name")
+                    ? unreadItem["name"] : unreadItem
                 key := GroupRegistry._Key(name)
                 if !groupLookup.Has(key) || selectedKeys.Has(key)
                     continue
-                this._PushUnique(selected, selectedKeys, groupLookup[key])
+                selectedGroup := groupLookup[key]
+                if unreadItem is Map && unreadItem.Has("count")
+                    selectedGroup := this._WithUnreadCount(
+                        selectedGroup, unreadItem["count"])
+                this._PushUnique(selected, selectedKeys, selectedGroup)
                 unreadCount++
             }
         }
-        for group in groups
-            this._PushUnique(selected, selectedKeys, group)
+        if !onlyUnread {
+            for group in groups
+                this._PushUnique(selected, selectedKeys, group)
+        }
 
         return Map(
-            "mode", "continuous",
+            "mode", onlyUnread ? "unread_only" : "continuous",
             "groups", selected,
             "unread", unreadCount,
             "audit", 0
@@ -282,7 +304,8 @@ class HarvestScheduler {
             auditCount++
         }
 
-        while selected.Length > this.config.HarvestMaxGroupsPerCycle
+        while this.config.HarvestMaxGroupsPerCycle > 0
+            && selected.Length > this.config.HarvestMaxGroupsPerCycle
             selected.Pop()
 
         return Map(
@@ -330,6 +353,14 @@ class HarvestScheduler {
         lookup[key] := true
         result.Push(group)
         return true
+    }
+
+    _WithUnreadCount(group, count) {
+        copy := Map()
+        for key, value in group
+            copy[key] := value
+        copy["unread_count"] := Max(1, Integer(count))
+        return copy
     }
 
     _Copy(items) {

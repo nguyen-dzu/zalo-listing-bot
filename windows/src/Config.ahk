@@ -82,11 +82,22 @@ class AppConfig {
         ; ── Source groups from operator-selected CSV/XLSX + output groups ──
         this.OutputGroupNames := this._PipeList(this._Read(
             ini, "Groups", "OutputGroups",
-            'Giỏ Hàng NNC Cao Thiên'
-            . '|Giỏ hàng “QUẬN Ngoại Thành ” Cao Thiên'
+            'Giỏ hàng “QUẬN Ngoại Thành ” Cao Thiên'
             . '|Giỏ hàng QUẬN SỐ Cao Thiên'
             . '|Giỏ hàng Cao Thiên 6Triệu Phú Nhuận, Bình Thạnh'
             . '|Giỏ Hàng Cao Thiên Dưới 5TR9 Phú Nhuận Bình Thạnh'))
+        this.OutputRouteGroupQuanSo := this._Read(
+            ini, "OutputRouting", "GroupQuanSo",
+            "Giỏ hàng QUẬN SỐ Cao Thiên")
+        this.OutputRouteGroupNgoaiThanh := this._Read(
+            ini, "OutputRouting", "GroupNgoaiThanh",
+            'Giỏ hàng “QUẬN Ngoại Thành ” Cao Thiên')
+        this.OutputRouteGroupUnder59 := this._Read(
+            ini, "OutputRouting", "GroupUnder59",
+            "Giỏ Hàng Cao Thiên Dưới 5TR9 Phú Nhuận Bình Thạnh")
+        this.OutputRouteGroupOver6 := this._Read(
+            ini, "OutputRouting", "GroupOver6",
+            "Giỏ hàng Cao Thiên 6Triệu Phú Nhuận, Bình Thạnh")
         this.SourceGroupFilePath := this._ResolveOptional(this._Read(
             ini, "Groups", "SourceFile", ""))
         this.SourceGroupPromptOnStart := this._Bool(
@@ -110,10 +121,10 @@ class AppConfig {
         this.ListingStartPattern := this._Read(ini, "Capture", "ListingStartPattern", "")
         this.ImageMarkerPattern := this._Read(ini, "Capture", "ImageMarkerPattern", "")
         this.MaxMessagesPerGroup := this._Int(ini, "Capture", "MaxMessagesPerGroup", 50)
+        this.MaxScanMessages := Max(1, this._Int(ini, "Capture", "MaxScanMessages", 20))
         this.RequiredFields := this._List(this._Read(ini, "Capture", "RequiredFields", ""))
 
         ; ── Output ──
-        this.Separator := this._Read(ini, "Output", "Separator", "------------{group}------------")
         this.MaxMessageChars := this._Int(ini, "Output", "MaxMessageChars", 1800)
         ; 0 = hiện SĐT + nhà mạng trên dòng Số chủ (mặc định publish).
         this.MaskPhone := this._Bool(ini, "Output", "MaskPhone", false)
@@ -124,7 +135,6 @@ class AppConfig {
         this.ListingSeparator := this._Read(ini, "Output", "ListingSeparator", "=======")
         ; After each room text, send ListingSeparator as its own Zalo message.
         this.SendSeparatorAsMessage := true
-        this.IncludeGroupHeader := this._Bool(ini, "Output", "IncludeGroupHeader", false)
 
         ; ── Images ──
         this.ImagesBeforeText := this._Bool(ini, "Images", "ImagesBeforeText", true)
@@ -205,8 +215,8 @@ class AppConfig {
         ; ── Incremental harvest scheduler ──
         this.HarvestInitialFullScan := this._Bool(
             ini, "Harvest", "InitialFullScan", true)
-        this.HarvestMaxGroupsPerCycle := Max(1,
-            this._Int(ini, "Harvest", "MaxGroupsPerCycle", 50))
+        this.HarvestMaxGroupsPerCycle := Max(0,
+            this._Int(ini, "Harvest", "MaxGroupsPerCycle", 0))
         this.HarvestAuditGroupsPerCycle := Max(0,
             this._Int(ini, "Harvest", "AuditGroupsPerCycle", 10))
         ; Publish to main groups after each source group that saved rooms.

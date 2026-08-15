@@ -16,7 +16,6 @@
 InitTestLog("Simulate.log")
 
 class SimConfig {
-    Separator := "------------{group}------------"
     MaxMessageChars := 1800
     MaskPhone := true
     PhoneHint := 'Nhắn bot "SĐT {room_code}" để lấy số'
@@ -24,7 +23,6 @@ class SimConfig {
     ListingsPerMessage := 1
     LeaseSize := 1
     ListingSeparator := "======="
-    IncludeGroupHeader := false
     BlocklistSheet := "Blocklist"
     BlocklistXlsx := ""
     BlocklistCsv := ""

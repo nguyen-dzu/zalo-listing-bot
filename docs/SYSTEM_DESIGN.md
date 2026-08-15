@@ -102,7 +102,10 @@ ReclaimExpiredLeases()
 LeaseNext(1) × MaxBatchesPerSession
 For each group with type=main (open once):
   For each one-room lease:
-    restore each archived .clip and paste (one image message each)
+    if forward_eligible: forward original bubble from source group
+    else: for each image_group in manifest v3:
+            batch (same Zalo bubble): paste all .clip files in one Enter
+            single (one image bubble): paste each .clip with its own Enter
     send room text and checkpoint
     send separator message "======="
 CompleteLease() only after every main group succeeds
@@ -150,7 +153,7 @@ Select `SĐT P001` → look up the per-listing JSON store → paste phone into a
 =======
 ```
 
-Each room is its own cycle: images → text → separator message `=======`.
+Each room is its own cycle: forward original bubble (when adjacent images) or paste archived images **one image per Zalo message** (each `.clip` → Enter) → formatted text → separator `=======`. Source group name appears only in the `🏷️ tên nhóm` line (no separate group header message).
 
 ## 6. Excel / CSV files
 
@@ -194,6 +197,8 @@ the first row; per-group hashes prevent duplicate listings.
   "info": "25m2, full nội thất",
   "extra_info": "",
   "image_count": 2,
+  "image_urls": ["https://..."],
+  "image_groups": [],
   "raw_text": "..."
 }
 ```

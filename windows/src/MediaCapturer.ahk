@@ -35,6 +35,35 @@ class ListingMediaCapturer {
         return SubStr(Trim(raw), 1, 40)
     }
 
+    static BuildLocationsFromRecord(record, limit := 0) {
+        locations := []
+        if record.Has("image_urls") && record["image_urls"] is Array {
+            for index, url in record["image_urls"] {
+                value := Trim(String(url))
+                if value = ""
+                    continue
+                ; blob: URLs only live in the DOM session that created them.
+                ; Never reuse them from a persisted listing during media repair.
+                if RegExMatch(value, "i)^blob:")
+                    continue
+                locations.Push(Map(
+                    "x", 0, "y", 0,
+                    "index", index,
+                    "url", value))
+            }
+        }
+        if limit > 0 && locations.Length > limit {
+            trimmed := []
+            index := 1
+            while index <= limit {
+                trimmed.Push(locations[index])
+                index++
+            }
+            return trimmed
+        }
+        return locations
+    }
+
     CaptureForRecord(groupName, record) {
         if !this.config.AutoCapture
             return true
@@ -51,8 +80,23 @@ class ListingMediaCapturer {
         }
 
         anchor := ListingMediaCapturer.BuildSearchAnchor(record, this.config)
-        if anchor = "" {
+        messageHash := record.Has("message_hash") ? Trim(record["message_hash"]) : ""
+        storedBlobCount := 0
+        if record.Has("image_urls") && record["image_urls"] is Array {
+            for url in record["image_urls"] {
+                if RegExMatch(Trim(String(url)), "i)^blob:")
+                    storedBlobCount++
+            }
+        }
+        ; A persisted blob URL implies a repair run. Use stable listing text
+        ; instead of a possibly generic/incorrect parsed room code such as ET.
+        if storedBlobCount > 0
+            && record.Has("raw_text") && Trim(record["raw_text"]) != ""
+            anchor := SubStr(Trim(record["raw_text"]), 1, 60)
+        if anchor = "" && messageHash = ""
+            && !(record.Has("image_urls") && record["image_urls"].Length) {
             this._LogFail(record, "", "Không có anchor tìm ảnh")
+            this._WaiveRequiredMedia(record["id"], "Không có anchor tìm ảnh")
             return false
         }
 
@@ -63,15 +107,22 @@ class ListingMediaCapturer {
                     ? imageCount : this.config.AutoCaptureProbeMaxImages
                 allowHeuristic := imageCount > 0
                     || this.config.AutoCaptureProbeImages
-                locations := []
-                if record.Has("image_urls") && record["image_urls"] is Array {
-                    for index, url in record["image_urls"]
-                        locations.Push(Map(
-                            "x", 0, "y", 0, "index", index, "url", url))
+                locations := ListingMediaCapturer.BuildLocationsFromRecord(
+                    record, limit)
+                if !locations.Length {
+                    currentGroup := this.ui.HasProp("currentGroup")
+                        ? this.ui.currentGroup : ""
+                    if currentGroup = ""
+                        || !this.ui._GroupNamesMatch(currentGroup, groupName)
+                        this.ui.OpenGroup(groupName, "read")
+                }
+                if !locations.Length && messageHash != "" {
+                    locations := this.ui.FindImageBubblesNearMessage(
+                        anchor, limit, allowHeuristic, messageHash)
                 }
                 if !locations.Length
                     locations := this.ui.FindImageBubblesNearMessage(
-                        anchor, limit, allowHeuristic)
+                        anchor, limit, allowHeuristic, messageHash)
                 if !locations.Length {
                     if imageCount > 0
                         throw Error("Không tìm thấy ảnh gần listing.")
@@ -89,11 +140,13 @@ class ListingMediaCapturer {
             } catch as err {
                 if A_Index > maxRetries {
                     this._LogFail(record, anchor, err.Message)
+                    this._WaiveRequiredMedia(record["id"], err.Message)
                     return false
                 }
                 Sleep 500
             }
         }
+        this._WaiveRequiredMedia(record["id"], "auto_capture_exhausted")
         return false
     }
 
@@ -114,6 +167,30 @@ class ListingMediaCapturer {
         return result
     }
 
+    _CaptureOneFile(listingId, location, append := false) {
+        prepared := this.media.PrepareArchive(listingId, append, "clip")
+        try {
+            if this.ui.CopyImageAt(location) {
+                this.ui.SaveClipboardArchive(prepared["temp_path"])
+            } else {
+                image := this.ui.FetchImageAt(location)
+                fetchPath := prepared["generation_dir"] "\fetch.bin"
+                this.ui.SaveFetchedImage(image, fetchPath)
+                if !this.ui.SetClipboardImageFromFile(fetchPath)
+                    throw Error("Không nạp ảnh tải về vào clipboard.")
+                this.ui.SaveClipboardArchive(prepared["temp_path"])
+                try FileDelete fetchPath
+            }
+            targetPath := this.media.CommitGeneration(prepared)
+            prefix := this.media.root "\"
+            return SubStr(targetPath, 1, StrLen(prefix)) = prefix
+                ? SubStr(targetPath, StrLen(prefix) + 1) : targetPath
+        } catch as err {
+            this.media.AbortGeneration(prepared)
+            throw err
+        }
+    }
+
     _ArchiveLocations(groupName, record, anchor, locations) {
         id := record["id"]
         if this.media.HasMedia(id) && !this.media.IsTrusted(id) {
@@ -123,29 +200,13 @@ class ListingMediaCapturer {
         }
 
         captured := 0
+        append := false
         for location in locations {
-            prepared := 0
             try {
-                try {
-                    image := this.ui.FetchImageAt(location)
-                    extension := this._ImageExtension(
-                        image.Has("mime") ? image["mime"] : "")
-                    prepared := this.media.PrepareArchive(
-                        id, captured > 0, extension)
-                    this.ui.SaveFetchedImage(image, prepared["temp_path"])
-                } catch as fetchErr {
-                    if prepared
-                        this.media.AbortGeneration(prepared)
-                    prepared := this.media.PrepareArchive(id, captured > 0)
-                    if !this.ui.CopyImageAt(location)
-                        throw Error("Không tải/copy được ảnh: " fetchErr.Message)
-                    this.ui.SaveClipboardArchive(prepared["temp_path"])
-                }
-                this.media.CommitGeneration(prepared)
+                this._CaptureOneFile(id, location, append)
                 captured++
+                append := true
             } catch as err {
-                if prepared
-                    this.media.AbortGeneration(prepared)
                 if !captured
                     throw err
                 this._Log("auto_capture_partial id=" id
@@ -153,6 +214,7 @@ class ListingMediaCapturer {
                 break
             }
         }
+
         if !captured
             throw Error("Không capture được ảnh nào.")
 
@@ -174,22 +236,16 @@ class ListingMediaCapturer {
         return captured
     }
 
-    _ImageExtension(mime) {
-        value := StrLower(Trim(mime))
-        if InStr(value, "jpeg") || InStr(value, "jpg")
-            return "jpg"
-        if InStr(value, "webp")
-            return "webp"
-        return "png"
-    }
-
     ArchiveFromSelection(record, append := false) {
         prepared := this.media.PrepareArchive(record["id"], append)
         try {
             if !this.ui.CopyImageFromSelection()
                 throw Error("Không copy được ảnh đã chọn.")
             this.ui.SaveClipboardArchive(prepared["temp_path"])
-            this.media.CommitGeneration(prepared)
+            targetPath := this.media.CommitGeneration(prepared)
+            prefix := this.media.root "\"
+            relPath := SubStr(targetPath, 1, StrLen(prefix)) = prefix
+                ? SubStr(targetPath, StrLen(prefix) + 1) : targetPath
             this.media.WriteManifest(record["id"], Map(
                 "capture_version", 2,
                 "validated_bitmap", 1,
@@ -218,5 +274,11 @@ class ListingMediaCapturer {
         room := record.Has("room_code") ? record["room_code"] : record["id"]
         this._Log("auto_capture_fail room=" room
             " anchor=" anchor " error=" message)
+    }
+
+    _WaiveRequiredMedia(id, reason) {
+        try this.queue.InvalidateMedia(id, reason, false)
+        catch {
+        }
     }
 }

@@ -15,7 +15,7 @@ Zalo Listing Bot — Portable (Windows)
    - Khi start, keo-tha/chon file CSV/XLSX trong popup
    - File co cot group_name, moi dong mot nhom input
    - Bot di tu dong dau den dong cuoi, nghi 5 phut, roi lap lai
-   - 5 nhom output duoc khai bao tai [Groups] OutputGroups trong config.ini
+   - 4 nhom output duoc khai bao tai [Groups] OutputGroups + [OutputRouting] trong config.ini
 
 4. Chay bot
    - Co ZaloListingBot.exe: chay exe

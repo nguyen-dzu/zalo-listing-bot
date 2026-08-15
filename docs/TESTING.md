@@ -24,7 +24,7 @@ guards, harvester/repository integration, and durable queue behavior: one-room p
 leases, journal/snapshot reload, retry/dead-letter, uncertain resolution, media gating,
 expired-lease reclaim, migration from legacy `listings.json`, and icon `FormatBlock` output.
 
-**230 tests** as of Aug 2026. Stress: `windows\tests\run-stress.cmd` (5,000 rooms).
+**234 tests** as of Aug 2026. Stress: `windows\tests\run-stress.cmd` (5,000 rooms).
 
 Exit code `1` if any test fails.
 

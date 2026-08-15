@@ -33,7 +33,9 @@ class MessageHarvester {
             summary["groups"]++
             result := 0
             try {
-                result := this.HarvestGroup(group["group_name"])
+                unreadLimit := group.Has("unread_count")
+                    ? group["unread_count"] : 0
+                result := this.HarvestGroup(group["group_name"], unreadLimit)
                 summary["saved"] += result["saved"]
                 summary["blocked"] += result["blocked"]
                 summary["duplicate"] += result["duplicate"]
@@ -45,8 +47,9 @@ class MessageHarvester {
                 summary["errors"].Push(
                     "skip " group["group_name"] ": " err.Message)
                 ; #region agent log
-                AgentDebugLog("Harvester.ahk:HarvestGroups", "harvest_group_error", Map(
-                    "group", group["group_name"], "error", err.Message), "H2")
+                AgentDbg("H3", "Harvester.ahk:HarvestGroups", "group_error",
+                    '{"group":"' StrReplace(group["group_name"], '"', '\"')
+                    '","error":"' StrReplace(StrReplace(err.Message, "`n", " "), '"', '\"') '"}')
                 ; #endregion
             }
             if this.config.HarvestSaveStateEachGroup
@@ -141,7 +144,7 @@ class MessageHarvester {
         return summary
     }
 
-    HarvestGroup(groupName) {
+    HarvestGroup(groupName, unreadLimit := 0) {
         result := Map(
             "saved", 0, "blocked", 0, "duplicate", 0, "invalid", 0,
             "media_captured", 0, "media_failed", 0, "saved_records", []
@@ -150,18 +153,24 @@ class MessageHarvester {
         this.ui.OpenGroup(groupName, "read")
         settle := this.config.HasProp("CaptureSettleMs") ? this.config.CaptureSettleMs : 600
         Sleep settle
-        capture := this.ui.CaptureConversation()
+        ; Badge "1" and the old first-cycle unread_count=1 must not shrink the
+        ; DOM scan to a single bubble — that drops listings and nearby photos.
+        origUnread := unreadLimit
+        if unreadLimit <= 1
+            unreadLimit := 0
+        effectiveLimit := unreadLimit > 0
+            ? Min(this.config.MaxMessagesPerGroup, unreadLimit)
+            : this.config.MaxMessagesPerGroup
+        scanLimit := this.config.HasProp("MaxScanMessages")
+            ? this.config.MaxScanMessages
+            : effectiveLimit
+        if unreadLimit > scanLimit
+            scanLimit := Min(unreadLimit, this.config.MaxMessagesPerGroup)
+        capture := this.ui.CaptureConversation("", scanLimit)
         text := capture.Has("text") ? capture["text"] : ""
+        msgCount := capture.Has("messages") ? capture["messages"].Length : 0
+        imageTotal := capture.Has("image_total") ? capture["image_total"] : 0
         normalized := NormalizeNewlines(text)
-        ; #region agent log
-        AgentDebugLog("Harvester.ahk:HarvestGroup", "capture_result", Map(
-            "group", groupName,
-            "textLen", StrLen(normalized),
-            "msgCount", capture.Has("messages") ? capture["messages"].Length : 0,
-            "scanGroup", capture.Has("group") ? capture["group"] : ""), "H3")
-        ; #endregion
-        if Trim(normalized) = ""
-            return result
 
         candidates := this._BuildCandidates(capture)
         blocks := []
@@ -170,23 +179,37 @@ class MessageHarvester {
             block := candidate["text"]
             hash := FnvHash(block)
             blocks.Push(block)
-            if candidateByHash.Has(hash)
+            if candidateByHash.Has(hash) {
                 candidateByHash[hash]["images"] := this._MergeUrls(
                     candidateByHash[hash]["images"], candidate["images"])
-            else
+            } else
                 candidateByHash[hash] := candidate
         }
         this._Log("harvest_scan group=" groupName
-            " messages=" (capture.Has("messages") ? capture["messages"].Length : 0)
+            " messages=" msgCount
             " candidates=" blocks.Length)
+        ; #region agent log
+        AgentDbg("H6", "Harvester.ahk:HarvestGroup", "scan",
+            '{"group":"' StrReplace(groupName, '"', '\"')
+            '","messages":' msgCount
+            ',"candidates":' blocks.Length
+            ',"scanLimit":' scanLimit
+            ',"origUnread":' origUnread
+            ',"unreadLimit":' unreadLimit
+            ',"imageTotal":' imageTotal
+            ',"emptyText":' (Trim(normalized) = "" ? 1 : 0) "}")
+        ; #endregion
+        if Trim(normalized) = ""
+            return result
 
         captureHash := this._CaptureHash(capture, normalized)
         previousHash := this.state.GetCaptureHash(groupName)
         ; Conversation unchanged → already-read messages; skip re-copy/re-parse.
         if previousHash != "" && previousHash = captureHash {
             ; #region agent log
-            AgentDebugLog("Harvester.ahk:HarvestGroup", "hash_skip", Map(
-                "group", groupName, "captureHash", captureHash), "H4")
+            AgentDbg("H6", "Harvester.ahk:HarvestGroup", "hash_skip",
+                '{"group":"' StrReplace(groupName, '"', '\"')
+                '","messages":' msgCount "}")
             ; #endregion
             this.state.MarkNeedsRevisit(groupName, false)
             this.state.TouchHarvest(groupName)
@@ -199,9 +222,12 @@ class MessageHarvester {
         pick := MessageActivityScanner.PickUnseenNewestFirst(
             blocks,
             ObjBindMethod(this.state, "IsSeen", groupName),
-            this.config.MaxMessagesPerGroup)
+            effectiveLimit)
         if pick["stopped_on_seen"]
             result["duplicate"]++
+        ; #region agent log
+        this._DebugClassify(groupName, capture, blocks, pick)
+        ; #endregion
 
         for item in pick["items"] {
             block := item["block"]
@@ -209,16 +235,21 @@ class MessageHarvester {
             candidate := candidateByHash.Has(hash)
                 ? candidateByHash[hash] : Map("images", [])
 
+            listing := ListingParser.Parse(block, this.config.ImageMarkerPattern)
+            listing["image_urls"] := candidate["images"]
+            listing["image_count"] := candidate["images"].Length
+            listing["image_groups"] := []
+            if candidate.Has("message_hash")
+                listing["message_hash"] := candidate["message_hash"]
+            if candidate.Has("forward_eligible")
+                listing["forward_eligible"] := candidate["forward_eligible"] ? 1 : 0
+
             keyword := this.blockList.Match(block)
-            if keyword != "" {
+            if keyword != "" && !this._SoftBlockOverride(keyword, listing) {
                 this.state.MarkSeen(groupName, hash)
                 result["blocked"]++
                 continue
             }
-
-            listing := ListingParser.Parse(block, this.config.ImageMarkerPattern)
-            listing["image_urls"] := candidate["images"]
-            listing["image_count"] := candidate["images"].Length
             if ListingParser.Validate(listing, this.config.RequiredFields).Length {
                 this.state.MarkSeen(groupName, hash)
                 result["invalid"]++
@@ -229,26 +260,11 @@ class MessageHarvester {
             this.state.MarkSeen(groupName, hash)
             result["saved"]++
             result["saved_records"].Push(record)
-            ; #region agent log
-            AgentDebugLog("Harvester.ahk:HarvestGroup", "listing_saved", Map(
-                "group", groupName,
-                "id", record["id"],
-                "room", record.Has("room_code") ? record["room_code"] : "",
-                "imageCount", record.Has("image_count") ? record["image_count"] : 0,
-                "rawLen", record.Has("raw_text") ? StrLen(record["raw_text"]) : 0), "H5")
-            ; #endregion
             if (this.mediaCapturer
                 && this.config.AutoCapture
                 && ((record.Has("image_count") && record["image_count"] > 0)
                     || this.config.AutoCaptureProbeImages)) {
                 mediaOk := this.mediaCapturer.CaptureForRecord(groupName, record)
-                ; #region agent log
-                AgentDebugLog("Harvester.ahk:HarvestGroup", "media_capture", Map(
-                    "group", groupName,
-                    "id", record["id"],
-                    "ok", mediaOk,
-                    "imageCount", record.Has("image_count") ? record["image_count"] : 0), "H5")
-                ; #endregion
                 if mediaOk
                     result["media_captured"]++
                 else
@@ -257,14 +273,106 @@ class MessageHarvester {
         }
 
         this.state.TouchHarvest(groupName)
+        ; #region agent log
+        AgentDbg("H7", "Harvester.ahk:HarvestGroup", "result_filter",
+            '{"group":"' StrReplace(groupName, '"', '\"')
+            '","saved":' result["saved"]
+            ',"blocked":' result["blocked"]
+            ',"invalid":' result["invalid"]
+            ',"duplicate":' result["duplicate"]
+            ',"picked":' pick["items"].Length
+            ',"stoppedOnSeen":' (pick["stopped_on_seen"] ? 1 : 0) "}")
+        ; #endregion
         this._Log("harvest_result group=" groupName
             " saved=" result["saved"]
             " blocked=" result["blocked"]
             " invalid=" result["invalid"]
             " media_ok=" result["media_captured"]
             " media_fail=" result["media_failed"])
+        ; #region agent log
+        AgentDbg("H6", "Harvester.ahk:HarvestGroup", "result",
+            '{"group":"' StrReplace(groupName, '"', '\"')
+            '","saved":' result["saved"]
+            ',"blocked":' result["blocked"]
+            ',"invalid":' result["invalid"]
+            ',"duplicate":' result["duplicate"]
+            ',"mediaOk":' result["media_captured"]
+            ',"mediaFail":' result["media_failed"] "}")
+        ; #endregion
         return result
     }
+
+    ; @All / tìm phòng / cần thuê often appear on real supply posts.
+    _SoftBlockOverride(keyword, listing) {
+        k := StrLower(Trim(keyword))
+        if k != "@all" && k != "tìm phòng" && k != "cần thuê"
+            return false
+        return ListingParser.QualifiesAsRentalListing(listing)
+    }
+
+    ; #region agent log
+    _DebugClassify(groupName, capture, blocks, pick) {
+        messages := capture.Has("messages") && capture["messages"] is Array
+            ? capture["messages"] : []
+        picked := Map()
+        for item in pick["items"]
+            picked[item["hash"]] := true
+        lookY := 0
+        lookN := 0
+        qualY := 0
+        blkN := 0
+        softY := 0
+        rows := ""
+        n := 0
+        for message in messages {
+            if !(message is Map)
+                continue
+            text := message.Has("text")
+                ? Trim(NormalizeNewlines(message["text"])) : ""
+            if text = ""
+                continue
+            looks := ListingParser.LooksLikeListing(text)
+            listing := ListingParser.Parse(text, this.config.ImageMarkerPattern)
+            core := ListingParser._CountRentalCoreSignals(listing)
+            qualifies := ListingParser.QualifiesAsRentalListing(listing)
+            keyword := this.blockList.Match(text)
+            if looks
+                lookY++
+            else
+                lookN++
+            if qualifies
+                qualY++
+            if keyword != "" {
+                blkN++
+                if this._SoftBlockOverride(keyword, listing)
+                    softY++
+            }
+            n++
+            if n > 8
+                continue
+            first := Trim(StrSplit(text, "`n")[1])
+            head := SubStr(RegExReplace(first, "\d", "#"), 1, 24)
+            head := StrReplace(StrReplace(head, "\", "/"), '"', "'")
+            kw := keyword != "" ? StrReplace(keyword, '"', "'") : "-"
+            piece := "look=" (looks ? 1 : 0) " qual=" (qualifies ? 1 : 0) " core=" core " blk=" kw " head=" head
+            if rows = ""
+                rows := piece
+            else
+                rows := rows " / " piece
+        }
+        AgentDbg("H7", "Harvester.ahk:_DebugClassify", "text_filter",
+            '{"group":"' StrReplace(groupName, '"', "'")
+            '","lookY":' lookY
+            ',"lookN":' lookN
+            ',"qualY":' qualY
+            ',"blkN":' blkN
+            ',"softY":' softY
+            ',"candN":' blocks.Length
+            ',"pickN":' pick["items"].Length
+            ',"stopped":' (pick["stopped_on_seen"] ? 1 : 0)
+            ',"rows":"' StrReplace(rows, "`n", " ") '"}')
+    }
+    ; #endregion
 
     _BuildCandidates(capture) {
         result := []
@@ -296,10 +404,198 @@ class MessageHarvester {
             ; a safe fallback after the listing heuristic accepts the text.
             if !parts.Length && ListingParser.LooksLikeListing(text)
                 parts.Push(text)
-            for part in parts
-                result.Push(Map("text", part, "images", this._MergeUrls([], images)))
+            imageMarker := this.config.ImageMarkerPattern != ""
+                ? this.config.ImageMarkerPattern
+                : ListingParser.DEFAULT_IMAGE_MARKER
+            urlDistributions := this._DistributeImagesToParts(
+                parts, images, imageMarker)
+            for index, part in parts {
+                partImages := index <= urlDistributions.Length
+                    ? urlDistributions[index] : []
+                shareForward := message.Has("forward_eligible")
+                    ? message["forward_eligible"] : false
+                result.Push(Map(
+                    "text", part,
+                    "images", this._MergeUrls([], partImages),
+                    "message_hash", message.Has("hash") ? message["hash"] : "",
+                    "forward_eligible", shareForward
+                        && partImages.Length > 0
+                ))
+            }
         }
         return result
+    }
+
+    _NormalizeImageGroups(message) {
+        if !(message is Map) || !message.Has("image_groups")
+            return []
+        raw := message["image_groups"]
+        if !(raw is Array)
+            return []
+        groups := []
+        for item in raw {
+            if !(item is Map)
+                continue
+            urls := []
+            if item.Has("urls") && item["urls"] is Array {
+                for url in item["urls"]
+                    if Trim(String(url)) != ""
+                        urls.Push(Trim(String(url)))
+            }
+            if !urls.Length
+                continue
+            mode := item.Has("mode") ? StrLower(Trim(String(item["mode"]))) : ""
+            if mode != "single" && mode != "batch"
+                mode := urls.Length > 1 ? "batch" : "single"
+            groups.Push(Map("mode", mode, "urls", urls))
+        }
+        return groups
+    }
+
+    _FlattenGroupUrls(groups) {
+        urls := []
+        for group in groups {
+            if !(group is Map) || !group.Has("urls")
+                continue
+            for url in group["urls"]
+                urls.Push(url)
+        }
+        return urls
+    }
+
+    _DistributeGroupsToParts(parts, groups, imageMarker) {
+        if !parts.Length
+            return []
+        if parts.Length = 1
+            return [groups]
+
+        distributions := []
+        markerCounts := []
+        totalMarkers := 0
+        for part in parts {
+            count := ListingParser.CountMatches(part, imageMarker)
+            markerCounts.Push(count)
+            totalMarkers += count
+        }
+
+        if totalMarkers = 0 {
+            index := 1
+            while index <= parts.Length {
+                distributions.Push([])
+                index++
+            }
+            groupIndex := 1
+            for group in groups {
+                target := groupIndex <= parts.Length ? groupIndex : parts.Length
+                distributions[target].Push(group)
+                groupIndex++
+            }
+            return distributions
+        }
+
+        for count in markerCounts
+            distributions.Push([])
+
+        groupIndex := 1
+        for group in groups {
+            assigned := false
+            for index, count in markerCounts {
+                if count > 0 && distributions[index].Length < count {
+                    distributions[index].Push(group)
+                    assigned := true
+                    break
+                }
+            }
+            if !assigned {
+                lastWithMarkers := 0
+                for index, count in markerCounts {
+                    if count > 0
+                        lastWithMarkers := index
+                }
+                target := lastWithMarkers > 0 ? lastWithMarkers : 1
+                distributions[target].Push(group)
+            }
+            groupIndex++
+        }
+        return distributions
+    }
+
+    _MergeGroups(left, right) {
+        result := []
+        seenUrl := Map()
+        for list in [left, right] {
+            for group in list {
+                if !(group is Map) || !group.Has("urls")
+                    continue
+                urls := []
+                for url in group["urls"] {
+                    value := Trim(String(url))
+                    if value = "" || seenUrl.Has(value)
+                        continue
+                    seenUrl[value] := true
+                    urls.Push(value)
+                }
+                if !urls.Length
+                    continue
+                mode := group.Has("mode") ? group["mode"] : "batch"
+                if mode != "single" && mode != "batch"
+                    mode := urls.Length > 1 ? "batch" : "single"
+                result.Push(Map("mode", mode, "urls", urls))
+            }
+        }
+        return result
+    }
+
+    _DistributeImagesToParts(parts, images, imageMarker) {
+        if !parts.Length
+            return []
+        if parts.Length = 1
+            return [images]
+
+        distributions := []
+        markerCounts := []
+        totalMarkers := 0
+        for part in parts {
+            count := ListingParser.CountMatches(part, imageMarker)
+            markerCounts.Push(count)
+            totalMarkers += count
+        }
+
+        if totalMarkers = 0 {
+            distributions.Push(images)
+            index := 2
+            while index <= parts.Length {
+                distributions.Push([])
+                index++
+            }
+            return distributions
+        }
+
+        urlIndex := 1
+        for count in markerCounts {
+            partImages := []
+            Loop count {
+                if urlIndex <= images.Length {
+                    partImages.Push(images[urlIndex])
+                    urlIndex++
+                }
+            }
+            distributions.Push(partImages)
+        }
+
+        if urlIndex <= images.Length {
+            lastWithMarkers := 0
+            for index, count in markerCounts {
+                if count > 0
+                    lastWithMarkers := index
+            }
+            target := lastWithMarkers > 0 ? lastWithMarkers : 1
+            while urlIndex <= images.Length {
+                distributions[target].Push(images[urlIndex])
+                urlIndex++
+            }
+        }
+        return distributions
     }
 
     _MergeUrls(left, right) {

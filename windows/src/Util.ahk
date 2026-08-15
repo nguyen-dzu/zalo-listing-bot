@@ -33,6 +33,15 @@ EnsureDir(path) {
     return path
 }
 
+; #region agent log
+AgentDbg(hypothesisId, location, message, dataJson := "{}") {
+    line := '{"sessionId":"36826f","runId":"post-fix","hypothesisId":"'
+        . hypothesisId '","location":"' location '","message":"' message
+        . '","timestamp":' A_TickCount ',"data":' dataJson "}`n"
+    try FileAppend line, "c:\Users\meo20\zalo-listing-bot\debug-36826f.log", "UTF-8-RAW"
+}
+; #endregion
+
 ReadTextFile(path) {
     if !FileExist(path)
         return ""
@@ -132,105 +141,6 @@ WithinConfiguredHours(start, finish, current := "") {
 
 ; Put a local file path on the clipboard as CF_HDROP so Zalo can Ctrl+V it as
 ; an attachment (Gemini/Zalo workaround when bitmap paste is unreliable).
-; #region agent log
-global AgentDiagnosticEnabled := false
-global AgentDiagnosticLogPath := ""
-
-ConfigureDiagnosticLog(enabled, logPath := "") {
-    global AgentDiagnosticEnabled, AgentDiagnosticLogPath
-    AgentDiagnosticEnabled := !!enabled
-    AgentDiagnosticLogPath := logPath
-    if AgentDiagnosticEnabled && AgentDiagnosticLogPath != "" {
-        dir := RegExReplace(AgentDiagnosticLogPath, "\\[^\\]+$")
-        if dir != AgentDiagnosticLogPath
-            EnsureDir(dir)
-    }
-}
-
-AgentDebugJsonEscape(text) {
-    s := String(text)
-    s := StrReplace(s, "\", "\\")
-    s := StrReplace(s, '"', '\"')
-    s := StrReplace(s, "`n", "\n")
-    s := StrReplace(s, "`r", "\r")
-    s := StrReplace(s, "`t", "\t")
-    return s
-}
-
-AgentDebugJsonValue(value) {
-    t := Type(value)
-    if t = "Integer" || t = "Float"
-        return value
-    if t = "String"
-        return '"' AgentDebugJsonEscape(value) '"'
-    if t = "Map" {
-        parts := []
-        for k, v in value
-            parts.Push('"' AgentDebugJsonEscape(k) '":' AgentDebugJsonValue(v))
-        return "{" StrJoin(parts, ",") "}"
-    }
-    return '"' AgentDebugJsonEscape(String(value)) '"'
-}
-
-AgentDebugSessionLogPath() {
-    root := DetectAppRoot(A_ScriptDir, false)
-    if root = ""
-        return ""
-    repoRoot := RegExReplace(root, "\\[^\\]+$", "")
-    if repoRoot = root
-        return ""
-    return repoRoot "\debug-850be2.log"
-}
-
-AgentDebugLog(location, message, data := unset, hypothesisId := "", runId := "pre-fix") {
-    global AgentDiagnosticEnabled, AgentDiagnosticLogPath
-    try {
-        linePayload := Map(
-            "runId", runId,
-            "hypothesisId", hypothesisId,
-            "location", location,
-            "message", message,
-            "timestamp", A_TickCount
-        )
-        if IsSet(data)
-            linePayload["data"] := data
-        line := AgentDebugJsonValue(linePayload) "`n"
-
-        sessionPath := AgentDebugSessionLogPath()
-        if sessionPath != "" {
-            sessionPayload := Map(
-                "sessionId", "850be2",
-                "runId", runId,
-                "hypothesisId", hypothesisId,
-                "location", location,
-                "message", message,
-                "timestamp", A_TickCount
-            )
-            if IsSet(data)
-                sessionPayload["data"] := data
-            FileAppend AgentDebugJsonValue(sessionPayload) "`n",
-                sessionPath, "UTF-8-RAW"
-        }
-
-        if AgentDiagnosticEnabled && AgentDiagnosticLogPath != "" {
-            runtimePayload := Map(
-                "sessionId", "runtime",
-                "runId", runId,
-                "hypothesisId", hypothesisId,
-                "location", location,
-                "message", message,
-                "timestamp", A_TickCount
-            )
-            if IsSet(data)
-                runtimePayload["data"] := data
-            FileAppend AgentDebugJsonValue(runtimePayload) "`n",
-                AgentDiagnosticLogPath, "UTF-8-RAW"
-        }
-    } catch {
-    }
-}
-; #endregion
-
 SetClipboardFile(filePath) {
     if !FileExist(filePath)
         return false
@@ -269,6 +179,34 @@ SetClipboardFile(filePath) {
     }
     DllCall("CloseClipboard")
     return true
+}
+
+FileToBase64(filePath) {
+    handle := FileOpen(filePath, "r")
+    if !handle
+        return ""
+    size := handle.Length
+    if size <= 0 {
+        handle.Close()
+        return ""
+    }
+    buf := Buffer(size)
+    if handle.Read(buf) != size {
+        handle.Close()
+        return ""
+    }
+    handle.Close()
+    outSize := 0
+    if !DllCall("Crypt32\CryptBinaryToStringW",
+        "Ptr", buf, "UInt", size, "UInt", 1,
+        "Ptr", 0, "UInt*", &outSize, "UInt", 0, "UInt", 0)
+        return ""
+    outBuf := Buffer(outSize * 2, 0)
+    if !DllCall("Crypt32\CryptBinaryToStringW",
+        "Ptr", buf, "UInt", size, "UInt", 1,
+        "Ptr", outBuf.Ptr, "UInt*", &outSize, "UInt", 0, "UInt", 0)
+        return ""
+    return StrReplace(StrGet(outBuf, outSize, "UTF-16"), "`r`n", "")
 }
 
 WriteBase64File(encoded, filePath) {

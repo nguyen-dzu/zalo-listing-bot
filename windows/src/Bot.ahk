@@ -10,6 +10,7 @@
 #Include BotControlWindow.ahk
 #Include BlockList.ahk
 #Include Parser.ahk
+#Include OutputRouter.ahk
 #Include Storage.ahk
 #Include StateStore.ahk
 #Include QueueStore.ahk
@@ -66,9 +67,6 @@ class ListingBotService {
     }
 
     _Build() {
-        ConfigureDiagnosticLog(
-            this.config.DiagnosticLogEnabled,
-            this.config.DiagnosticLogFile)
         this.registry := GroupRegistry(this.config)
         this.groupsDiscovered := false
         this.blockList := BlockList(this.config)
@@ -371,6 +369,11 @@ class ListingBotService {
     ; Tự khởi động sau khi script load (Startup folder hoặc mở Bot.ahk thủ công).
     AutoStart() {
         this.autoStartRetryPending := false
+        ; #region agent log
+        AgentDbg("H1", "Bot.ahk:AutoStart", "enter",
+            '{"watchRunning":' (this.watchRunning ? 1 : 0)
+            ',"operation":"' this.operation '"}')
+        ; #endregion
         if !this.config.StartupAutoRunWatch
             return false
         if this.emergencyStopped
@@ -384,14 +387,14 @@ class ListingBotService {
             this._Notify("Auto-start",
                 "Zalo Web (1 tab) sẵn sàng — bật watch loop tự động.", 1)
             ; #region agent log
-            AgentDebugLog("Bot.ahk:AutoStart", "auto_start_ok", Map(
-                "sources", this.registry.SourceGroups().Length), "H1")
+            AgentDbg("H1", "Bot.ahk:AutoStart", "ok_start_watch",
+                '{"sources":' this.registry.SourceGroups().Length "}")
             ; #endregion
             return this.RunExclusive("watch", ObjBindMethod(this, "RunWatchLoop"))
         } catch as err {
             ; #region agent log
-            AgentDebugLog("Bot.ahk:AutoStart", "auto_start_fail", Map(
-                "error", err.Message), "H1")
+            AgentDbg("H1", "Bot.ahk:AutoStart", "fail",
+                '{"error":"' StrReplace(StrReplace(err.Message, "\", "\\"), '"', '\"') '"}')
             ; #endregion
             transient := InStr(err.Message, "Chưa kết nối")
                 || InStr(err.Message, "Tampermonkey")
@@ -556,6 +559,11 @@ class ListingBotService {
         this._Notify("Da nap file nhom input",
             count " tong | " sources " input | "
             . this.registry.MainGroups().Length " output", 1)
+        ; #region agent log
+        AgentDbg("H2", "Bot.ahk:_LoadSourceGroups", "loaded",
+            '{"path":"' StrReplace(path, "\", "\\") '","count":' count
+            ',"sources":' sources "}")
+        ; #endregion
         return true
     }
 
@@ -593,22 +601,31 @@ class ListingBotService {
                         || !this.groupsDiscovered)
                         this._LoadSourceGroups()
                     sources := this.registry.SourceGroups()
-                    ; #region agent log
-                    AgentDebugLog("Bot.ahk:RunWatchLoop", "watch_cycle_start", Map(
-                        "cycle", cycles, "sourceCount", sources.Length), "H1")
-                    ; #endregion
                     unreadNames := []
-                    try unreadNames := this.ui.FindUnreadSidebarGroups(sources)
-                    catch {
+                    if cycles > 1 {
+                        try unreadNames := this.ui.FindUnreadSidebarGroups(sources)
+                        catch {
+                        }
                     }
                     plan := this.harvestScheduler.BuildContinuousPlan(
-                        sources, unreadNames)
+                        sources, unreadNames, false)
+                    ; #region agent log
+                    AgentDbg("H2", "Bot.ahk:RunWatchLoop", "plan",
+                        '{"cycle":' cycles
+                        ',"sourceGroups":' sources.Length
+                        ',"plannedGroups":' plan["groups"].Length
+                        ',"unreadDetected":' unreadNames.Length
+                        ',"onlyUnread":' (this.config.WatchOnlyUnreadAfterFirstCycle ? 1 : 0)
+                        ',"maxGroups":' this.config.HarvestMaxGroupsPerCycle
+                        ',"forceLatest":0}')
+                    ; #endregion
                     this._Notify("Watch vòng " cycles " bắt đầu",
                         plan["groups"].Length " nhóm nguồn"
                         . (plan["unread"] ? " | unread: " plan["unread"] : "")
                         . "`nHết vòng sẽ lặp lại từ đầu.", 1)
                     this.watchPublishBatchesRemaining :=
                         this.config.PublishBatchesPerWatchCycle
+                    this.queue.WaiveUnarchivedMedia("watch_unarchived")
                     harvest := this.harvester.HarvestGroups(
                         plan["groups"], ObjBindMethod(this, "_AfterWatchGroup"))
                     mediaRepair := this.mediaCapturer.RepairPending(
@@ -707,7 +724,7 @@ class ListingBotService {
             if !status["remaining_batches"]
                 break
             try {
-                summary := this.publisher.RunSession(1, bypass)
+                summary := this.publisher.RunSession(1, bypass, false)
                 this.watchPublishBatchesRemaining--
                 completed += summary["batches"]
                 if !summary["batches"] && !summary["failed"]

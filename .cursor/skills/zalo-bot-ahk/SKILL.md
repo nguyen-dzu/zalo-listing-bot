@@ -10,14 +10,14 @@ description: >-
 
 ## Context nhanh (Aug 2026)
 
-**Output publish:** 1 phòng → ảnh → text (icon format) → `=======` (tin riêng).
+**Output publish:** 1 phòng → (forward tin gốc nếu có ảnh kề, else paste archive) → text icon → `=======`. Tên nhóm nguồn chỉ trong `🏷️ tên nhóm`, không header riêng.
 
 **ZaloUI đã calibrate (Zalo Web, 1 tab Chrome):**
 
 - Cửa sổ normalized (`MaximizeBrowser=0`, `NormalizedWidth/Height` ~1100×850)
 - Mở nhóm qua bridge `navigate` (không click search sidebar PC)
 - Compose: bridge `focus_compose`, fallback click ~42%×88% client area
-- Message pane focus ~55%×45% khi harvest (tránh click giữa ảnh)
+- Message pane focus: bridge `focus_pane` (header, không click ảnh). Fallback click ~52%×10% + Esc
 - Publish session: `BeginPublishSession` → paste ảnh/text → `EndPublishSession`
 - Diagnostics: `[Diagnostics] Enabled=1` → `data/ui-diagnostic.jsonl`
 
@@ -29,6 +29,7 @@ description: >-
 | `MaximizeBrowser` | `0` = normalized (khuyến nghị) |
 | `PasteDelayMs`, `SendDelayMs`, `BetweenMessagesMs` | Timing paste/send |
 | `CaptureSettleMs` | Chờ sau focus message pane |
+| `MaxScanMessages` | Số tin mới nhất DOM scan mỗi nhóm (mặc định 20) |
 | `[Diagnostics] LogFile` | JSONL click/publish debug |
 
 **Backlog tóm tắt:** UI calibration **Done (needs E2E)**, output icon format **Done**.
@@ -72,7 +73,7 @@ Sửa `Parser.ahk` → thêm case vào `RunTests.ahk`.
 
 ## Output format
 
-Per room, per main group: paste ảnh → text (8 dòng icon) → separator `=======`.
+Per room, per main group: forward bubble gốc (nếu `forward_eligible`) hoặc paste archive ảnh → text icon → separator `=======`.
 
 ```text
 🏷️ tên nhóm: Nhóm nguồn A
