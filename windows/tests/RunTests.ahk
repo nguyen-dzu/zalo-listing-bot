@@ -179,6 +179,10 @@ class FakeCaptureUI {
         return true
     }
 
+    CopyVideoAt(location) {
+        return false
+    }
+
     SaveClipboardArchive(path) {
         EnsureDir(RegExReplace(path, "\\[^\\]+$", ""))
         WriteTextFile(path, "fake-image")
@@ -206,7 +210,7 @@ class FakeCaptureMedia {
         return this.files.Has(id)
     }
 
-    PrepareArchive(id, append := false, extension := "clip") {
+    PrepareArchive(id, append := false, extension := "clip", kind := "image") {
         dir := A_Temp "\zalo-fake-capture\" id
         genDir := dir "\generations\test-gen"
         EnsureDir(genDir)
@@ -649,6 +653,21 @@ if blocks.Length {
     Check("tin tự do validate", ListingParser.Validate(listing, []).Length = 0)
 }
 Check("bỏ tin chat thường", ListingParser.LooksLikeListing("Ok em cảm ơn") = false)
+t104Raw := "T104 @All"
+t104 := ListingParser.Parse(t104Raw)
+Check("T104 @All looks like listing", ListingParser.LooksLikeListing(t104Raw))
+Check("T104 lấy mã T104", t104["room_code"] = "T104", t104["room_code"])
+Check("T104 không ảnh thì chưa qualify",
+    !ListingParser.QualifiesAsRentalListing(t104))
+t104["image_count"] := 7
+t104["image_urls"] := ["https://photo.zdn.vn/t104-1.jpg"]
+Check("T104 có ảnh phòng thì qualify",
+    ListingParser.QualifiesAsRentalListing(t104))
+t104Card := ListingParser.Parse("Nguyenduy`n[Hình ảnh]`nT104 @All`n10:10")
+Check("T104 card [Hình ảnh] lấy mã T104",
+    t104Card["room_code"] = "T104", t104Card["room_code"])
+Check("không nhận chat Ok làm mã phòng",
+    ListingParser._SimpleRoomCodeFromText("Ok em cảm ơn") = "")
 shortRental := ListingParser.Parse("phòng 305 cho thuê 4tr")
 Check("tin ngắn phòng 305 được nhận",
     ListingParser.LooksLikeListing(shortRental["raw_text"]))
@@ -983,6 +1002,66 @@ Check("ex4 địa chỉ tân phú",
 Check("ex4 pdv 200k",
     InStr(ex4["service_price"], "200k") > 0, ex4["service_price"])
 
+c27Raw := "
+(
+💥 43 đường C27, Phường 12, Tân Bình, Nhà mới xây
+🍀 Phòng 202: studio rộng 25m full nội thất, rộng rãi. Giá 4tr5 ( 30/8 trống)
+🔸 Ra vào bằng khoá cổng Vân tay, không chung chủ, giờ giấc tự do 24/7.
+▶️ Điện 4k/kwhk
+▶️ Nước 100k/1 người
+▶️ Phí dịch vụ : 200k
+📣 Lh ngay:
+0905299507
+==============================
+👉 HD 12 tháng cọc 1 tháng (HH 80%)
+https://zalo.me/g/798ykkqjys3qgv24d3bi
+)"
+c27 := ListingParser.Parse(c27Raw)
+c27Out := ListingParser.FormatBlock(c27, false, "")
+Check("C27 qualify studio 202",
+    ListingParser.QualifiesAsRentalListing(c27))
+Check("C27 mã P202 không lấy P12 phường",
+    c27["room_code"] = "P202", c27["room_code"])
+Check("C27 giá 4tr5",
+    InStr(c27["price"], "4tr5") > 0, c27["price"])
+Check("C27 output không lộ SĐT",
+    !RegExMatch(c27Out, ListingParser.PHONE_FRAGMENT_PATTERN)
+    && !InStr(c27Out, "Lh ngay") && !InStr(c27Out, "0905299507"),
+    c27Out)
+Check("C27 giữ địa chỉ C27",
+    InStr(c27Out, "C27") > 0 && InStr(c27Out, "Tân Bình") > 0, c27Out)
+c27InfoLine := ""
+if RegExMatch(c27Out, "m)📍 thông tin phòng: (.+)$", &c27Info)
+    c27InfoLine := c27Info[1]
+Check("C27 thông tin không lặp điện nước dv",
+    !InStr(c27InfoLine, "Nước 100k")
+    && !InStr(c27InfoLine, "Điện 4k")
+    && !InStr(c27InfoLine, "Phí dịch vụ")
+    && !InStr(c27InfoLine, "200k"),
+    c27InfoLine)
+anNinhCount := 0
+pos := 1
+while pos := InStr(c27InfoLine, "Khu an ninh", false, pos) {
+    anNinhCount++
+    pos += 1
+}
+Check("C27 không lặp khối tiện ích",
+    anNinhCount <= 1, "count=" anNinhCount " | " c27InfoLine)
+ctaFragRaw := "
+(
+📢 Lh ngay:
+0905299507
+==============================
+👉 HD 12 tháng cọc 1 tháng (HH 80%)
+👉 HD 12 tháng cọc 1,5 tháng (HH 100%)
+Đường C27, P12, Tân Bình
+)"
+ctaFragOut := ListingParser.FormatBlock(ListingParser.Parse(ctaFragRaw), false, "")
+Check("CTA fragment không lộ SĐT",
+    !RegExMatch(ctaFragOut, ListingParser.PHONE_FRAGMENT_PATTERN)
+    && !InStr(ctaFragOut, "0905299507"),
+    ctaFragOut)
+
 exCompactRaw := "P201 - 2PN : 8.200.000 ( 20/8 trống )"
 exCompact := ListingParser.Parse(exCompactRaw)
 Check("compact P201 qualify",
@@ -1054,6 +1133,174 @@ Check("studio gò vấp có giá",
     studioGovap["price"] != "", studioGovap["price"])
 Check("studio gò vấp có địa chỉ",
     InStr(studioGovap["address"], "Lê Văn Thọ") > 0, studioGovap["address"])
+
+Section("screenshot harvest 2026-08")
+traKhucRaw := "
+(
+38 Trà Khúc Mã 201
+sát sân bay P2 Tân Bình nhà mới dạng 1PN bancol full nội thất,máy giặt riêng.Giá 8.6@ tr ( 30/8 Trống )
+Điện 4.000đ
+Nước 100k/ng
+Phí dv 200k/p
+Hh 50-80
+Cọc 1-1.5
+Liên hệ dẫn khách 0938292656 A Chính
+)"
+traKhuc := ListingParser.Parse(traKhucRaw)
+traKhucOut := ListingParser.FormatBlock(traKhuc, false, "")
+Check("Trà Khúc qualify",
+    ListingParser.QualifiesAsRentalListing(traKhuc))
+Check("Trà Khúc mã P201 không lấy P2",
+    traKhuc["room_code"] = "P201", traKhuc["room_code"])
+Check("Trà Khúc giá 8.6tr",
+    InStr(traKhuc["price"], "8.6") > 0 && InStr(StrLower(traKhuc["price"]), "tr") > 0,
+    traKhuc["price"])
+Check("Trà Khúc địa chỉ + Tân Bình",
+    (InStr(traKhuc["address"], "Trà Khúc") > 0
+        || InStr(traKhucOut, "Trà Khúc") > 0)
+    && (InStr(traKhuc["address"], "Tân Bình") > 0
+        || InStr(traKhucOut, "Tân Bình") > 0
+        || InStr(traKhucOut, "P2") > 0),
+    traKhuc["address"] " | " traKhucOut)
+Check("Trà Khúc loại 1PN",
+    InStr(StrLower(traKhucOut), "1pn") > 0, traKhucOut)
+Check("Trà Khúc không HH",
+    !InStr(StrLower(traKhucOut), "hh") && !InStr(traKhucOut, "50-80"),
+    traKhucOut)
+traKhucInfo := ""
+if RegExMatch(traKhucOut, "m)📍 thông tin phòng: (.+)$", &tkInfo)
+    traKhucInfo := tkInfo[1]
+Check("Trà Khúc 📍 không lặp điện nước giá",
+    !InStr(traKhucInfo, "4.000") && !InStr(traKhucInfo, "100k")
+    && !InStr(traKhucInfo, "8.6"),
+    traKhucInfo)
+Check("Trà Khúc giữ bancol/nội thất",
+    InStr(StrLower(traKhucOut), "ban công") > 0
+    || InStr(StrLower(traKhucOut), "nội thất") > 0,
+    traKhucOut)
+
+phanDinhRaw := "
+(
+248 Phan Đình Phùng Mã 205
+Trống 1PN bancol full nội thất, cửa khoá từ Trống Sẵn
+Nước 100k/ng
+Phí dv 200k/p
+Hh 50-80
+Cọc 1-1.5
+Liên hệ 0938292656 A Chính.
+)"
+phanDinh := ListingParser.Parse(phanDinhRaw)
+phanDinhOut := ListingParser.FormatBlock(phanDinh, false, "")
+Check("Phan Đình Phùng qualify không giá",
+    ListingParser.QualifiesAsRentalListing(phanDinh)
+    && ListingParser._ListingMatchRatio(phanDinh) >= 0.6)
+Check("Phan Đình Phùng mã P205",
+    phanDinh["room_code"] = "P205", phanDinh["room_code"])
+Check("Phan Đình Phùng 1PN bancol",
+    InStr(StrLower(phanDinhOut), "1pn") > 0
+    && (InStr(StrLower(phanDinhOut), "ban công") > 0
+        || InStr(StrLower(phanDinh["info"]), "bancol") > 0),
+    phanDinhOut)
+Check("Phan Đình Phùng không HH",
+    !InStr(phanDinhOut, "50-80") && !InStr(StrLower(phanDinhOut), "hh 50"),
+    phanDinhOut)
+
+toaNhaRaw := "
+(
+CHO THUÊ TÒA NHÀ CHDV TÂN BÌNH – 131 PHÒNG, ĐANG FULL KHÁCH
+Doanh thu hiện tại: 650 triệu/tháng
+Giá thuê: 500 triệu/tháng
+Quy mô: 131 phòng
+Đang full phòng, khai thác ổn định
+Đặt cọc: 3 tháng + thanh toán 1 tháng
+Liên hệ: 0899 010 094
+)"
+toaNha := ListingParser.Parse(toaNhaRaw)
+toaNhaOut := ListingParser.FormatBlock(toaNha, false, "")
+Check("tòa nhà 131 qualify",
+    ListingParser.QualifiesAsRentalListing(toaNha))
+Check("tòa nhà loại không lấy P131",
+    InStr(StrLower(toaNhaOut), "tòa nhà") > 0
+    || InStr(StrLower(toaNhaOut), "chdv") > 0,
+    toaNhaOut)
+Check("tòa nhà không mã P131",
+    toaNha["room_code"] = "" || !RegExMatch(toaNha["room_code"], "i)^P?131$"),
+    toaNha["room_code"])
+Check("tòa nhà giá thuê 500",
+    InStr(toaNha["price"], "500") > 0, toaNha["price"])
+
+pcccRaw := "
+(
+🔥 CHO THUÊ NHÀ MỚI TM PCCC
+Quy mô: 21 phòng + 1 Mặt bằng kinh doanh.
+Trang bị sẵn: Gác, kệ bếp, máy lạnh
+Giá thuê: cost phòng 3,x tr/tháng
+📞 Liên hệ: 07690.7777.3 (Thanh Tình)
+)"
+pccc := ListingParser.Parse(pcccRaw)
+pcccOut := ListingParser.FormatBlock(pccc, false, "")
+Check("PCCC 21 phòng qualify",
+    ListingParser.QualifiesAsRentalListing(pccc))
+Check("PCCC không mã P21",
+    pccc["room_code"] = "" || !RegExMatch(pccc["room_code"], "i)^P?21$"),
+    pccc["room_code"])
+
+hoangSaRaw := "
+(
+🔥 CẬP NHẬT DỰ ÁN 547/38 HOÀNG SA
+✅ Mặt trước: 7.200.000 (ban công, thang bộ)
+Mã: KC501 (L4)
+Nội Thất: Tủ, giường (nệm), kệ bếp, tủ lạnh, máy lạnh, lò vi sóng, bàn ghế, kệ tủ.
+⚙️ Thông tin dịch vụ
+Điện: 4k
+Nước: 100k/ng
+PDV: 200k/P
+Xe: Free (Bãi riêng cách 10m)
+Cọc: 1 tháng
+🌹 HH: 50 - 80 (HĐ 6-12 tháng)
+📲 Liên hệ dắt khách / chốt cọc: 0397821386
+)"
+hoangSa := ListingParser.Parse(hoangSaRaw)
+hoangSaOut := ListingParser.FormatBlock(hoangSa, false, "")
+Check("Hoàng Sa qualify",
+    ListingParser.QualifiesAsRentalListing(hoangSa))
+Check("Hoàng Sa mã KC501",
+    InStr(hoangSa["room_code"], "KC501") > 0, hoangSa["room_code"])
+Check("Hoàng Sa giá 7tr2",
+    InStr(hoangSa["price"], "7tr") > 0 || InStr(hoangSa["price"], "7.200") > 0,
+    hoangSa["price"])
+Check("Hoàng Sa địa chỉ",
+    InStr(hoangSa["address"], "547/38") > 0
+    || InStr(hoangSaOut, "547/38") > 0,
+    hoangSa["address"] " | " hoangSaOut)
+Check("Hoàng Sa strip HH",
+    !InStr(hoangSaOut, "50 - 80") && !InStr(StrLower(hoangSaOut), "hh:"),
+    hoangSaOut)
+Check("Hoàng Sa giữ nội thất",
+    InStr(StrLower(hoangSaOut), "nội thất") > 0
+    || InStr(StrLower(hoangSa["info"]), "tủ") > 0,
+    hoangSaOut)
+
+salesRaw := "
+(
+Địa chỉ: 12 Lê Lợi, Quận 1
+Mã phòng: P401
+💰 giá: sales sập sàn, thưởng nóng 500k/ phòng, hoa hồng cao
+Giá: 5tr5
+Full nội thất
+Liên hệ: 0901234567
+)"
+salesOut := ListingParser.FormatBlock(ListingParser.Parse(salesRaw), false, "")
+Check("sales sập sàn không lọt output",
+    !InStr(StrLower(salesOut), "sập sàn")
+    && !InStr(StrLower(salesOut), "thưởng nóng")
+    && !InStr(StrLower(salesOut), "hoa hồng"),
+    salesOut)
+Check("sales vẫn giữ giá phòng",
+    InStr(salesOut, "5tr5") > 0, salesOut)
+Check("chat thường dưới 60% không qualify",
+    !ListingParser.QualifiesAsRentalListing(
+        ListingParser.Parse("Ok em cảm ơn, mai em qua xem phòng")))
 
 ; ── Tách tin + gán ảnh ────────────────────────────────────
 Section("tách tin")
@@ -1377,14 +1624,14 @@ Check("harvester capture conversation lưu listing",
     && harvestRepo.records.Length = 1
     && harvestUi.captureIndex = 1)
 Check("harvester scan truyền max_messages",
-    harvestUi.lastMaxMessages = 20, harvestUi.lastMaxMessages)
+    harvestUi.lastMaxMessages = 50, harvestUi.lastMaxMessages)
 unreadScanUi := FakeHarvesterUI([validHarvestText])
 unreadScanResult := MessageHarvester(
     harvestCfg, unreadScanUi, FakeHarvesterRegistry(),
     FakeHarvesterBlockList(), FakeHarvesterState(), FakeHarvesterRepository()
 ).HarvestGroup("Nhóm Test", 1)
 Check("harvester scan cap theo unreadLimit",
-    unreadScanResult["saved"] = 1 && unreadScanUi.lastMaxMessages = 20,
+    unreadScanResult["saved"] = 1 && unreadScanUi.lastMaxMessages = 50,
     unreadScanUi.lastMaxMessages)
 
 atAllText := "@All `n" studioGovapRaw
@@ -1496,6 +1743,67 @@ if dualRepo.records.Length = 2 {
         imgByAddress["namky"] " / " imgByAddress["vovan"])
 }
 
+c27Capture := Map(
+    "text", c27Raw,
+    "group", "Hổ Trợ Chủ Đầu Tư-F1 Sale Phòng",
+    "messages", [Map(
+        "text", c27Raw,
+        "images", ["https://photo.zdn.vn/invite.jpg", "https://photo.zdn.vn/room1.jpg"],
+        "hash", "c27-hash")])
+c27Repo := FakeHarvesterRepository()
+c27Harvest := MessageHarvester(
+    harvestCfg, FakeHarvesterUI([c27Capture]),
+    FakeHarvesterRegistry(), FakeHarvesterBlockList(),
+    FakeHarvesterState(), c27Repo).HarvestGroup("Hổ Trợ Chủ Đầu Tư-F1 Sale Phòng")
+Check("C27 một bubble chỉ lưu 1 phòng",
+    c27Harvest["saved"] = 1, c27Harvest["saved"])
+if c27Repo.records.Length {
+    c27Saved := c27Repo.records[1]
+    c27SavedOut := ListingParser.FormatBlock(c27Saved, false, "")
+    Check("C27 harvest mã P202",
+        c27Saved["room_code"] = "P202", c27Saved["room_code"])
+    Check("C27 harvest không lộ SĐT",
+        !RegExMatch(c27SavedOut, ListingParser.PHONE_FRAGMENT_PATTERN),
+        c27SavedOut)
+}
+
+t104HarvestText := "T104 @All"
+t104HarvestCapture := Map(
+    "text", t104HarvestText,
+    "group", "Nhóm Simple",
+    "messages", [Map(
+        "text", t104HarvestText,
+        "images", [
+            "https://photo.zdn.vn/t104a.jpg",
+            "https://photo.zdn.vn/t104b.jpg"],
+        "hash", "t104-hash")])
+t104HarvestRepo := FakeHarvesterRepository()
+t104Harvest := MessageHarvester(
+    harvestCfg, FakeHarvesterUI([t104HarvestCapture]),
+    FakeHarvesterRegistry(), AtAllHarvestBlockList(),
+    FakeHarvesterState(), t104HarvestRepo).HarvestGroup("Nhóm Simple")
+Check("harvest T104 @All kèm ảnh",
+    t104Harvest["saved"] = 1 && t104Harvest["blocked"] = 0,
+    "saved=" t104Harvest["saved"] " blocked=" t104Harvest["blocked"])
+if t104HarvestRepo.records.Length {
+    Check("harvest T104 mã T104",
+        t104HarvestRepo.records[1]["room_code"] = "T104",
+        t104HarvestRepo.records[1]["room_code"])
+    Check("harvest T104 giữ ảnh lưới",
+        t104HarvestRepo.records[1]["image_count"] = 2,
+        t104HarvestRepo.records[1]["image_count"])
+}
+t104NoImg := MessageHarvester(
+    harvestCfg, FakeHarvesterUI([Map(
+        "text", t104HarvestText,
+        "group", "Nhóm Simple",
+        "messages", [Map("text", t104HarvestText, "images", [], "hash", "t104-noimg")])]),
+    FakeHarvesterRegistry(), AtAllHarvestBlockList(),
+    FakeHarvesterState(), FakeHarvesterRepository()
+).HarvestGroup("Nhóm Simple")
+Check("T104 @All không ảnh thì bỏ",
+    t104NoImg["saved"] = 0, t104NoImg["saved"])
+
 markedDualText := "
 (
 [Hình ảnh]
@@ -1572,6 +1880,45 @@ singleGroupResult := MessageHarvester(
 Check("harvest flat images: lưu 3 URL ảnh",
     singleGroupResult["saved"] = 1
     && singleGroupRepo.records[1]["image_count"] = 3)
+
+twoGridCapture := Map(
+    "text", "two grids",
+    "group", "Nhóm Two Grid",
+    "messages", [
+        Map("text", "38 Trà Khúc Mã 201`nGiá 8.6@ tr`nĐiện 4k`nNước 100k`nPhí dv 200k`nLiên hệ 0938292656",
+            "images", ["https://photo.zdn.vn/grid1a.jpg", "https://photo.zdn.vn/grid1b.jpg"],
+            "videos", [],
+            "hash", "grid-one"),
+        Map("text", "248 Phan Đình Phùng Mã 205`nTrống 1PN bancol full nội thất Trống Sẵn`nNước 100k/ng`nPhí dv 200k/p`nLiên hệ 0938292656",
+            "images", ["https://photo.zdn.vn/grid2a.jpg"],
+            "videos", ["https://dlfl.vn/room.mp4"],
+            "hash", "grid-two")
+    ])
+twoGridRepo := FakeHarvesterRepository()
+twoGridResult := MessageHarvester(
+    harvestCfg, FakeHarvesterUI([twoGridCapture]),
+    FakeHarvesterRegistry(), FakeHarvesterBlockList(),
+    FakeHarvesterState(), twoGridRepo).HarvestGroup("Nhóm Two Grid")
+Check("hai cụm lưới không trộn ảnh",
+    twoGridResult["saved"] = 2, "saved=" twoGridResult["saved"]
+    . " invalid=" twoGridResult["invalid"])
+if twoGridRepo.records.Length = 2 {
+    byCode := Map()
+    for record in twoGridRepo.records
+        byCode[record["room_code"]] := record
+    Check("cụm 1 chỉ ảnh lưới 1",
+        byCode.Has("P201") && byCode["P201"]["image_urls"].Length = 2
+        && InStr(byCode["P201"]["image_urls"][1], "grid1"),
+        twoGridRepo.records[1]["room_code"] " / " twoGridRepo.records[2]["room_code"])
+    Check("cụm 2 chỉ ảnh lưới 2",
+        byCode.Has("P205") && byCode["P205"]["image_urls"].Length = 1
+        && InStr(byCode["P205"]["image_urls"][1], "grid2"))
+    Check("video_urls tách khỏi images",
+        byCode.Has("P205") && byCode["P205"].Has("video_urls")
+        && byCode["P205"]["video_urls"].Length = 1
+        && InStr(byCode["P205"]["video_urls"][1], "room.mp4")
+        && byCode["P201"]["video_urls"].Length = 0)
+}
 
 groupDualText := "
 (
@@ -2175,6 +2522,7 @@ forwardCfg.MaxBatchesPerSession := 1
 forwardQueue := PublishQueueStore(forwardCfg)
 forwardRecord := MakePublisherRecord(800, 2, 1)
 forwardQueue.Enqueue(forwardRecord)
+forwardQueue.AttachMedia(forwardRecord["id"], ["800\001.clip", "800\002.clip"])
 forwardUi := FakePublisherUI()
 forwardSvc := DurableListingPublisher(
     forwardCfg, forwardUi, FakePublisherRegistry(),
@@ -2182,12 +2530,14 @@ forwardSvc := DurableListingPublisher(
     FakePublisherRepository([forwardRecord]), FakePublisherMedia())
 forwardSummary := forwardSvc.RunSession()
 forwardTrace := StrJoin(forwardUi.events, "|")
-Check("forward_eligible gửi forward trước text",
+Check("forward_eligible không forward tin gốc",
     forwardSummary["rooms"] = 1
-    && InStr(forwardTrace, "forward:") > 0
-    && InStr(forwardTrace, "forward:") < InStr(forwardTrace, "paste:text"))
-Check("checkpoint forward_sent",
-    forwardQueue.Get(forwardRecord["id"])["deliveries"]["Main A"]["forward_sent"] = 1)
+    && InStr(forwardTrace, "forward:") = 0
+    && InStr(forwardTrace, "paste:batch") > 0
+    && InStr(forwardTrace, "paste:batch") < InStr(forwardTrace, "paste:text"),
+    forwardTrace)
+Check("checkpoint không forward_sent",
+    forwardQueue.Get(forwardRecord["id"])["deliveries"]["Main A"]["forward_sent"] = 0)
 
 waiveRoot := A_Temp "\zalo-publisher-waive-media-tests"
 if DirExist(waiveRoot)
@@ -2256,7 +2606,7 @@ fallbackSvc := DurableListingPublisher(
     fallbackCfg, fallbackUi, FakePublisherRegistry(),
     MessageComposer(cfg), fallbackQueue,
     FakePublisherRepository([fallbackRecord]), FakePublisherMedia())
-fallbackSummary := fallbackSvc.RunSession()
+fallbackSummary := fallbackSvc.RunSession(1, true, true)
 fallbackTrace := StrJoin(fallbackUi.events, "|")
 Check("forward lỗi mở lại output trước khi paste archive",
     fallbackSummary["rooms"] = 1
@@ -2305,6 +2655,25 @@ legacyGroupTrace := StrJoin(legacyGroupUi.events, "|")
 Check("publish 2 ảnh trong một batch",
     InStr(legacyGroupTrace, "paste:batch") > 0
     && !InStr(legacyGroupTrace, "paste:single"))
+
+videoRecord := MakePublisherRecord(905, 2)
+groupsQueue.Enqueue(videoRecord)
+groupsQueue.AttachMedia(videoRecord["id"], [
+    "905\001.clip", "905\002.clip", "905\v001.clip"])
+videoUi := FakePublisherUI()
+videoSvc := DurableListingPublisher(
+    groupsCfg, videoUi, FakePublisherRegistry(),
+    MessageComposer(cfg), groupsQueue,
+    FakePublisherRepository([videoRecord]), FakePublisherMedia())
+videoSvc.RunSession()
+videoTrace := StrJoin(videoUi.events, "|")
+Check("publish ảnh batch rồi video riêng",
+    InStr(videoTrace, "paste:batch") > 0
+    && InStr(videoTrace, "paste:single") > 0
+    && InStr(videoTrace, "v001.clip") > 0
+    && InStr(videoTrace, "paste:batch") < InStr(videoTrace, "paste:single")
+    && InStr(videoTrace, "paste:single") < InStr(videoTrace, "paste:text"),
+    videoTrace)
 
 ; Routing sends each listing to exactly one output group.
 multiRoot := A_Temp "\zalo-publisher-multi-output-tests"
@@ -2565,10 +2934,10 @@ forwardCapture := ListingMediaCapturer(
 forwardProbeRecord := Map(
     "id", "forward-probe", "room_code", "P404",
     "address", "", "raw_text", "Mã phòng: P404", "image_count", 0)
-Check("web probe không phóng đại số ảnh",
+Check("web probe không lấy ảnh khi thiếu lưới và hash",
     forwardCapture.CaptureForRecord("Nhóm Probe", forwardProbeRecord)
-    && forwardProbeRecord["image_count"] = 1
-    && forwardQueue.attached.Length = 1)
+    && forwardProbeRecord["image_count"] = 0
+    && forwardQueue.attached.Length = 0)
 
 captureFailRoot := A_Temp "\zalo-capture-fail-waive-tests"
 if DirExist(captureFailRoot)

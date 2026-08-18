@@ -6,7 +6,7 @@ Updated: Aug 2026. Agent **must read this file** before changing publish/parser/
 
 ## P0 — Required (operational)
 
-### 1. Output format — 1 room per cycle: one image per message → text → separator (Aug 2026)
+### 1. Output format — 1 room per cycle: grid images → video → text → separator (Aug 2026)
 
 **Forced:** `OneMessagePerListing=1`, `SendSeparatorAsMessage=1`, `LeaseSize=1`,
 `PublishAfterGroups=1`. Multi-room blob / harvest batch-5 đã gỡ.
@@ -16,12 +16,12 @@ quận số → ngoại thành → giá (`ListingOutputRouter`, `[OutputRouting]
 
 Per room in the routed output group:
 
-1. Paste archived images **one `.clip` per Zalo message** (Enter after each)
-2. Send formatted text for that room
-3. Send `=======` as its own message
-4. Next room
+1. Paste archived **grid images** in one Zalo message
+2. Paste video (if archived) as its own message; skip if copy fails
+3. Send formatted text for that room
+4. Send `=======` as its own message
 
-**Debug note (Aug 2026):** reverted from `image_groups` batch/cluster paste to per-image send while fixing harvest image detection.
+**Debug note (Aug 2026):** image_groups neighbor-walk removed; publish uses archive paste, not forward of original bubble.
 
 ---
 
@@ -109,13 +109,22 @@ Added to `blocklist.example.csv` + tests:
 
 **Parser (`ListingParser`):**
 
-- Strip promo lines: tham gia cộng đồng, chốt/thưởng nóng, link nhóm, vay tài chính, …
-- `thông tin phòng` chỉ giữ thuộc tính phòng (nội thất, duplex, hẻm xe hơi, số người, …)
-- `QualifiesAsRentalListing`: gate harvest — cần ≥2 lõi (giá, địa chỉ, mã, dịch vụ/điện/nước, SĐT, info)
-- Text-only vẫn harvest nếu đủ lõi; không bắt buộc ảnh lúc capture
+- Strip promo lines: tham gia cộng đồng, chốt/thưởng nóng, sales sập sàn, HH/hoa hồng, link nhóm, …
+- `thông tin phòng` tách clause, không lặp giá/điện/nước/mã/SĐT
+- `QualifiesAsRentalListing`: ≥60% of 8 harvest slots **or** parsed address+price; photo+room-code bypass
+- Compact broker posts (`38 Trà Khúc Mã 201`, `8.6@ tr`, `bancol`) + tòa nhà CHDV
 - Pure promo / link nhóm → `invalid`, mark seen
 
-**Tests:** section `rental-only filter` in `RunTests.ahk` (G01 regression + P401 promo strip).
+**Tests:** `rental-only filter` + `screenshot harvest 2026-08` in `RunTests.ahk`.
+
+---
+
+### 5c. Grid images + video publish — DONE (Aug 2026)
+
+- Userscript v4.3.20: lowest message ancestor, images from one grid cluster, `video_urls` separate
+- `find_images` no longer walks neighbor bubbles (±2)
+- Publish: paste image grid (one message) → video (skip if fail) → formatted text → `=======`
+- Do not forward original bubble (HH/sales + mixed rooms)
 
 ---
 

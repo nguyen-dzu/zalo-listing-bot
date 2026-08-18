@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zalo Listing Bot — Web Bridge
 // @namespace    zalo-listing-bot
-// @version      4.3.10
+// @version      4.3.20
 // @description  Single-tab Zalo Web: harvest source groups then switch to sale group in-place
 // @match        *://chat.zalo.me/*
 // @match        *://chat.zalo.me/
@@ -22,7 +22,7 @@
 (function () {
     'use strict';
 
-    const SCRIPT_VERSION = '4.3.10';
+    const SCRIPT_VERSION = '4.3.20';
     const BRIDGE = {
         host: '127.0.0.1',
         port: 8080,
@@ -122,7 +122,11 @@
     let registerTimer = null;
     let observerDebounce = null;
     let pollBusy = false;
+    let pollBusySince = 0;
     let lastDomDiagnostics = { matchedSelector: '', messageCount: 0 };
+    let lastScanDebug = {
+        collected: 0, windowed: 0, divider: 0, imageOnly: 0, rawImgs: 0
+    };
     let outputGroupNames = [];
     let eventsPaused = false;
 
@@ -196,7 +200,7 @@
                 url,
                 headers: body ? { 'Content-Type': 'application/json' } : undefined,
                 data: body ? JSON.stringify(body) : undefined,
-                timeout: 8000,
+                timeout: path.indexOf('/api/command') === 0 ? 4000 : 8000,
                 onload(resp) {
                     try {
                         resolve({
@@ -272,6 +276,12 @@
         if (pane && pane.contains(el)) score += 2;
         const text = extractMessageText(el);
         if (text.length > 12) score += 3;
+        let sizedPhotos = 0;
+        for (const img of el.querySelectorAll('img')) {
+            if (!isAvatarImage(img) && isSizedMessageMedia(img)) sizedPhotos++;
+        }
+        if (sizedPhotos >= 2) score += 4;
+        else if (sizedPhotos === 1) score += 2;
         if (extractMessageImages(el).length) score += 2;
         if (el.querySelector('img, video, [class*="photo"], [class*="album"], [class*="media"]')) score += 1;
         return score;
@@ -304,8 +314,10 @@
             for (let depth = 0; candidate && depth < 8; depth++, candidate = candidate.parentElement) {
                 if (candidate === pane || isExcludedElement(candidate)) break;
                 const score = scoreMessageElement(candidate, pane);
-                if (score >= 3 && (!best || score > best.score))
+                if (score >= 2) {
                     best = { el: candidate, score, selector: 'media ancestor' };
+                    break;
+                }
             }
             if (best && !seen.has(best.el)) {
                 seen.add(best.el);
@@ -399,54 +411,6 @@
         return normalizeText(clone.innerText || clone.textContent);
     }
 
-    function classifyTimeValue(value) {
-        const raw = String(value || '').trim();
-        if (!raw) return '';
-        if (/^\d{13}$/.test(raw)) return 'epoch_ms';
-        if (/^\d{10}$/.test(raw)) return 'epoch_s';
-        if (/\b\d{1,2}:\d{2}\b/.test(raw) && /\b\d{1,2}[\/.-]\d{1,2}/.test(raw))
-            return 'date_time';
-        if (/\b\d{1,2}:\d{2}\b/.test(raw)) return 'clock';
-        if (/\b\d{1,2}[\/.-]\d{1,2}(?:[\/.-]\d{2,4})?\b/.test(raw))
-            return 'date';
-        return 'other';
-    }
-
-    function timeValueShape(value) {
-        return String(value || '')
-            .trim()
-            .replace(/\d/g, '#')
-            .replace(/[A-Za-zÀ-ỹ]/g, 'a')
-            .replace(/\s+/g, ' ')
-            .slice(0, 48);
-    }
-
-    function inspectMessageTime(item) {
-        const nodes = [
-            item,
-            ...item.querySelectorAll(
-                'time, [class*="time"], [data-time], [data-timestamp], [datetime]')
-        ];
-        const values = [];
-        let structured = false;
-        for (const node of nodes) {
-            for (const attr of ['datetime', 'data-time', 'data-timestamp', 'title', 'aria-label']) {
-                const value = node.getAttribute && node.getAttribute(attr);
-                if (!value) continue;
-                if (attr === 'datetime' || attr === 'data-time' || attr === 'data-timestamp')
-                    structured = true;
-                values.push(value);
-            }
-            if (node !== item) {
-                const text = normalizeText(node.innerText || node.textContent || '');
-                if (text) values.push(text);
-            }
-        }
-        const kinds = [...new Set(values.map(classifyTimeValue).filter(Boolean))];
-        const shapes = [...new Set(values.map(timeValueShape).filter(Boolean))].slice(0, 4);
-        return { found: values.length > 0, structured, kinds, shapes };
-    }
-
     function isPlaceholderImageSrc(src) {
         const value = String(src || '').trim().toLowerCase();
         if (!value || value === 'about:blank') return true;
@@ -526,24 +490,22 @@
     function extractVideoUrls(item) {
         const urls = [];
         const seen = new Set();
-        const push = (url) => {
-            if (!url || seen.has(url)) return;
-            seen.add(url);
-            urls.push(url);
-        };
         for (const video of item.querySelectorAll('video')) {
             if (isAvatarImage(video)) continue;
             const candidates = [
-                video.poster,
-                video.getAttribute('poster'),
                 video.currentSrc,
                 video.src,
                 video.getAttribute('data-src'),
                 video.getAttribute('data-url')
             ];
             for (const candidate of candidates) {
-                if (isChatImageUrl(candidate, video))
-                    push(candidate);
+                const value = String(candidate || '').trim();
+                if (!value || seen.has(value)) continue;
+                if (value.startsWith('blob:') || /^https?:/i.test(value)) {
+                    seen.add(value);
+                    urls.push(value);
+                    break;
+                }
             }
         }
         return urls;
@@ -575,6 +537,7 @@
         };
         for (const el of root.querySelectorAll('[style*="background"]')) {
             if (el.closest('[class*="avatar"]')) continue;
+            if (isInviteOrContactImage(el)) continue;
             const style = el.getAttribute('style') || '';
             const re = /url\(\s*['"]?([^'")]+)['"]?\s*\)/gi;
             let match;
@@ -594,14 +557,10 @@
 
     function isCommunityCardImage(img) {
         if (!img || !img.closest) return false;
-        const { w, h } = mediaElementSize(img);
-        const wide = w >= 240 && h > 0 && w / h >= 2.0;
-        const album = img.closest('[class*="album"], [class*="grid"]');
-        const inAlbum = !!(album && album.querySelectorAll('img').length >= 2);
-        if (inAlbum && !wide) return false;
+        if (isRoomPhotoImage(img)) return false;
         const skipSelectors = [
-            '[class*="link"]', '[class*="preview"]', '[class*="card"]',
-            '[class*="share"]', '[class*="og-"]', '[class*="banner"]',
+            '[class*="link"]', '[class*="preview"]', '[class*="og-"]',
+            '[class*="share"]', '[class*="banner"]',
             '[class*="community"]', '[class*="group-info"]',
             '[class*="article"]', '[class*="rich-link"]'
         ];
@@ -616,10 +575,9 @@
         for (let depth = 0; el && depth < 5; depth++, el = el.parentElement) {
             const text = normalizeText(el.innerText || el.textContent || '');
             if (text.length > 180) break;
-            if (/cộng đồng|community|link\s+nhóm|tham\s+gia\s+cộng\s+đồng|dự án/i.test(text))
+            if (/cộng đồng|community|link\s+nhóm|tham\s+gia\s+cộng\s+đồng|home\s*365/i.test(text))
                 return true;
         }
-        if (wide) return true;
         return false;
     }
 
@@ -630,18 +588,110 @@
             + '[class*="pin-bar"], [class*="pinBar"], header [class*="pin"]');
     }
 
+    function cardLocalText(el) {
+        if (!el || !el.closest) return '';
+        const box = el.closest(
+            '[class*="link"], [class*="preview"], [class*="card"], [class*="share"],'
+            + ' [class*="og-"], [class*="contact"], [class*="qr"], [class*="banner"]');
+        const root = box || el.parentElement;
+        const t = normalizeText((root && (root.innerText || root.textContent)) || '');
+        if (t.length && t.length <= 280) return t;
+        let node = el.parentElement;
+        for (let depth = 0; node && depth < 5; depth++, node = node.parentElement) {
+            const s = normalizeText(node.innerText || node.textContent || '');
+            if (s.length > 220) break;
+            if (s.length > 8) return s;
+        }
+        return t.slice(0, 280);
+    }
+
+    function isRoomPhotoImage(img) {
+        if (!img || isAvatarImage(img)) return false;
+        if (img.closest(
+            '[class*="og-"], [class*="rich-link"], [class*="link-preview"],'
+            + ' [class*="LinkPreview"]'))
+            return false;
+        const { w, h } = mediaElementSize(img);
+        if (w >= 72 && h >= 72) return true;
+        return isPhotoGridImage(img) && isSizedMessageMedia(img);
+    }
+
+    function isInviteOrContactImage(img) {
+        if (!img || !img.closest) return false;
+        const t = cardLocalText(img);
+        if (/kết bạn|nhắn tin/i.test(t)) return true;
+        if (isRoomPhotoImage(img)) return false;
+        if (/zalo\.me|tham gia cộng đồng|bấm vào đây|cộng đồng/i.test(t)
+            && !/giá\s*\d|\d+\s*tr\b|\d+tr\d|phòng\s+\d/i.test(t))
+            return true;
+        return isCommunityCardImage(img);
+    }
+
+    function hasRentalCore(text) {
+        const t = normalizeText(text || '');
+        return /(?:giá|cho thuê|phòng\s+\d|studio|duplex|mã phòng|địa chỉ|trống\s*(?:sẵn|phòng|\d)|full nội thất|\d+tr\d|\d+\s*tr\b|\b1pn\b|\b2pn\b|phí dv|pdv|\bbancol\b|(?:mã|ma)\s*[:\-–]?\s*\d{2,4}|tòa nhà|quy mô)/i.test(t);
+    }
+
+    function isClockOnlyText(text) {
+        return /^\d{1,2}:\d{2}$/.test(normalizeText(text || ''));
+    }
+
+    function isRoomCodeCaption(text) {
+        const t = normalizeText(text || '');
+        if (!t) return false;
+        const cleaned = t
+            .replace(/\[hình ảnh\]/gi, ' ')
+            .replace(/@all\b/gi, ' ')
+            .replace(/(?:^|\s)\d{1,2}:\d{2}(?:\s|$)/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!cleaned || cleaned.length > 48) return false;
+        if (/^(?:[A-Za-z]{1,3}\d{2,4}[A-Za-z]?|\d{3,4})$/.test(cleaned))
+            return true;
+        const tokens = cleaned.split(' ').filter(Boolean);
+        if (tokens.length > 4) return false;
+        const codes = tokens.filter(x => /^[A-Za-z]{1,3}\d{2,4}[A-Za-z]?$/.test(x));
+        const rest = tokens.filter(x => !/^[A-Za-z]{1,3}\d{2,4}[A-Za-z]?$/.test(x));
+        return codes.length === 1 && rest.every(x => !/\d/.test(x) && x.length <= 24);
+    }
+
+    function isPromoCaption(text) {
+        const t = normalizeText(text || '');
+        if (!t || isClockOnlyText(t)) return false;
+        if (/kết bạn|nhắn tin/i.test(t) && t.length < 240) return true;
+        if (/zalo\.me\/g\/|tham gia cộng đồng|bấm vào đây để tham gia/i.test(t)
+            && !hasRentalCore(t))
+            return true;
+        return false;
+    }
+
+    function isListingCaption(text) {
+        const t = normalizeText(text || '');
+        if (!t || isClockOnlyText(t) || isPromoCaption(t)) return false;
+        return hasRentalCore(t) || isRoomCodeCaption(t);
+    }
+
+    function isBareSenderOrNoise(text) {
+        const t = normalizeText(text || '');
+        if (!t || isClockOnlyText(t)) return true;
+        if (hasRentalCore(t) || isRoomCodeCaption(t) || isPromoCaption(t)) return false;
+        return t.length <= 48;
+    }
+
+    function effectiveCaption(text) {
+        if (isBareSenderOrNoise(text)) return '';
+        return text;
+    }
+
+    function isPhotoCarrier(message) {
+        return !!(message && message.images && message.images.length
+            && !isListingCaption(message.text));
+    }
+
     function isPromoBannerImage(img, item) {
         if (!img) return false;
         if (isPinnedRegion(img) || isPinnedRegion(item)) return true;
-        if (isCommunityCardImage(img)) return true;
-        const { w, h } = mediaElementSize(img);
-        const album = img.closest('[class*="album"], [class*="grid"]');
-        const inAlbum = !!(album && album.querySelectorAll('img').length >= 2);
-        if (!inAlbum && w >= 280 && h > 0 && w / h >= 2.0) return true;
-        const t = normalizeText((item && (item.innerText || item.textContent)) || '');
-        if (/cộng đồng|dự án|home\s*365|link nhóm/i.test(t)
-            && !/giá|trống sẵn|mã phòng|địa chỉ/i.test(t))
-            return true;
+        if (isInviteOrContactImage(img)) return true;
         return false;
     }
 
@@ -655,7 +705,9 @@
         };
 
         for (const img of item.querySelectorAll('img')) {
-            if (isAvatarImage(img) || isPromoBannerImage(img, item)) continue;
+            if (isAvatarImage(img)) continue;
+            const roomPhoto = isRoomPhotoImage(img);
+            if (!roomPhoto && isPromoBannerImage(img, item)) continue;
             let url = resolveImageUrl(img);
             if (!url && isPhotoGridImage(img) && isSizedMessageMedia(img))
                 url = img.currentSrc || img.src || img.getAttribute('data-src') || '';
@@ -663,14 +715,12 @@
         }
 
         for (const source of item.querySelectorAll('picture source[srcset], source[srcset]')) {
+            if (isInviteOrContactImage(source)) continue;
             const url = parseSrcsetValue(source.srcset || source.getAttribute('srcset'));
             if (isChatImageUrl(url, source)) push(url);
         }
 
         for (const url of extractBackgroundImageUrls(item))
-            push(url);
-
-        for (const url of extractVideoUrls(item))
             push(url);
 
         return urls;
@@ -738,13 +788,15 @@
     }
 
     function collectMessages() {
+        const items = findMessageElements();
         const messages = [];
-        for (const item of findMessageElements()) {
+        for (const item of items) {
             if (isPinnedRegion(item)) continue;
             const text = extractMessageText(item);
             const images = extractMessageImages(item);
-            if (!text && !images.length) continue;
-            const hash = fnvHash(text + images.join('|'));
+            const videos = extractVideoUrls(item);
+            if (!text && !images.length && !videos.length) continue;
+            const hash = fnvHash(text + images.join('|') + videos.join('|'));
             const nestedDuplicate = messages.some(message =>
                 message.hash === hash &&
                 (message.element.contains(item) || item.contains(message.element))
@@ -754,6 +806,7 @@
                 element: item,
                 text,
                 images,
+                videos,
                 timeMs: extractMessageTimeMs(item),
                 hash
             });
@@ -766,6 +819,140 @@
         if (!Number.isFinite(limit) || limit <= 0 || items.length <= limit)
             return items;
         return items.slice(-limit);
+    }
+
+    function findUnreadDividerElement() {
+        const pane = getMessagePane();
+        if (!pane) return null;
+        const re = /^(?:[-–—•\s]*)(?:\d+\s+)?(?:tin nhắn chưa đọc|tin chưa đọc|unread messages)(?:\s*[-–—•]*)?$/i;
+        for (const el of pane.querySelectorAll('div, span, p, strong')) {
+            if (isExcludedElement(el) || isPinnedRegion(el)) continue;
+            if (el.closest('[class*="rich-text"], [class*="message-text"], [class*="text-message"]'))
+                continue;
+            const t = normalizeText(el.innerText || el.textContent || '');
+            if (t.length < 8 || t.length > 40) continue;
+            if (re.test(t)) return el;
+        }
+        return null;
+    }
+
+    function indexAfterUnreadDivider(messages) {
+        const divider = findUnreadDividerElement();
+        if (!divider || !messages.length) return -1;
+        for (let i = 0; i < messages.length; i++) {
+            const el = messages[i] && messages[i].element;
+            if (!el || !el.isConnected) continue;
+            if (divider === el || divider.contains(el)) return i;
+            const pos = divider.compareDocumentPosition(el);
+            if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return i;
+        }
+        return -1;
+    }
+
+    function sliceUnreadToNewest(messages, maxBubbles) {
+        return takeNewestMessages(messages, maxBubbles);
+    }
+
+    async function collectUnreadToNewestWindow(maxBubbles) {
+        const pane = getMessagePane();
+        const scrollable = pane
+            ? (pane.closest('[class*="scroll"]') || pane)
+            : null;
+        const map = new Map();
+        const ordered = [];
+        const ingest = (where) => {
+            const fresh = [];
+            for (const m of collectMessages()) {
+                const prev = map.get(m.hash);
+                if (prev) {
+                    if (m.images.length > prev.images.length
+                        || (m.videos || []).length > (prev.videos || []).length) {
+                        map.set(m.hash, m);
+                        const idx = ordered.indexOf(prev);
+                        if (idx >= 0) ordered[idx] = m;
+                    }
+                    continue;
+                }
+                let upgraded = false;
+                for (const [hash, old] of map.entries()) {
+                    if ((old.text || '') === (m.text || '')
+                        && (m.images.length > old.images.length
+                            || (m.videos || []).length > (old.videos || []).length)) {
+                        map.delete(hash);
+                        map.set(m.hash, m);
+                        const idx = ordered.indexOf(old);
+                        if (idx >= 0) ordered[idx] = m;
+                        upgraded = true;
+                        break;
+                    }
+                }
+                if (upgraded) continue;
+                map.set(m.hash, m);
+                fresh.push(m);
+            }
+            if (where === 'up')
+                ordered.unshift(...fresh);
+            else
+                ordered.push(...fresh);
+            return fresh.length;
+        };
+
+        const hydrate = async () => {
+            const paneEl = getMessagePane();
+            if (!paneEl) return;
+            let n = 0;
+            for (const img of paneEl.querySelectorAll('img')) {
+                if (isAvatarImage(img) || resolveImageUrl(img)) continue;
+                if (!isSizedMessageMedia(img) && !isPhotoGridImage(img)) continue;
+                try {
+                    img.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+                } catch (_) { /* ignore */ }
+                n++;
+                if (n >= 8) break;
+            }
+            if (n) await sleep(160);
+        };
+
+        let divider = 0;
+        if (scrollable) {
+            scrollable.scrollTop = scrollable.scrollHeight;
+            await sleep(250);
+        }
+        await hydrate();
+        ingest('down');
+        if (findUnreadDividerElement())
+            divider = 1;
+
+        if (scrollable) {
+            for (let step = 0; step < 12; step++) {
+                if (ordered.length >= maxBubbles) break;
+                if (findUnreadDividerElement()) {
+                    divider = 1;
+                    ingest('up');
+                    break;
+                }
+                if (scrollable.scrollTop <= 2) break;
+                scrollable.scrollTop = Math.max(
+                    0, scrollable.scrollTop - Math.max(120, scrollable.clientHeight * 0.85));
+                await sleep(220);
+                await hydrate();
+                ingest('up');
+            }
+            scrollable.scrollTop = scrollable.scrollHeight;
+            await sleep(180);
+            await hydrate();
+            ingest('down');
+        }
+
+        const windowed = takeNewestMessages(ordered, maxBubbles);
+        return {
+            ordered,
+            windowed,
+            collected: ordered.length,
+            divider,
+            imageOnly: windowed.filter(m => !effectiveCaption(m.text) && m.images.length).length,
+            rawImgs: windowed.reduce((n, m) => n + (m.images || []).length, 0)
+        };
     }
 
     const MAX_IMAGE_TEXT_GAP_MS = 90 * 1000;
@@ -791,10 +978,59 @@
         }
         if (best < 0) return -1;
         const text = messages[best];
-        if (img.timeMs && text.timeMs) {
-            if (bestDt > MAX_IMAGE_TEXT_GAP_MS) return -1;
-        } else if (bestDom > 2) {
+        if (img.timeMs && text.timeMs && bestDt > MAX_IMAGE_TEXT_GAP_MS)
             return -1;
+        return best;
+    }
+
+    function gridRoot(message) {
+        const el = message && message.element;
+        if (!el || !el.closest) return null;
+        return el.closest(
+            '[class*="album"], [class*="photo-grid"], [class*="photogrid"],'
+            + ' [class*="media-grid"], [class*="image-grid"]') || el;
+    }
+
+    function imageRuns(messages) {
+        const runs = [];
+        let run = [];
+        let runRoot = null;
+        for (let i = 0; i < messages.length; i++) {
+            if (isPhotoCarrier(messages[i])) {
+                const root = gridRoot(messages[i]);
+                if (run.length && runRoot && root && root !== runRoot) {
+                    runs.push(run);
+                    run = [];
+                }
+                run.push(i);
+                runRoot = root || runRoot;
+            } else if (run.length) {
+                runs.push(run);
+                run = [];
+                runRoot = null;
+            }
+        }
+        if (run.length)
+            runs.push(run);
+        return runs;
+    }
+
+    function nearestTextForRun(indices, textIndices, messages) {
+        const mid = indices[Math.floor(indices.length / 2)];
+        const hasTime = indices.some(i => messages[i].timeMs)
+            && textIndices.some(ti => messages[ti].timeMs);
+        if (hasTime)
+            return nearestTextByTime(mid, textIndices, messages);
+        const first = indices[0];
+        const last = indices[indices.length - 1];
+        let best = -1;
+        let bestGap = Infinity;
+        for (const ti of textIndices) {
+            const gap = ti < first ? first - ti : (ti > last ? ti - last : 0);
+            if (gap <= 3 && gap < bestGap) {
+                bestGap = gap;
+                best = ti;
+            }
         }
         return best;
     }
@@ -802,17 +1038,25 @@
     function associateImagesWithText(messages) {
         const textIndices = [];
         for (let i = 0; i < messages.length; i++) {
-            if (messages[i].text) textIndices.push(i);
+            if (isListingCaption(messages[i].text)) textIndices.push(i);
+        }
+        if (!textIndices.length) {
+            for (let i = 0; i < messages.length; i++) {
+                const cap = effectiveCaption(messages[i].text);
+                if (cap && !isPromoCaption(cap)) textIndices.push(i);
+            }
         }
 
         const imageOwner = new Map();
         let droppedFar = 0;
-        for (let i = 0; i < messages.length; i++) {
-            const msg = messages[i];
-            if (msg.text || !msg.images.length) continue;
-            const target = nearestTextByTime(i, textIndices, messages);
-            if (target >= 0) imageOwner.set(i, target);
-            else droppedFar++;
+        for (const run of imageRuns(messages)) {
+            const target = nearestTextForRun(run, textIndices, messages);
+            if (target >= 0) {
+                for (const i of run)
+                    imageOwner.set(i, target);
+            } else {
+                droppedFar += run.length;
+            }
         }
 
         const ownedBefore = new Map();
@@ -833,22 +1077,20 @@
             const before = ownedBefore.get(ti) || [];
             const after = ownedAfter.get(ti) || [];
             let keep = [];
-            if (before.length && after.length) {
-                const beforeCount = before.reduce((n, i) => n + messages[i].images.length, 0);
-                const afterCount = after.reduce((n, i) => n + messages[i].images.length, 0);
-                const beforeDt = minTimeDelta(messages[ti], before, messages);
-                const afterDt = minTimeDelta(messages[ti], after, messages);
-                if (beforeDt < afterDt) keep = before;
-                else if (afterDt < beforeDt) keep = after;
-                else keep = beforeCount >= afterCount ? before : after;
-            } else {
+            if (before.length && after.length)
+                keep = before;
+            else
                 keep = before.concat(after);
-            }
 
             const images = [...message.images];
-            for (const idx of keep)
-                images.push(...messages[idx].images);
-            const hash = fnvHash(message.text + images.join('|'));
+            const videos = [...(message.videos || [])];
+            if (!images.length) {
+                for (const idx of keep) {
+                    images.push(...messages[idx].images);
+                    videos.push(...(messages[idx].videos || []));
+                }
+            }
+            const hash = fnvHash(message.text + images.join('|') + videos.join('|'));
             const hadBefore = keep.some(idx => idx < ti);
             const hadAfter = keep.some(idx => idx > ti);
             const forward_eligible = images.length > 0
@@ -857,6 +1099,7 @@
             result.push({
                 text: message.text,
                 images,
+                videos,
                 hash,
                 message_hash: hash,
                 dom_index: ti,
@@ -905,33 +1148,6 @@
         await sleep(300);
     }
 
-    function findPinnedBanner() {
-        const nodes = document.querySelectorAll(
-            'header, [class*="chat-header"], [class*="header-bar"], [class*="conv-header"]');
-        const pinSels = [
-            '[class*="pin-msg"]', '[class*="PinMsg"]', '[class*="pinned"]',
-            '[class*="pin-bar"]', '[class*="pinBar"]', '[class*="sticky-msg"]',
-            '[class*="announc"]'
-        ];
-        for (const root of nodes) {
-            for (const sel of pinSels) {
-                const el = root.querySelector(sel);
-                const text = normalizeText(el && (el.innerText || el.textContent) || '');
-                if (el && text.length > 8)
-                    return { el, text };
-            }
-        }
-        for (const root of nodes) {
-            for (const el of root.querySelectorAll('div, span, a, p')) {
-                const text = normalizeText(el.innerText || el.textContent || '');
-                if (!/^tin nhắn\s*:/i.test(text)) continue;
-                if (text.length < 16 || text.length > 500) continue;
-                return { el, text };
-            }
-        }
-        return null;
-    }
-
     function buildScanResultFromAssociated(messages, maxMessages) {
         const lines = messages.map(m => m.text).filter(Boolean);
         const imageTotal = messages.reduce((sum, m) => sum + m.images.length, 0);
@@ -943,41 +1159,48 @@
             messages: messages.map(m => ({
                 text: m.text,
                 images: m.images,
+                videos: m.videos || [],
                 hash: m.hash,
                 message_hash: m.message_hash || m.hash,
                 forward_eligible: !!m.forward_eligible
             })),
             message_count: messages.length,
             max_messages: Number(maxMessages) > 0 ? Number(maxMessages) : 0,
+            collected: lastScanDebug.collected || messages.length,
+            windowed: lastScanDebug.windowed || messages.length,
+            divider: lastScanDebug.divider || 0,
+            image_only: lastScanDebug.imageOnly || 0,
+            raw_imgs: lastScanDebug.rawImgs || 0,
             dom: lastDomDiagnostics
         };
     }
 
     function buildScanResult(collected, maxMessages) {
-        const associated = associateImagesWithText(collected);
-        const messages = takeNewestMessages(associated, maxMessages);
-        return buildScanResultFromAssociated(messages, maxMessages);
+        const windowed = sliceUnreadToNewest(collected, maxMessages);
+        const associated = associateImagesWithText(windowed);
+        return buildScanResultFromAssociated(associated, maxMessages);
     }
 
     async function scanConversationAsync(maxMessages) {
-        const limit = Number(maxMessages) > 0 ? Number(maxMessages) : 20;
-        let collected = collectMessages();
-        if (!collected.length) {
+        const limit = Number(maxMessages) > 0 ? Number(maxMessages) : 50;
+        let pack = await collectUnreadToNewestWindow(limit);
+        if (!pack.windowed.length) {
             await ensureLazyImagesLoaded();
-            collected = collectMessages();
+            pack = await collectUnreadToNewestWindow(limit);
         }
-        const associated = associateImagesWithText(collected);
-        const scanResult = buildScanResultFromAssociated(
-            takeNewestMessages(associated, limit), limit);
-        const pin = findPinnedBanner();
-        // #region agent log
-        fetch('http://127.0.0.1:7563/ingest/62f52916-fbcd-44d7-9d57-b29d0026eaef',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'36826f'},body:JSON.stringify({sessionId:'36826f',runId:'post-fix',hypothesisId:'H12',location:'user.js:scanConversationAsync',message:'scan_result',data:{title:scanResult.group,maxMessages:limit,collected:collected.length,imageOnly:collected.filter(m=>!m.text&&m.images.length).length,returned:scanResult.message_count,imageTotal:scanResult.image_total,droppedFar:associated[0]&&associated[0].droppedFar||0,pinFound:pin?1:0,perMsg:associated.slice(-6).map(m=>({imgs:m.images.length,tlen:(m.text||'').length}))},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-        return scanResult;
+        lastScanDebug = {
+            collected: pack.collected,
+            windowed: pack.windowed.length,
+            divider: pack.divider,
+            imageOnly: pack.imageOnly,
+            rawImgs: pack.rawImgs
+        };
+        const associated = associateImagesWithText(pack.windowed);
+        return buildScanResultFromAssociated(associated, limit);
     }
 
     function scanConversation(maxMessages) {
-        const limit = Number(maxMessages) > 0 ? Number(maxMessages) : 20;
+        const limit = Number(maxMessages) > 0 ? Number(maxMessages) : 50;
         return buildScanResult(collectMessages(), limit);
     }
 
@@ -1064,9 +1287,6 @@
             knownCount: knownKeys.size,
             visibleKnown
         };
-        // #region agent log
-        fetch('http://127.0.0.1:7563/ingest/62f52916-fbcd-44d7-9d57-b29d0026eaef',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'93807a'},body:JSON.stringify({sessionId:'93807a',runId:'pre-fix',hypothesisId:'H25,H27',location:'user.js:findUnreadGroups',message:'sidebar_unread_detected',data:diagnostics,timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         return { items: unread, diagnostics };
     }
 
@@ -1123,9 +1343,6 @@
         }
         await sleep(80);
         dismissBrowserUi();
-        // #region agent log
-        fetch('http://127.0.0.1:7563/ingest/62f52916-fbcd-44d7-9d57-b29d0026eaef',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'36826f'},body:JSON.stringify({sessionId:'36826f',runId:'pre-fix',hypothesisId:'H4',location:'user.js:focusMessagePane',message:'focus_pane',data:{via,title:getConversationTitle(),hasHeader:!!header,hasPane:!!pane},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         return { ok: true, via };
     }
 
@@ -1268,12 +1485,6 @@
         await sleep(200);
         const search = await ensureSidebarSearchVisible();
         if (!search) throw new Error('Không tìm thấy ô tìm kiếm sidebar Zalo.');
-        // #region agent log
-        fetch('http://127.0.0.1:7563/ingest/62f52916-fbcd-44d7-9d57-b29d0026eaef',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'36826f'},body:JSON.stringify({sessionId:'36826f',runId:'pre-fix',hypothesisId:'H3',location:'user.js:navigateToGroup',message:'nav_start',data:{group:groupName,hasSearch:!!search},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-        // #region agent log
-        fetch('http://127.0.0.1:7932/ingest/d1ffc0de-e0fa-4c76-b9ea-e4ddb6aeec2d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'850be2'},body:JSON.stringify({sessionId:'850be2',location:'user.js:navigateToGroup',message:'sidebar_search_focus',data:{group:groupName,tag:search.tagName,placeholder:search.getAttribute('placeholder')||'',ariaLabel:search.getAttribute('aria-label')||'',className:(search.className||'').slice(0,80)},timestamp:Date.now(),hypothesisId:'H9',runId:'post-fix'})}).catch(()=>{});
-        // #endregion
 
         search.scrollIntoView({ block: 'nearest' });
         await typeSearchQuery(search, groupName);
@@ -1303,13 +1514,6 @@
         const title = getConversationTitle();
         if (groupNamesMatch(title, groupName))
             return { ok: true, group: title };
-        // #region agent log
-        const diagLabels = collectGroupLabels(
-            [...SELECTORS.searchResultItem, ...SELECTORS.sidebarItem],
-            document
-        ).slice(0, 6).map(entry => entry.label.slice(0, 80));
-        fetch('http://127.0.0.1:7932/ingest/d1ffc0de-e0fa-4c76-b9ea-e4ddb6aeec2d',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'850be2'},body:JSON.stringify({sessionId:'850be2',location:'user.js:navigateToGroup',message:'navigate_fail',data:{expected:groupName,titleAfter:title,searchLen:groupName.length,labelSamples:diagLabels,url:location.href},timestamp:Date.now(),hypothesisId:'H2',runId:'post-fix'})}).catch(()=>{});
-        // #endregion
         throw new Error('Không mở được nhóm: ' + groupName);
     }
 
@@ -1467,22 +1671,12 @@
     }
 
     async function copyImageBlobToClipboard(url) {
-        try {
-            const blob = await requestImageBlob(url);
-            const png = await toClipboardPng(blob);
-            await navigator.clipboard.write([
-                new ClipboardItem({ 'image/png': png })
-            ]);
-            // #region agent log
-            fetch('http://127.0.0.1:7563/ingest/62f52916-fbcd-44d7-9d57-b29d0026eaef',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'93807a'},body:JSON.stringify({sessionId:'93807a',runId:'post-fix',hypothesisId:'H5',location:'user.js:copyImageBlobToClipboard',message:'clipboard_png_written',data:{urlKind:imageUrlKind(url),sourceMime:blob.type||'',sourceSize:blob.size,pngSize:png.size},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
-            return true;
-        } catch (error) {
-            // #region agent log
-            fetch('http://127.0.0.1:7563/ingest/62f52916-fbcd-44d7-9d57-b29d0026eaef',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'93807a'},body:JSON.stringify({sessionId:'93807a',runId:'post-fix',hypothesisId:'H5,H6',location:'user.js:copyImageBlobToClipboard',message:'clipboard_image_failed',data:{urlKind:imageUrlKind(url),error:String(error&&error.message||error)},timestamp:Date.now()})}).catch(()=>{});
-            // #endregion
-            throw error;
-        }
+        const blob = await requestImageBlob(url);
+        const png = await toClipboardPng(blob);
+        await navigator.clipboard.write([
+            new ClipboardItem({ 'image/png': png })
+        ]);
+        return true;
     }
 
     function blobToBase64(blob) {
@@ -1536,6 +1730,8 @@
         };
         for (let j = Math.max(0, anchorIdx - 1);
             j <= Math.min(items.length - 1, anchorIdx + 2); j++) {
+            const nearbyText = extractMessageText(items[j]);
+            if (isPromoCaption(nearbyText)) continue;
             try {
                 items[j].scrollIntoView({ block: 'center', behavior: 'instant' });
             } catch (_) { /* ignore */ }
@@ -1545,13 +1741,14 @@
         return urls.slice(0, limit).map(url => ({ url, text: '' }));
     }
 
-    async function findImagesNearAnchor(anchor, limit = 6, messageHash = '') {
+    async function findImagesNearAnchor(anchor, limit = 16, messageHash = '') {
         const messages = associateImagesWithText(collectMessages());
+        const cap = Number(limit) > 0 ? Number(limit) : 16;
         if (messageHash) {
             const exact = messages.find(m =>
                 m.hash === messageHash || m.message_hash === messageHash);
             if (exact && exact.images.length) {
-                return exact.images.slice(0, limit).map(url => ({
+                return exact.images.slice(0, cap).map(url => ({
                     url,
                     text: exact.text
                 }));
@@ -1563,14 +1760,14 @@
             for (let i = messages.length - 1; i >= 0; i--) {
                 const msg = messages[i];
                 if (msg.text.toLowerCase().includes(needle) && msg.images.length) {
-                    return msg.images.slice(0, limit).map(url => ({
+                    return msg.images.slice(0, cap).map(url => ({
                         url,
                         text: msg.text
                     }));
                 }
             }
         }
-        return findImagesNearAnchorDom(anchor, limit);
+        return [];
     }
 
     async function listImagesForAnchor(anchor, limit = 6, messageHash = '') {
@@ -1598,6 +1795,17 @@
         return { ok: true, url };
     }
 
+    async function copyVideoByUrl(url) {
+        if (!url) throw new Error('URL video rỗng.');
+        const blob = await requestImageBlob(url);
+        const type = blob.type && blob.type.startsWith('video/')
+            ? blob.type : 'video/mp4';
+        await navigator.clipboard.write([
+            new ClipboardItem({ [type]: blob })
+        ]);
+        return { ok: true, url, mime: type, size: blob.size };
+    }
+
     async function scrollToAnchor(anchor) {
         const needle = (anchor || '').toLowerCase();
         if (!needle) return false;
@@ -1611,20 +1819,40 @@
         return false;
     }
 
+    async function replyCommand(cmd) {
+        const commandId = cmd && cmd.id ? cmd.id : '';
+        try {
+            const result = await runCommand(cmd);
+            await http('POST', '/api/command-result', {
+                id: commandId,
+                ok: true,
+                result
+            });
+        } catch (err) {
+            if (!commandId) return;
+            try {
+                await http('POST', '/api/command-result', {
+                    id: commandId,
+                    ok: false,
+                    error: String(err.message || err)
+                });
+            } catch (_) { /* ignore */ }
+        }
+    }
+
     async function registerRole() {
         try {
             applyRoleTitle();
-            await http('POST', '/api/register', {
+            const resp = await http('POST', '/api/register', {
                 role: 'bot',
                 version: SCRIPT_VERSION,
                 title: document.title,
                 url: location.href,
                 ts: Date.now()
             });
-            // Chrome may throttle the faster command timer in background tabs.
-            // Process a pending command after every successful heartbeat so
-            // startup ping and later commands cannot remain stuck indefinitely.
-            await pollCommands();
+            const cmd = resp.body && resp.body.command;
+            if (cmd && cmd.action === 'ping')
+                await replyCommand(cmd);
         } catch (_) { /* bridge offline */ }
     }
 
@@ -1672,9 +1900,11 @@
             case 'find_images':
                 if (cmd.anchor) await scrollToAnchor(cmd.anchor);
                 return await listImagesForAnchor(
-                    cmd.anchor, cmd.limit || 6, cmd.message_hash || '');
+                    cmd.anchor, cmd.limit || 16, cmd.message_hash || '');
             case 'copy_image':
                 return await copyImageByUrl(cmd.url);
+            case 'copy_video':
+                return await copyVideoByUrl(cmd.url);
             case 'set_clipboard_image':
                 return await setClipboardImageFromBase64(cmd.data_base64, cmd.mime);
             case 'fetch_image':
@@ -1694,30 +1924,36 @@
     }
 
     async function pollCommands() {
-        if (pollBusy) return;
+        if (pollBusy) {
+            if (pollBusySince && Date.now() - pollBusySince > 20000)
+                pollBusy = false;
+            else
+                return;
+        }
         pollBusy = true;
-        let commandId = '';
+        pollBusySince = Date.now();
         try {
-            const resp = await http('GET', '/api/command?role=bot');
-            if (!resp.body || !resp.body.action) return;
-            commandId = resp.body.id || '';
-            const result = await runCommand(resp.body);
-            await http('POST', '/api/command-result', {
-                id: commandId,
-                ok: true,
-                result
-            });
-        } catch (err) {
-            if (!commandId) return;
-            try {
-                await http('POST', '/api/command-result', {
-                    id: commandId,
-                    ok: false,
-                    error: String(err.message || err)
-                });
-            } catch (_) { /* ignore */ }
+            for (let n = 0; n < 8; n++) {
+                let commandId = '';
+                try {
+                    const resp = await http('GET', '/api/command?role=bot');
+                    if (!resp.body || !resp.body.action) return;
+                    commandId = resp.body.id || '';
+                    await replyCommand(resp.body);
+                } catch (err) {
+                    if (!commandId) return;
+                    try {
+                        await http('POST', '/api/command-result', {
+                            id: commandId,
+                            ok: false,
+                            error: String(err.message || err)
+                        });
+                    } catch (_) { /* ignore */ }
+                }
+            }
         } finally {
             pollBusy = false;
+            pollBusySince = 0;
         }
     }
 
@@ -1773,6 +2009,8 @@
         console.info('[ZaloBot] single-tab role=bot', location.href);
 
         await registerRole();
+        if (pollTimer) clearInterval(pollTimer);
+        pollTimer = setInterval(pollCommands, BRIDGE.pollMs);
         await refreshPublicConfig();
         if (registerTimer) clearInterval(registerTimer);
         registerTimer = setInterval(() => {
@@ -1780,13 +2018,9 @@
             showStatusBadge();
             registerRole();
             refreshPublicConfig();
-            pollCommands();
         }, 2000);
 
         startObserver();
-
-        if (pollTimer) clearInterval(pollTimer);
-        pollTimer = setInterval(pollCommands, BRIDGE.pollMs);
 
         try {
             const health = await http('GET', '/api/health');

@@ -33,15 +33,6 @@ EnsureDir(path) {
     return path
 }
 
-; #region agent log
-AgentDbg(hypothesisId, location, message, dataJson := "{}") {
-    line := '{"sessionId":"36826f","runId":"post-fix","hypothesisId":"'
-        . hypothesisId '","location":"' location '","message":"' message
-        . '","timestamp":' A_TickCount ',"data":' dataJson "}`n"
-    try FileAppend line, "c:\Users\meo20\zalo-listing-bot\debug-36826f.log", "UTF-8-RAW"
-}
-; #endregion
-
 ReadTextFile(path) {
     if !FileExist(path)
         return ""

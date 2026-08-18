@@ -17,10 +17,10 @@ class DurableListingPublisher {
         this.stopRequested := false
         this.running := false
         this.nextSessionAt := ""
-        this.allowForward := true
+        this.allowForward := false
     }
 
-    RunSession(maxBatches := 0, bypassCooldown := false, allowForward := true) {
+    RunSession(maxBatches := 0, bypassCooldown := false, allowForward := false) {
         if this.running
             throw Error("Publish session đang chạy.")
         if (!bypassCooldown
@@ -184,7 +184,8 @@ class DurableListingPublisher {
                 throw Error("Lease ownership đã thay đổi cho listing " id)
         }
 
-        ; Always one room per cycle: images → text → separator → next room.
+        ; Per room: archive images (grid batch) then video then text then separator.
+        ; Do not forward the original bubble (it carries HH/sales and can mix rooms).
         for record in records
             this._SendOneRoom(record, groupName, true)
     }
@@ -268,16 +269,28 @@ class DurableListingPublisher {
         if startIndex > files.Length
             return
 
-        paths := []
+        imagePaths := []
+        videoPaths := []
         index := startIndex
         while index <= files.Length {
-            paths.Push(this.media.Resolve(files[index]))
+            resolved := this.media.Resolve(files[index])
+            fileName := RegExReplace(resolved, "^.*\\", "")
+            if RegExMatch(fileName, "i)^v\d+")
+                videoPaths.Push(resolved)
+            else
+                imagePaths.Push(resolved)
             index++
         }
         beforeSend := ObjBindMethod(
             this.queue, "MarkDeliveryIntent",
             [id], groupName, "media", files.Length)
-        this.ui.PasteMediaBatchInSession(paths, beforeSend)
+        if imagePaths.Length
+            this.ui.PasteMediaBatchInSession(imagePaths, beforeSend)
+        for vpath in videoPaths {
+            try this.ui.PasteOneMediaInSession(vpath)
+            catch as err
+                this._Log("video_paste_skip id=" id " error=" err.Message)
+        }
         this.queue.CheckpointMedia(id, groupName, files.Length)
     }
 

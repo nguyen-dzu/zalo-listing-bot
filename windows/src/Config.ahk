@@ -148,7 +148,7 @@ class AppConfig {
         this.AutoCaptureProbeImages := this._Bool(
             ini, "Images", "AutoCaptureProbeImages", true)
         this.AutoCaptureProbeMaxImages := Max(1,
-            this._Int(ini, "Images", "AutoCaptureProbeMaxImages", 6))
+            this._Int(ini, "Images", "AutoCaptureProbeMaxImages", 16))
         this.AutoCaptureReplaceUntrusted := this._Bool(
             ini, "Images", "AutoCaptureReplaceUntrusted", true)
         this.AutoCaptureRepairPerCycle := Max(0,

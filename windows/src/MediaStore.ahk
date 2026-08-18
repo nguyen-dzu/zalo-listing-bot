@@ -60,10 +60,10 @@ class ListingMediaStore {
         return result
     }
 
-    PrepareArchive(listingId, append := false, extension := "clip") {
+    PrepareArchive(listingId, append := false, extension := "clip", kind := "image") {
         listingDir := this.ListingDir(listingId)
         extension := StrLower(Trim(extension, " ."))
-        if !RegExMatch(extension, "^(?:clip|png|jpg|jpeg|webp)$")
+        if !RegExMatch(extension, "^(?:clip|png|jpg|jpeg|webp|mp4)$")
             extension := "png"
         baseGeneration := CompactStamp() "." ProcessExist() "." A_TickCount
         generation := baseGeneration
@@ -85,9 +85,12 @@ class ListingMediaStore {
             }
         }
 
-        targetPath := append
-            ? this._NextNumberedInDir(generationDir, extension)
-            : generationDir "\bundle." extension
+        if kind = "video"
+            targetPath := this._NextVideoPath(generationDir, extension)
+        else
+            targetPath := append
+                ? this._NextNumberedInDir(generationDir, extension)
+                : generationDir "\bundle." extension
         return Map(
             "listing_id", listingId,
             "listing_dir", listingDir,
@@ -134,6 +137,16 @@ class ListingMediaStore {
                 break
             }
             if !occupied
+                return path
+            index++
+        }
+    }
+
+    _NextVideoPath(dir, extension := "clip") {
+        index := 1
+        Loop {
+            path := dir "\v" Format("{:03}", index) "." extension
+            if !FileExist(path)
                 return path
             index++
         }

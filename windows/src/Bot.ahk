@@ -369,11 +369,6 @@ class ListingBotService {
     ; Tự khởi động sau khi script load (Startup folder hoặc mở Bot.ahk thủ công).
     AutoStart() {
         this.autoStartRetryPending := false
-        ; #region agent log
-        AgentDbg("H1", "Bot.ahk:AutoStart", "enter",
-            '{"watchRunning":' (this.watchRunning ? 1 : 0)
-            ',"operation":"' this.operation '"}')
-        ; #endregion
         if !this.config.StartupAutoRunWatch
             return false
         if this.emergencyStopped
@@ -386,16 +381,8 @@ class ListingBotService {
                 Sleep this.config.StartupDelayMs
             this._Notify("Auto-start",
                 "Zalo Web (1 tab) sẵn sàng — bật watch loop tự động.", 1)
-            ; #region agent log
-            AgentDbg("H1", "Bot.ahk:AutoStart", "ok_start_watch",
-                '{"sources":' this.registry.SourceGroups().Length "}")
-            ; #endregion
             return this.RunExclusive("watch", ObjBindMethod(this, "RunWatchLoop"))
         } catch as err {
-            ; #region agent log
-            AgentDbg("H1", "Bot.ahk:AutoStart", "fail",
-                '{"error":"' StrReplace(StrReplace(err.Message, "\", "\\"), '"', '\"') '"}')
-            ; #endregion
             transient := InStr(err.Message, "Chưa kết nối")
                 || InStr(err.Message, "Tampermonkey")
                 || InStr(err.Message, "Chrome/Zalo Web không mở")
@@ -504,16 +491,20 @@ class ListingBotService {
 
     _PingWebBridge(timeoutSeconds := 30) {
         this.bridge.WaitForRoles(timeoutSeconds)
-        pingTimeoutMs := Min(timeoutSeconds * 1000, 8000)
-        try {
-            ping := this.bridge.RunCommand("ping", Map(), pingTimeoutMs, "bot")
-            if (ping is Map) && ping.Has("role") && ping["role"] = "bot"
-                return true
-        } catch {
+        pingTimeoutMs := Max(20000, Min(timeoutSeconds * 1000, 45000))
+        Loop 4 {
+            try {
+                ping := this.bridge.RunCommand("ping", Map(), pingTimeoutMs, "bot")
+                if (ping is Map) && ping.Has("role") && ping["role"] = "bot"
+                    return true
+            } catch {
+            }
+            Sleep 400
         }
         throw Error(
             "Tampermonkey userscript chưa kết nối tab Zalo Web.`n"
-            . "Mở đúng 1 tab https://chat.zalo.me/#bot và bật script v4.")
+            . "Mở đúng 1 tab https://chat.zalo.me/#bot, F5, bật script v4.`n"
+            . "Title tab phải có [ZaloBot].")
     }
 
     _ResolveChromePath() {
@@ -559,11 +550,6 @@ class ListingBotService {
         this._Notify("Da nap file nhom input",
             count " tong | " sources " input | "
             . this.registry.MainGroups().Length " output", 1)
-        ; #region agent log
-        AgentDbg("H2", "Bot.ahk:_LoadSourceGroups", "loaded",
-            '{"path":"' StrReplace(path, "\", "\\") '","count":' count
-            ',"sources":' sources "}")
-        ; #endregion
         return true
     }
 
@@ -609,16 +595,6 @@ class ListingBotService {
                     }
                     plan := this.harvestScheduler.BuildContinuousPlan(
                         sources, unreadNames, false)
-                    ; #region agent log
-                    AgentDbg("H2", "Bot.ahk:RunWatchLoop", "plan",
-                        '{"cycle":' cycles
-                        ',"sourceGroups":' sources.Length
-                        ',"plannedGroups":' plan["groups"].Length
-                        ',"unreadDetected":' unreadNames.Length
-                        ',"onlyUnread":' (this.config.WatchOnlyUnreadAfterFirstCycle ? 1 : 0)
-                        ',"maxGroups":' this.config.HarvestMaxGroupsPerCycle
-                        ',"forceLatest":0}')
-                    ; #endregion
                     this._Notify("Watch vòng " cycles " bắt đầu",
                         plan["groups"].Length " nhóm nguồn"
                         . (plan["unread"] ? " | unread: " plan["unread"] : "")

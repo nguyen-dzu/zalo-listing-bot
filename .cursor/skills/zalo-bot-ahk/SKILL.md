@@ -10,7 +10,7 @@ description: >-
 
 ## Context nhanh (Aug 2026)
 
-**Output publish:** 1 phòng → (forward tin gốc nếu có ảnh kề, else paste archive) → text icon → `=======`. Tên nhóm nguồn chỉ trong `🏷️ tên nhóm`, không header riêng.
+Per room, per main group: paste archive ảnh lưới (một tin) → video (nếu có) → text icon → `=======`. Tên nhóm nguồn chỉ trong `🏷️ tên nhóm`, không header riêng.
 
 **ZaloUI đã calibrate (Zalo Web, 1 tab Chrome):**
 

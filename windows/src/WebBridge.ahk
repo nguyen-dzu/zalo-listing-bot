@@ -255,7 +255,11 @@ class WebBridge {
                 "url", payload.Has("url") ? payload["url"] : "",
                 "ts", A_TickCount
             )
-            return this._JsonResponse(200, Map("ok", true, "role", role))
+            reply := Map("ok", true, "role", role)
+            pending := this.pendingByRole.Has("bot") ? this.pendingByRole["bot"] : Map()
+            if pending.Has("action")
+                reply["command"] := pending
+            return this._JsonResponse(200, reply)
         } catch as err {
             return this._JsonResponse(400, Map("error", err.Message))
         }

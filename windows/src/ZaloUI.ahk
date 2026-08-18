@@ -203,16 +203,9 @@ class ZaloUIAdapter {
         ; lands on listing photos and opens the image viewer, aborting harvest.
         try {
             this.bridge.RunCommand("focus_pane", Map(), 5000, "bot")
-            ; #region agent log
-            AgentDbg("H4", "ZaloUI.ahk:_FocusMessagePane", "bridge_ok", "{}")
-            ; #endregion
             Sleep this.config.CaptureSettleMs
             return
-        } catch as err {
-            ; #region agent log
-            AgentDbg("H4", "ZaloUI.ahk:_FocusMessagePane", "bridge_fail_click_header",
-                '{"error":"' StrReplace(StrReplace(err.Message, "`n", " "), '"', '\"') '"}')
-            ; #endregion
+        } catch {
         }
         hwnd := WinExist(this._WindowMatch())
         if !hwnd
@@ -342,6 +335,18 @@ class ZaloUIAdapter {
         this.Activate()
         this.bridge.RunCommand("copy_image", Map("url", location["url"]), 15000, "bot")
         return this._ClipboardHasImage()
+    }
+
+    CopyVideoAt(location) {
+        if !IsObject(location) || !location.Has("url")
+            return false
+        this.Activate()
+        try {
+            this.bridge.RunCommand("copy_video", Map("url", location["url"]), 20000, "bot")
+        } catch {
+            return false
+        }
+        return this._ClipboardHasPublishMedia()
     }
 
     FetchImageAt(location) {

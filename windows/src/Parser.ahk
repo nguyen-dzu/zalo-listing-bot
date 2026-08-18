@@ -8,18 +8,19 @@ class ListingParser {
     ; ("Giá điện" must be tested before "Giá").
     static RULES := [
         ["utility_price", "i)^\s*(?:⚡\s*)?(?:Điện\s*(?:và|&|/|,)\s*nước|Điện nước)\s*[:\-–]?\s*(.+)$"],
-        ["electric_price", "i)^\s*(?:⚡|👉|✅)?\s*(?:Giá điện|Tiền điện|Điện|Đ\.)\s*[:\-–]?\s*([^,\n|]+)"],
-        ["water_price", "i)^\s*(?:💧|👉|✅)?\s*(?:Giá nước|Tiền nước|Nước|Nc|N\.)\s*[:\-–]?\s*([^,\n|]+)"],
-        ["service_price", "i)^\s*(?:🧾|👉|✅)?\s*(?:Giá dịch vụ|Phí dịch vụ|Phí quản lý|Phí dv|Phí DV|Dịch vụ|Dv|PDV|Phí DV)\s*[:\-–]?\s*([^,\n|]+)"],
+        ["electric_price", "i)^\s*(?:⚡|👉|▶️|✅)?\s*(?:Giá điện|Tiền điện|Điện|Đ\.)\s*[:\-–]?\s*([^,\n|]+)"],
+        ["water_price", "i)^\s*(?:💧|👉|▶️|✅)?\s*(?:Giá nước|Tiền nước|Nước|Nc|N\.)\s*[:\-–]?\s*([^,\n|]+)"],
+        ["service_price", "i)^\s*(?:🧾|👉|▶️|✅)?\s*(?:Giá dịch vụ|Phí dịch vụ|Phí quản lý|Phí dv|Phí DV|Dịch vụ|Dv|PDV|Phí DV)\s*[:\-–]?\s*([^,\n|]+)"],
         ["address", "i)^\s*(?:📍|🏡\s*)?(?:Địa chỉ|Địa điểm|Đ/c|ĐC|Đc)\s*[:\-–]\s*(.+)$"],
         ["address", "i)^\s*📍\s*(\d[\d\/\.\-\w\s,A-Za-zÀ-ỹ]+(?:Q\.?\s*\d+|q\.?\s*\d+|quận\s*\d+|phường\s+\w+).*)$"],
         ["address", "i)^\s*(\d+\/\d+\s+[A-Za-zÀ-ỹ\s\/\.\-]+(?:quận|q\.?\s*\d+|phường\s+\w+).*)$"],
-        ["room_code", "i)^\s*(?:🔑|➖|⚡)?\s*(?:Mã phòng|Mã Phòng|Số phòng|Phòng số|Mã)\s*[:\-–]\s*([A-Za-z]\d{0,3}|\d{2,4})"],
+        ["room_code", "i)^\s*(?:🔑|➖|⚡|📲)?\s*(?:Mã phòng|Mã Phòng|Số phòng|Phòng số|Mã)\s*[:\-–\s]\s*([A-Za-z]{1,3}\d{1,4}[A-Za-z]?|\d{2,4})"],
         ["room_code", "i)^\s*P(\d{2,4})\s*-\s*\d+\s*PN\s*:"],
         ["room_code", "i)^\s*-?\s*P(\d{2,4})\b(?:\s|$|[,\.:])"],
+        ["room_code", "i)^\s*([A-Za-z]{1,3}\d{2,4}[A-Za-z]?)(?:\s*@All)?\s*$"],
         ["price", "i)^\s*P\d{2,4}\s*-\s*\d+\s*PN\s*:\s*([\d\.]+)"],
-        ["price", "i)^\s*(?:💰|🚥|👉|💸|➖)?\s*(?:Giá thuê|Giá phòng|Giá)\s*[:\-–]?\s*(.+)$"],
-        ["price", "i)^\s*Giá\s+(\d+tr\d|\d+[\.,]?\d*\s*tr)\b"],
+        ["price", "i)^\s*(?:💰|🚥|👉|💸|➖|✅)?\s*(?:Giá thuê|Giá phòng|Giá|Cost)\s*[:\-–]?\s*(.+)$"],
+        ["price", "i)^\s*Giá\s+(\d+tr\d|\d+[\.,]?\d*\s*[@\s]*tr)\b"],
         ["info", "i)^\s*P(\d{2,4})\s+(.+)$"],
         ["owner_phone", "i)^\s*(?:📞|☎️?|☎)\s*(.+)$"],
         ["owner_phone", "i)^\s*(?:Số điện thoại|Số chủ|SĐT|SDT|Hotline|Liên hệ|LH)\s*[:\-–]\s*(.+)$"],
@@ -33,7 +34,9 @@ class ListingParser {
 
     static DEFAULT_START_PATTERN := "i)^\s*(?:📍\s*)?(?:Địa chỉ|Địa điểm|Đ/c|ĐC)\s*[:\-–]"
     ; Freeform posts often start with rental keywords instead of "Địa chỉ:"
-    static RENTAL_START_PATTERN := "i)^\s*(?:🏠\s*|📍\s*|🚩\s*|👉\s*|👇\s*|💎\s*|🚥\s*|💥\s*|🔥\s*)?(?:Cho thuê|Cần cho thuê|Sang CHDV|CHDV|Phòng trọ|Căn hộ|CĂN HỘ|Nhà nguyên căn|Studio|Duplex|Phòng|Giữa tháng|Giá|Hình ảnh.*trống|trống\s+mã|trống\s+sẵn|trống\s+phòng|P\d{2,4}\s*-\s*\d+\s*PN)\b"
+    static RENTAL_START_PATTERN := "i)^\s*(?:🏠\s*|📍\s*|🚩\s*|👉\s*|👇\s*|💎\s*|🚥\s*|💥\s*|🔥\s*)?(?:Cho thuê|Cần cho thuê|Sang CHDV|CHDV|Phòng trọ|Căn hộ|CĂN HỘ|Nhà nguyên căn|Tòa nhà|TOÀ NHÀ|Studio|Duplex|Phòng|Giữa tháng|Giá|Hình ảnh.*trống|trống\s+mã|trống\s+sẵn|trống\s+phòng|CẬP NHẬT DỰ ÁN|P\d{2,4}\s*-\s*\d+\s*PN|\d+\s*PN)\b"
+    static MIN_LISTING_MATCH_RATIO := 0.6
+    static LISTING_SLOT_COUNT := 8
     static MAP_LINK_PATTERN := "i)(?:maps\.(?:app\.)?goo\.gl|google\.com/maps|goo\.gl/maps)"
     ; VN mobile: 0… or +84/84… with optional spaces/dots/dashes between digits.
     static PHONE_FRAGMENT_PATTERN := "(?:\+?84|0)(?:[\s.\-]*\d){9}"
@@ -157,6 +160,8 @@ class ListingParser {
     static LooksLikeListing(text, minScore := 0) {
         haystack := StrLower(NormalizeNewlines(text))
         trimmed := Trim(haystack)
+        if ListingParser._SimpleRoomCodeFromText(text) != ""
+            return true
         if StrLen(trimmed) < 12
             return false
         if RegExMatch(trimmed, ListingParser.NON_RENTAL_PATTERN)
@@ -197,13 +202,14 @@ class ListingParser {
     static _RENTAL_SIGNALS := [
         ["cho thuê", 3], ["cho thue", 3], ["cần cho thuê", 3], ["thuê phòng", 3],
         ["sang chdv", 3], ["phòng trọ", 2], ["phong tro", 2], ["căn hộ", 2], ["can ho", 2],
-        ["nhà nguyên căn", 2], ["chdv", 2], ["studio", 2], ["duplex", 2], ["phòng", 1],
+        ["nhà nguyên căn", 2], ["tòa nhà", 3], ["toa nha", 3], ["chdv", 2],
+        ["studio", 2], ["duplex", 2], ["phòng", 1], ["1pn", 2], ["2pn", 2],
         [" trống", 2], ["trống mã", 3], ["phòng mới", 2], ["còn phòng", 2],
         ["phòng trống", 3], ["trống lại", 3], ["trống sẵn", 3], ["available", 3],
         ["căn hộ studio", 2], ["duplex", 2], ["full nt", 1], ["full nội thất", 1],
-        ["nhận khách", 2], ["dọn vào", 2],
+        ["nhận khách", 2], ["dọn vào", 2], ["bancol", 1], ["ban công", 1],
         ["giá thuê", 2], ["giá", 1], ["gia ", 1], ["triệu", 2], ["tr/th", 2], ["/tháng", 1],
-        ["phí dv", 1], ["pdv", 1],
+        ["phí dv", 1], ["pdv", 1], ["quy mô", 2],
         ["địa chỉ", 2], ["dia chi", 2], ["quận", 1], ["phường", 1], ["đường", 1],
         ["điện", 1], ["nước", 1], ["dịch vụ", 1], ["sđt", 1], ["liên hệ", 2],
         ["full nội thất", 1], ["m²", 1], ["m2", 1], ["gác", 1], ["ban công", 1],
@@ -219,7 +225,11 @@ class ListingParser {
         ["i)^\d{1,2}/\d{1,2}\s+trống", 3],
         ["i)(?:địa chỉ|dự án|đường|quận|phường|gần trường|gần đh)\s*:?", 2],
         ["i)(?:sđt|lh|mọi chi tiết|zalo|call)\s*:?\s*0[35789]\d{8}", 3],
-        ["i)(?:giá|điện|nước|dịch vụ|phí dv)\s*:?\s*\d+(?:[\.,]\d+)?(?:k|tr|triệu)?", 2]
+        ["i)(?:giá|điện|nước|dịch vụ|phí dv)\s*:?\s*\d+(?:[\.,]\d+)?(?:k|tr|triệu)?", 2],
+        ["i)\b(?:1pn|2pn|3pn)\b", 2],
+        ["i)\bbancol\b", 1],
+        ["i)(?:mã|ma)\s*[:\-–]?\s*(?:[A-Za-z]{1,3}\d{2,4}|\d{2,4})\b", 2],
+        ["i)(?:tòa nhà|toa nha|quy mô)\b", 3]
     ]
 
     ; Drop blank and sender/time header lines from both ends of a block.
@@ -268,8 +278,14 @@ class ListingParser {
             for rule in ListingParser.RULES {
                 if RegExMatch(parseLine, rule[2], &found) {
                     key := rule[1]
+                    value := Trim(found[1])
+                    if key = "price" && ListingParser._IsPromoPart(value)
+                    {
+                        matched := true
+                        break
+                    }
                     if listing[key] = ""
-                        listing[key] := Trim(found[1])
+                        listing[key] := value
                     matched := true
                     break
                 }
@@ -310,10 +326,13 @@ class ListingParser {
         "i)mời\s+tham\s+gia[^\n|]*",
         "i)join\s+group[^\n|]*",
         "i)chốt\s+đúng\s+giá\s+thưởng[^\n|]*",
-        "i)thưởng\s*nóng(?:\s+\d+[\s\d]*(?:triệu|tr|k))?(?:\s*trên\s*mỗi\s*phòng)?[^\n|📍🔥]*",
+        "i)thưởng\s*nóng(?:\s+\d+[\s\d]*(?:triệu|tr|k))?(?:\s*(?:trên|\/)\s*(?:mỗi\s*)?phòng)?[^\n|📍🔥]*",
         "i)thuong\s*nong(?:\s+\d+[\s\d]*(?:triệu|tr|k))?(?:\s*tren\s*moiphong)?[^\n|📍🔥]*",
+        "i)sales?\s+sập\s+sàn[^\n|]*",
+        "i)hoa\s*hồng\s+cao[^\n|]*",
         "i)🌹[^\n|]*",
-        "i)(?:hh|hoa hồng)\s*[\d/]+%[^\n|]*",
+        "i)(?:hh|hoa hồng)\s*[:\-–]?\s*[\d.\-–/]+\s*%?[^\n|]*",
+        "i)\bhh\s*[\d.\-–/]+",
         "i)\bhđ\s*\d+[^\n|]*",
         "i)\(\s*HĐ\s*\d+[^\n|]*\)",
         "i)(?:🎉\s*)?link\s+nhóm\s*:?\s*[^\n|]*",
@@ -329,6 +348,10 @@ class ListingParser {
             result := RegExReplace(result, pattern, "")
         result := RegExReplace(result, "i)thưởng\s*nóng[^|📍\n🔥]*", "")
         result := RegExReplace(result, "i)thuong\s*nong[^|📍\n🔥]*", "")
+        result := RegExReplace(result, ListingParser.PHONE_FRAGMENT_PATTERN, "")
+        result := RegExReplace(result, "i)(?:📣|📢|📞|☎️?)?\s*(?:lh|liên hệ)\s*ngay\s*:?\s*", "")
+        result := RegExReplace(result, "={3,}", "")
+        result := RegExReplace(result, "i)\bHD\s*\d+[^\n|]*", "")
         result := RegExReplace(result, "i)\s*🔥+", " ")
         result := RegExReplace(result, "i)\s*\|\s*\|+", " | ")
         result := RegExReplace(result, "\s{2,}", " ")
@@ -344,11 +367,18 @@ class ListingParser {
                 return true
         }
         if RegExMatch(piece,
-            "i)(?:liên hệ|link nhóm|zalo\.me|chốt\s+đúng\s+giá|thưởng\s*nóng|thuong\s*nong|vay\s+tài\s+chính)")
+            "i)(?:liên hệ|link nhóm|zalo\.me|chốt\s+đúng\s+giá|thưởng\s*nóng|thuong\s*nong|vay\s+tài\s+chính|"
+            . "lh\s*ngay|liên hệ\s*ngay)")
             return true
-        return RegExMatch(piece,
+        strippedPhone := RegExReplace(piece, ListingParser.PHONE_FRAGMENT_PATTERN, "")
+        if strippedPhone != piece && StrLen(Trim(strippedPhone, " |,;:=-")) < 8
+            return true
+        if RegExMatch(piece,
             "i)(?:thưởng\s*nóng|thuong\s*nong|^\s*chốt|link\s+nhóm|tham\s+gia|join\s+group|"
-            . "^\s*🌹|\b(?:hh|hđ|hoa hồng)\b)")
+            . "sales?\s+sập\s+sàn|hoa\s*hồng\s+cao|"
+            . "^\s*🌹|\b(?:hh|hđ|hd|hoa hồng)\b)")
+            return true
+        return false
     }
 
     ; True when stripped text has no meaningful rental core (group invite / CTA spam).
@@ -358,6 +388,8 @@ class ListingParser {
         cleaned := ListingParser._StripPromotionalText(text)
         cleaned := RegExReplace(cleaned, "🔥|🎉|♨️|👇|👉", "")
         cleaned := Trim(RegExReplace(cleaned, "\s{2,}", " "))
+        if ListingParser._SimpleRoomCodeFromText(text) != ""
+            return false
         if StrLen(cleaned) < 10
             return true
         hay := StrLower(cleaned)
@@ -389,18 +421,46 @@ class ListingParser {
 
     static ROOM_INFO_LABELED_PATTERN := "i)^(?:dịch vụ|pdv|dv|điện|nước|giá|địa chỉ|mã phòng|số phòng|sđt|liên hệ|xe)\s*[:\-]?"
     static ROOM_INFO_AMENITY_PATTERN := "i)(?:full nội thất|full nt|nội thất|máy giặt|máy lạnh|máy nước nóng|"
-        . "vân tay|giờ giấc|duplex|studio|mezzanine|gác|gác cao|ban công|bancong|"
-        . "wc riêng|hẻm xe hơi|hem xe hoi|xe hơi|ô tô|thang máy|"
-        . "an ninh|camera|"
+        . "vân tay|giờ giấc|duplex|studio|mezzanine|gác|gác cao|ban công|bancong|bancol|"
+        . "wc riêng|hẻm xe hơi|hem xe hoi|xe hơi|ô tô|thang máy|thang bộ|"
+        . "an ninh|camera|khoá từ|khóa từ|cửa khoá|"
         . "m²|m2|diện tích|"
         . "người.*xe|\d+\s*người|free\s*\d*\s*xe|giữ xe|"
         . "trống phòng|trống sẵn|\d{1,2}/\d{1,2}\s+trống|tách bếp|ngủ tách|tiện ích|"
-        . "tủ lạnh|kệ bếp|tủ quần|phòng mới|"
+        . "tủ lạnh|kệ bếp|tủ quần|phòng mới|nhà mới|máy giặt riêng|"
+        . "cọc\s*\d|\bđặt cọc\b|"
+        . "quy mô|\d+\s*phòng|pccc|mặt bằng|"
         . "\d+\s*pn|lầu\s*\d+)"
 
     static _IsLabeledFieldPart(text) {
-        piece := Trim(text)
-        return RegExMatch(piece, ListingParser.ROOM_INFO_LABELED_PATTERN)
+        piece := ListingParser._StripLinePrefix(Trim(text))
+        if piece = ""
+            return false
+        if RegExMatch(piece, ListingParser.ROOM_INFO_LABELED_PATTERN)
+            return true
+        return RegExMatch(piece, "i)^(?:phí\s*)?(?:dịch vụ|pdv|dv|điện|nước)\s*:?\s*\d")
+    }
+
+    static _IsUtilityPricePart(text) {
+        piece := ListingParser._StripLinePrefix(Trim(text))
+        return RegExMatch(piece,
+            "i)^(?:phí\s*)?(?:dịch vụ|pdv|dv|điện|nước|giá điện|giá nước|giá dịch vụ)\b")
+    }
+
+    static _NormalizeInfoKey(text) {
+        key := StrLower(Trim(RegExReplace(text, "\s+", " ")))
+        return Trim(RegExReplace(key, "[\.…]+\s*$"))
+    }
+
+    static _ArrayHasNormalized(arr, value) {
+        needle := ListingParser._NormalizeInfoKey(value)
+        if needle = ""
+            return false
+        for item in arr {
+            if ListingParser._NormalizeInfoKey(item) = needle
+                return true
+        }
+        return false
     }
 
     static _IsRoomInfoPart(text) {
@@ -434,14 +494,159 @@ class ListingParser {
         return count
     }
 
-    ; Harvest gate: rental intent + at least two core fields after cleanup.
+    ; Harvest gate: rental intent + ~60% of listing-rule slots after cleanup.
+    ; Photo + short room code (T104 @All) is a complete listing in some groups.
     static QualifiesAsRentalListing(listing) {
         raw := listing.Has("raw_text") ? listing["raw_text"] : ""
+        if ListingParser._IsPhotoRoomCaption(listing)
+            return true
         if !ListingParser.LooksLikeListing(raw)
             return false
         if ListingParser.IsPromoOnlyMessage(raw, listing)
             return false
-        return ListingParser._CountRentalCoreSignals(listing) >= 2
+        return ListingParser._ListingMatchRatio(listing)
+            >= ListingParser.MIN_LISTING_MATCH_RATIO
+            || ListingParser._HasAddressAndPrice(listing)
+            || ListingParser._HasMediaAndMinSlots(listing)
+    }
+
+    static _HasMediaAndMinSlots(listing, minSlots := 2) {
+        imgN := 0
+        if listing.Has("image_count")
+            imgN := listing["image_count"]
+        if listing.Has("image_urls") && listing["image_urls"] is Array
+            imgN := Max(imgN, listing["image_urls"].Length)
+        if imgN < 1
+            return false
+        slots := ListingParser._MatchListingSlots(listing)
+        return ListingParser._CountSlotHits(slots) >= minSlots
+    }
+
+    static _HasAddressAndPrice(listing) {
+        addr := listing.Has("address") ? Trim(listing["address"]) : ""
+        price := listing.Has("price") ? Trim(listing["price"]) : ""
+        return addr != "" && price != ""
+    }
+
+    static _CountSlotHits(slots) {
+        count := 0
+        for key, filled in slots {
+            if filled
+                count++
+        }
+        return count
+    }
+
+    static _ListingMatchRatio(listing) {
+        slots := ListingParser._MatchListingSlots(listing)
+        return ListingParser._CountSlotHits(slots) / ListingParser.LISTING_SLOT_COUNT
+    }
+
+    ; 8 harvest slots. Filled from parsed fields or raw regex.
+    static _MatchListingSlots(listing) {
+        raw := listing.Has("raw_text") ? listing["raw_text"] : ""
+        hay := StrLower(raw)
+        slots := Map(
+            "address", false,
+            "price", false,
+            "room_code", false,
+            "room_type", false,
+            "utilities", false,
+            "phone", false,
+            "amenities", false,
+            "availability", false
+        )
+
+        addr := listing.Has("address") ? Trim(listing["address"]) : ""
+        if addr != ""
+            || RegExMatch(hay, "i)(?:địa chỉ|đ/c)\s*[:\-]")
+            || RegExMatch(hay, "i)(?:q\.?\s*\d+|quận\s*\d+|phường\s+\w+|p\d{1,2}\s+tân)")
+            || RegExMatch(raw, "i)\d{1,5}(?:\/\d+){0,3}\s+[A-Za-zÀ-ỹ]{2,}")
+            slots["address"] := true
+
+        price := listing.Has("price") ? Trim(listing["price"]) : ""
+        if price != ""
+            || RegExMatch(hay, "i)(?:giá|gia|cost)\s*[:\-–]?\s*\d")
+            || RegExMatch(hay, "i)\d+[.,]?\d*\s*@?\s*(?:tr|triệu)\b")
+            || RegExMatch(hay, "i)\d{1,2}\.\d{3}\.\d{3}")
+            slots["price"] := true
+
+        code := listing.Has("room_code") ? Trim(listing["room_code"]) : ""
+        if code != "" && !RegExMatch(code, "^R[a-f0-9]{6}$")
+            slots["room_code"] := true
+        else if RegExMatch(hay, "i)(?:mã|ma)\s*[:\-–]?\s*(?:[A-Za-z]{1,3}\d{2,4}|\d{2,4})\b")
+            slots["room_code"] := true
+
+        typeLabel := ListingParser._RoomTypeLabel(listing)
+        if typeLabel != "-"
+            || RegExMatch(hay, "i)\b(?:studio|duplex|1\s*pn|2\s*pn|3\s*pn|chdv|tòa nhà|toa nha|căn hộ|phòng trọ|cho thuê nhà)\b")
+            slots["room_type"] := true
+
+        if (listing.Has("electric_price") && Trim(listing["electric_price"]) != "")
+            || (listing.Has("water_price") && Trim(listing["water_price"]) != "")
+            || (listing.Has("service_price") && Trim(listing["service_price"]) != "")
+            || (listing.Has("utility_price") && Trim(listing["utility_price"]) != "")
+            || RegExMatch(hay, "i)(?:điện|nước|phí dv|pdv|dịch vụ)\s*[:\-–]?\s*\d")
+            slots["utilities"] := true
+
+        if (listing.Has("owner_phone") && Trim(listing["owner_phone"]) != "")
+            || RegExMatch(raw, ListingParser.PHONE_FRAGMENT_PATTERN)
+            slots["phone"] := true
+
+        info := listing.Has("info") ? Trim(listing["info"]) : ""
+        extra := listing.Has("extra_info") ? Trim(listing["extra_info"]) : ""
+        if info != "" || extra != ""
+            || RegExMatch(hay, ListingParser.ROOM_INFO_AMENITY_PATTERN)
+            slots["amenities"] := true
+
+        if RegExMatch(hay, "i)(?:trống\s*(?:sẵn|phòng|\d)|còn phòng|available|\d{1,2}/\d{1,2}\s+trống)")
+            || RegExMatch(hay, "i)(?:quy mô|doanh thu|đang full)")
+            || RegExMatch(extra, "i)trống")
+            slots["availability"] := true
+
+        return slots
+    }
+
+    static _StripSimpleCaptionNoise(text) {
+        t := NormalizeNewlines(text)
+        t := RegExReplace(t, "i)\[hình ảnh\]", " ")
+        t := RegExReplace(t, "i)@all\b", " ")
+        lines := []
+        for line in StrSplit(t, "`n") {
+            line := Trim(line)
+            if line = "" || RegExMatch(line, "i)^\d{1,2}:\d{2}$")
+                continue
+            lines.Push(line)
+        }
+        return Trim(RegExReplace(StrJoin(lines, " "), "\s+", " "))
+    }
+
+    ; "T104 @All" / "Nguyenduy T104" — not a full địa chỉ/giá post.
+    static _SimpleRoomCodeFromText(text) {
+        cleaned := ListingParser._StripSimpleCaptionNoise(text)
+        if cleaned = "" || StrLen(cleaned) > 48
+            return ""
+        if RegExMatch(cleaned, "i)^([A-Za-z]{1,3}\d{2,4}[A-Za-z]?)$", &found)
+            return found[1]
+        if RegExMatch(cleaned,
+            "i)^(?:[A-Za-zÀ-ỹ][A-Za-zÀ-ỹ0-9]*\s+)+([A-Za-z]{1,3}\d{2,4}[A-Za-z]?)$",
+            &found)
+            return found[1]
+        return ""
+    }
+
+    static _IsPhotoRoomCaption(listing) {
+        if !(listing is Map)
+            return false
+        raw := listing.Has("raw_text") ? listing["raw_text"] : ""
+        if ListingParser._SimpleRoomCodeFromText(raw) = ""
+            return false
+        imgN := 0
+        if listing.Has("image_count")
+            imgN := listing["image_count"]
+        if listing.Has("image_urls") && listing["image_urls"] is Array
+            imgN := Max(imgN, listing["image_urls"].Length)
+        return imgN >= 1
     }
 
     static _ExtractPinAddress(text) {
@@ -492,15 +697,14 @@ class ListingParser {
 
     static _SplitInfoParts(text) {
         parts := []
-        for line in StrSplit(NormalizeNewlines(text), "`n") {
-            line := Trim(line)
-            if line = ""
-                continue
-            for piece in StrSplit(line, " | ") {
-                piece := Trim(piece)
-                if piece != ""
-                    parts.Push(piece)
-            }
+        blob := NormalizeNewlines(text)
+        blob := StrReplace(blob, "|", "`n")
+        blob := StrReplace(blob, ",", "`n")
+        blob := RegExReplace(blob, "(?<=[A-Za-zÀ-ỹ0-9\)])\.(?=\s*[A-Za-zÀ-ỹ])", "`n")
+        for line in StrSplit(blob, "`n") {
+            piece := Trim(line)
+            if piece != ""
+                parts.Push(piece)
         }
         return parts
     }
@@ -518,7 +722,7 @@ class ListingParser {
                 if !ListingParser._IsRoomInfoPart(piece)
                     continue
                 clean := ListingParser._StripPromotionalText(piece)
-                if clean != "" && !ListingParser._ArrayHas(amenities, clean)
+                if clean != "" && !ListingParser._ArrayHasNormalized(amenities, clean)
                     amenities.Push(clean)
             }
         }
@@ -648,6 +852,32 @@ class ListingParser {
         listing["extra_info"] := StrJoin(kept, " | ")
     }
 
+    ; P12 in "P12, Tân Bình" / "Phường 12" / "P2 Tân Bình" is a ward, not a room code.
+    static _LooksLikeWardCode(text, digits) {
+        n := Trim(digits)
+        if n = ""
+            return false
+        if StrLen(n) > 2
+            return false
+        if RegExMatch(text, "i)(?:phường|phuong|p\.)\s*" n "\b")
+            return true
+        if RegExMatch(text, "i)\bP" n "\s*,")
+            return true
+        return RegExMatch(text,
+            "i)\bP" n "\s+(?:tân\s*bình|tân\s*phú|bình\s*thạnh|bình\s*tân|"
+            . "gò\s*vấp|phú\s*nhuận|thủ\s*đức|quận|q\.)")
+    }
+
+    static _LooksLikeBuildingScale(text, digits) {
+        n := Trim(digits)
+        if n = ""
+            return false
+        if RegExMatch(text, "i)(?:quy mô|tòa nhà|toa nha|cho thuê nhà).{0,40}" n "\s*phòng")
+            return true
+        return RegExMatch(text, "i)" n "\s*phòng")
+            && RegExMatch(text, "i)(?:tòa nhà|toa nha|chdv|quy mô|mặt bằng)")
+    }
+
     ; Reject price strings; prefer labeled codes; prefix P for numeric rooms (P102).
     static LooksLikePrice(value) {
         v := Trim(value)
@@ -664,19 +894,34 @@ class ListingParser {
             raw := ""
 
         if raw = "" && text != "" {
-            if RegExMatch(text, "i)(?:🔑\s*)?(?:Mã phòng|Số phòng|Phòng số|Mã)\s*[:\-–]\s*(\S+)", &found)
+            if RegExMatch(text,
+                "i)(?:🔑\s*)?(?:Mã phòng|Số phòng|Phòng số|Mã)\s*[:\-–\s]\s*"
+                . "([A-Za-z]{1,3}\d{1,4}[A-Za-z]?|\d{2,4})", &found)
                 raw := Trim(found[1])
             else if RegExMatch(text, "i)(?:mã|ma)\s+(\d{2,4})\b", &found)
                 raw := found[1]
-            else if RegExMatch(text, "i)\bP(\d{2,4})\b", &found)
-                raw := "P" found[1]
             else if RegExMatch(text, "i)(?:phòng|room)\s+(\d{2,4})\b", &found)
+                && !ListingParser._LooksLikeBuildingScale(text, found[1])
                 raw := found[1]
+            else if RegExMatch(text, "i)\bP(\d{2,4})\b", &found)
+                && !ListingParser._LooksLikeWardCode(text, found[1])
+                && !ListingParser._LooksLikeBuildingScale(text, found[1])
+            {
+                raw := "P" found[1]
+            }
             else if RegExMatch(text, "i)trống\s+mã\s+(\d{2,4})\b", &found)
                 raw := found[1]
+            else if (simpleCode := ListingParser._SimpleRoomCodeFromText(text)) != ""
+                raw := simpleCode
         }
 
         if raw != "" && ListingParser.LooksLikePrice(raw)
+            raw := ""
+        if raw != "" && !RegExMatch(raw, "\d")
+            raw := ""
+        if raw != "" && RegExMatch(raw, "i)^P?(\d{1,4})$", &found)
+            && (ListingParser._LooksLikeWardCode(text, found[1])
+                || ListingParser._LooksLikeBuildingScale(text, found[1]))
             raw := ""
 
         if raw = "" {
@@ -700,9 +945,9 @@ class ListingParser {
 
     static _StripLinePrefix(line) {
         stripped := Trim(line)
-        stripped := RegExReplace(stripped, "i)^\s*(?:👉|•|➖|[-–—*]\s*)+")
+        stripped := RegExReplace(stripped, "i)^\s*(?:👉|▶️|•|➖|[-–—*]\s*)+")
         stripped := RegExReplace(stripped,
-            "i)^\s*(?:🌈|🌹+|🚩|💎|🚥|👇|💸|✅|💥|⚡|🏡|📞|☎️?|☎|🔥+)+")
+            "i)^\s*(?:🌈|🌹+|🚩|💎|🚥|👇|💸|✅|💥|⚡|🏡|📞|☎️?|☎|🔥+|📣|📢|🍀|🔸)+")
         return Trim(stripped)
     }
 
@@ -710,11 +955,17 @@ class ListingParser {
     static _InferFields(listing) {
         text := listing["raw_text"]
 
-        if listing["price"] != "" && RegExMatch(listing["price"], "^\d{1,2}\.\d{3}\.\d{3}$")
-            listing["price"] := ListingParser._NormalizeDotPrice(listing["price"])
+        if listing["price"] != "" {
+            if RegExMatch(listing["price"], "i)@|\d{1,2}\.\d{3}\.\d{3}")
+                listing["price"] := ListingParser._NormalizeLoosePrice(listing["price"])
+        }
 
         if listing["price"] = "" {
-            if RegExMatch(text, "i)(?:giá\s*)?(\d+\s*tr\s*\d|\d+tr\d)", &found)
+            if RegExMatch(text, "i)(\d+[.,]?\d*)\s*@\s*(?:tr|triệu)\b", &found)
+                listing["price"] := ListingParser._NormalizeLoosePrice(found[1] "tr")
+            else if RegExMatch(text, "i)(?:giá|gia|cost)\s*[:\-–]?\s*(\d+[.,]?\d*)\s*@?\s*(?:tr|triệu)\b", &found)
+                listing["price"] := ListingParser._NormalizeLoosePrice(found[1] "tr")
+            else if RegExMatch(text, "i)(?:giá\s*)?(\d+\s*tr\s*\d|\d+tr\d)", &found)
                 listing["price"] := Trim(found[1])
             else if RegExMatch(text, "i)(?:👉\s*)?(\d+tr\d|\d+\s*tr\s*\d)", &found)
                 listing["price"] := Trim(found[1])
@@ -723,24 +974,55 @@ class ListingParser {
             else if RegExMatch(text, "i)(\d+[\.,]?\d*)\s*(tr|triệu|k| củ)(?:\s*/\s*th(?:áng|ang)?)?", &found)
                 listing["price"] := Trim(found[0])
             else if RegExMatch(text, "i)giá\s*[:\-–]?\s*([^\n\r]{2,40})", &found)
-                listing["price"] := Trim(found[1])
+                listing["price"] := ListingParser._NormalizeLoosePrice(found[1])
         }
 
         if listing["room_code"] = "" {
-            if RegExMatch(text, "i)(?:mã|ma)\s+([A-Za-z]\d{0,3}|\d{2,4})", &found)
+            if RegExMatch(text,
+                "i)(?:mã|ma)\s*[:\-–\s]\s*([A-Za-z]{1,3}\d{1,4}[A-Za-z]?|\d{2,4})", &found)
                 listing["room_code"] := found[1]
-            else if RegExMatch(text, "i)(?:mã|ma)\s+(\d{2,4})", &found)
+            else if RegExMatch(text, "i)(?:phòng|room)\s+(\d{2,4})\b", &found)
+                && !ListingParser._LooksLikeBuildingScale(text, found[1])
                 listing["room_code"] := found[1]
             else if RegExMatch(text, "i)\bP(\d{2,4})\b", &found)
+                && !ListingParser._LooksLikeWardCode(text, found[1])
+                && !ListingParser._LooksLikeBuildingScale(text, found[1])
+            {
                 listing["room_code"] := "P" found[1]
-            else if RegExMatch(text, "i)phòng\s+(\d{2,4})", &found)
-                listing["room_code"] := found[1]
-            else if RegExMatch(text, "i)(?:phòng|room|pn|p)\s*[:\-#]?\s*([A-Za-z0-9.\-]{2,12})", &found)
-                listing["room_code"] := Trim(found[1])
+            }
+            else if (simpleCode := ListingParser._SimpleRoomCodeFromText(text)) != ""
+                listing["room_code"] := simpleCode
         }
 
         if listing["address"] = "" {
-            if RegExMatch(text, "i)(?:tại|tai)\s+(\d[^\n]{5,100})", &found) {
+            if RegExMatch(text,
+                "im)^(\d{1,5}(?:\/\d+){0,3}\s+[^\n]{3,50}?)\s+[Mm][aãáàảạ]\s+\S+",
+                &found)
+            {
+                candidate := Trim(found[1])
+                candidate := Trim(RegExReplace(candidate, "i)^\s*(?:cập nhật\s+)?dự án\s+", ""))
+                if StrLen(candidate) >= 6
+                    && !RegExMatch(candidate, "i)^\d{1,2}/\d{1,2}\s+trống")
+                    listing["address"] := candidate
+            }
+            if listing["address"] = "" {
+                for line in StrSplit(text, "`n") {
+                    stripped := Trim(ListingParser._StripLinePrefix(line))
+                    if RegExMatch(stripped,
+                        "i)^(\d{1,5}(?:\/\d+){0,3}\s+.+?)\s+m[aãáàảạ]\s+\S+",
+                        &found)
+                    {
+                        candidate := Trim(found[1])
+                        if StrLen(candidate) >= 6
+                            && !RegExMatch(candidate, "i)trống")
+                        {
+                            listing["address"] := candidate
+                            break
+                        }
+                    }
+                }
+            }
+            if listing["address"] = "" && RegExMatch(text, "i)(?:tại|tai)\s+(\d[^\n]{5,100})", &found) {
                 addr := Trim(found[1])
                 addr := RegExReplace(addr, "i)\s*(?:giá|sđt|lh|điện|nước|full|,?\s*có\s).*$")
                 addr := Trim(addr, " .,;|-")
@@ -784,6 +1066,20 @@ class ListingParser {
                         &_) {
                         candidate := line
                         score := 4
+                    } else if RegExMatch(line, "i)(?:cập nhật\s+)?dự án\s+(\d{1,5}(?:\/\d+){0,3}\s+[A-Za-zÀ-ỹ].+)", &found) {
+                        candidate := Trim(found[1])
+                        score := 4
+                    } else if RegExMatch(line,
+                        "i)^(\d{1,5}(?:\/\d+){0,3}\s+[A-Za-zÀ-ỹ][A-Za-zÀ-ỹ\s\/\.\-]{2,50})",
+                        &found)
+                        && !RegExMatch(line, "i)^\d{1,2}/\d{1,2}\s+trống")
+                        && !RegExMatch(line, "i)^\d+[.,]?\d*\s*(?:tr|k|triệu)")
+                    {
+                        candidate := Trim(RegExReplace(found[1], "i)\s+[Mm]ã\s+\S+.*$"))
+                        candidate := Trim(RegExReplace(candidate,
+                            "i)\s*(?:giá|điện|nước|phí dv|pdv).*$"))
+                        if StrLen(candidate) >= 6
+                            score := 3
                     } else if RegExMatch(line, "i).+\s+(?:q\.?\s*\d+|quận\s*\d+|phường\s+\w+)", &found) && StrLen(line) >= 10 {
                         candidate := line
                         score := 2
@@ -800,6 +1096,7 @@ class ListingParser {
                     listing["address"] := best
             }
         }
+        ListingParser._AppendDistrictToAddress(listing)
 
         if listing["owner_phone"] = ""
             listing["owner_phone"] := ListingParser.ExtractPhone(text)
@@ -811,8 +1108,8 @@ class ListingParser {
             for line in StrSplit(text, "`n") {
                 line := Trim(ListingParser._StripLinePrefix(line))
                 if RegExMatch(line,
-                    "i)(?:duplex|studio|full nội thất|full nt|bancong|ban công|diện tích|m2|m²|"
-                    . "wc riêng|thang máy|trống sẵn|\d+\s*pn)", &found) {
+                    "i)(?:duplex|studio|full nội thất|full nt|bancong|ban công|bancol|diện tích|m2|m²|"
+                    . "wc riêng|thang máy|khoá từ|khóa từ|trống sẵn|\d+\s*pn|máy giặt riêng|quy mô)", &found) {
                     listing["info"] := line
                     break
                 }
@@ -839,7 +1136,7 @@ class ListingParser {
             listing["extra_info"] := avail
     }
 
-    ; 8.200.000 → 8tr2 (VN dot-separated VND)
+    ; 8.200.000 → 8tr2 (VN dot-separated VND). 8.6@ tr → 8.6tr
     static _NormalizeDotPrice(value) {
         v := Trim(value)
         if RegExMatch(v, "^(\d{1,2})\.(\d{3})\.(\d{3})$", &m) {
@@ -850,6 +1147,48 @@ class ListingParser {
             return whole "tr" sub
         }
         return v
+    }
+
+    static _NormalizeLoosePrice(value) {
+        v := Trim(value)
+        if v = ""
+            return ""
+        v := ListingParser._StripPromotionalText(v)
+        if RegExMatch(v, "(\d{1,2}\.\d{3}\.\d{3})", &found)
+            return ListingParser._NormalizeDotPrice(found[1])
+        if RegExMatch(v, "i)(\d+[.,]?\d*)\s*@\s*(?:tr|triệu)\b", &found)
+            return StrReplace(found[1], ",", ".") "tr"
+        if RegExMatch(v, "i)^(\d+[.,]?\d*)\s*(tr|triệu)\b", &found)
+            return found[1] "tr"
+        if RegExMatch(v, "i)^(\d+[.,]?\d*\s*@?\s*tr\d*)", &found) {
+            token := Trim(RegExReplace(found[1], "\s*@", ""))
+            token := RegExReplace(token, "\s+", "")
+            return token
+        }
+        v := Trim(RegExReplace(v, "i)\s*\([^)]*trống[^)]*\)", ""))
+        v := Trim(RegExReplace(v, "i)(?:sales?\s+sập\s+sàn|thưởng\s*nóng.*|hoa hồng.*)$", ""))
+        return Trim(v, " |,;.")
+    }
+
+    static _AppendDistrictToAddress(listing) {
+        addr := listing.Has("address") ? Trim(listing["address"]) : ""
+        if addr = ""
+            return
+        if RegExMatch(addr, "i)tân bình|tân phú|gò vấp|bình thạnh|phú nhuận|thủ đức|quận|phường")
+            return
+        text := listing.Has("raw_text") ? listing["raw_text"] : ""
+        if text = ""
+            return
+        district := ""
+        if RegExMatch(text,
+            "i)(p\d{1,2}\s+(?:tân bình|tân phú|bình thạnh|gò vấp|phú nhuận|thủ đức|bình tân))",
+            &found)
+            district := Trim(found[1])
+        else if RegExMatch(text, "i)\b(tân bình|tân phú|bình thạnh|gò vấp|phú nhuận)\b", &found)
+            district := found[1]
+        if district = "" || InStr(addr, district)
+            return
+        listing["address"] := addr ", " district
     }
 
     ; Normalize to 10-digit 0xxxxxxxxx (accepts +84 / 84 / separators).
@@ -1055,31 +1394,119 @@ class ListingParser {
             if listing.Has(key) && listing[key] != ""
                 hay .= " " listing[key]
         }
-        if RegExMatch(hay, "i)\b(studio|1\s*pn|2\s*pn|3\s*pn|duplex|mezzanine|ban\s*công|phòng\s*trọ|căn\s*hộ|chdv)\b", &m)
+        if RegExMatch(hay, "i)tòa nhà|toa nha|cho thuê nhà")
+            return "tòa nhà"
+        if RegExMatch(hay, "i)\bchdv\b")
+            return "CHDV"
+        if RegExMatch(hay, "i)\b(studio|1\s*pn|2\s*pn|3\s*pn|duplex|mezzanine|phòng\s*trọ|căn\s*hộ)\b", &m)
             return Trim(RegExReplace(m[0], "\s+", " "))
         return "-"
     }
 
+    static _NormalizeAmenityPhrase(piece) {
+        result := Trim(piece)
+        result := RegExReplace(result, "i)\bbancol\b", "ban công")
+        result := RegExReplace(result, "i)\bbancong\b", "ban công")
+        return Trim(RegExReplace(result, "\s{2,}", " "))
+    }
+
+    static _CompactRoomInfoPiece(piece) {
+        text := Trim(piece)
+        if StrLen(text) <= 70
+            return ListingParser._NormalizeAmenityPhrase(text)
+        hits := []
+        patterns := [
+            "i)sát sân bay",
+            "i)nhà mới(?:\s+dạng)?",
+            "i)\d+\s*pn",
+            "i)bancol|ban\s*công|bancong",
+            "i)full nội thất|full nt",
+            "i)máy giặt(?:\s+riêng)?",
+            "i)khoá từ|khóa từ|cửa khoá từ",
+            "i)trống sẵn|\d{1,2}/\d{1,2}\s+trống",
+            "i)thang máy|thang bộ",
+            "i)quy mô\s*[:\-–]?\s*\d+\s*phòng",
+            "i)\d+\s*phòng(?:\s*\+\s*1\s*mặt bằng)?",
+            "i)cọc\s*[:\-–]?\s*\d[\d.\-–/]*",
+            "i)pccc",
+            "i)gác cao|có gác"
+        ]
+        for pattern in patterns {
+            if RegExMatch(text, pattern, &found) {
+                frag := ListingParser._NormalizeAmenityPhrase(Trim(found[0]))
+                if frag != "" && !ListingParser._ArrayHasNormalized(hits, frag)
+                    hits.Push(frag)
+            }
+        }
+        if hits.Length
+            return StrJoin(hits, " | ")
+        return ListingParser._NormalizeAmenityPhrase(text)
+    }
+
+    static _StripExtractedFieldClauses(piece, listing) {
+        result := piece
+        if listing.Has("electric_price") && Trim(listing["electric_price"]) != ""
+            result := RegExReplace(result,
+                "i)(?:,\s*)?(?:▶️|⚡)?\s*(?:giá\s*)?điện\s*:?\s*[\d][\w./]*", "")
+        if listing.Has("water_price") && Trim(listing["water_price"]) != ""
+            result := RegExReplace(result,
+                "i)(?:,\s*)?(?:▶️|💧|🈁)?\s*(?:giá\s*)?nước\s*:?\s*[\d][\w./]*(?:\s*/\s*\d*\s*(?:người|ng))?", "")
+        if listing.Has("service_price") && Trim(listing["service_price"]) != ""
+            result := RegExReplace(result,
+                "i)(?:,\s*)?(?:▶️|🧾)?\s*(?:phí\s*)?(?:dịch vụ|pdv|dv)\s*:?\s*[\d][\w./]*", "")
+        if listing.Has("price") && Trim(listing["price"]) != ""
+            result := RegExReplace(result,
+                "i)(?:,\s*)?(?:💰)?\s*(?:giá(?:\s*thuê|\s*phòng)?)\s*:?\s*\d[\w.@\s]*tr\w*", "")
+        if listing.Has("room_code") && Trim(listing["room_code"]) != ""
+            result := RegExReplace(result, "i)(?:mã(?:\s*phòng)?)\s*:?\s*[A-Za-z]{0,3}\d{2,4}[A-Za-z]?", "")
+        result := RegExReplace(result, "i)(?:hh|hoa hồng)\s*:?\s*[\d.\-–/]+\s*%?", "")
+        result := Trim(RegExReplace(result, "\s{2,}", " "), " |,;")
+        return result
+    }
+
     static _RoomInfoLabel(listing) {
         parts := []
+        addr := ""
         if listing.Has("address") && Trim(listing["address"]) != "" {
             addr := ListingParser._StripPromotionalText(listing["address"])
             addr := Trim(RegExReplace(NormalizeNewlines(addr), "\s+", " "))
             if addr != "" && !ListingParser._IsPromoPart(addr)
                 parts.Push(addr)
         }
-        if listing.Has("info") && Trim(listing["info"]) != "" {
-            info := ListingParser._StripPromotionalText(listing["info"])
-            info := Trim(RegExReplace(NormalizeNewlines(info), "\s+", " "))
-            if info != "" && !ListingParser._IsPromoPart(info)
-                parts.Push(info)
-        }
-        if listing.Has("extra_info") && Trim(listing["extra_info"]) != "" {
-            for part in StrSplit(listing["extra_info"], " | ") {
+        rawParts := []
+        if listing.Has("info") && Trim(listing["info"]) != ""
+            rawParts.Push(listing["info"])
+        if listing.Has("extra_info") && Trim(listing["extra_info"]) != ""
+            rawParts.Push(listing["extra_info"])
+        for blob in rawParts {
+            for part in ListingParser._SplitInfoParts(blob) {
                 piece := Trim(ListingParser._StripPromotionalText(part))
                 piece := Trim(RegExReplace(NormalizeNewlines(piece), "\s+", " "))
-                if piece != "" && ListingParser._IsRoomInfoPart(piece)
-                    parts.Push(piece)
+                piece := ListingParser._StripExtractedFieldClauses(piece, listing)
+                piece := ListingParser._CompactRoomInfoPiece(piece)
+                if piece = ""
+                    continue
+                for sub in ListingParser._SplitInfoParts(piece) {
+                    sub := Trim(ListingParser._NormalizeAmenityPhrase(sub))
+                    if sub = ""
+                        continue
+                    if ListingParser._IsPromoPart(sub)
+                        continue
+                    if ListingParser._IsUtilityPricePart(sub)
+                        continue
+                    if ListingParser._IsLabeledFieldPart(sub)
+                        continue
+                    if addr != "" && (sub = addr || InStr(sub, addr) || InStr(addr, sub))
+                        continue
+                    if listing.Has("price") && Trim(listing["price"]) != ""
+                        && (sub = Trim(listing["price"]) || InStr(sub, Trim(listing["price"])))
+                        continue
+                    if !ListingParser._IsRoomInfoPart(sub)
+                        continue
+                    if ListingParser._ArrayHasNormalized(parts, sub)
+                        continue
+                    parts.Push(sub)
+                }
             }
         }
         if parts.Length

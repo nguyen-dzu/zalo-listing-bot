@@ -121,6 +121,7 @@ class ListingRepository {
             "extra_info", listing["extra_info"],
             "image_count", listing["image_count"],
             "image_urls", listing.Has("image_urls") ? listing["image_urls"] : [],
+            "video_urls", listing.Has("video_urls") ? listing["video_urls"] : [],
             "image_groups", listing.Has("image_groups") ? listing["image_groups"] : [],
             "message_hash", listing.Has("message_hash") ? listing["message_hash"] : "",
             "forward_eligible", listing.Has("forward_eligible")

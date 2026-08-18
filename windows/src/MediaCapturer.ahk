@@ -104,34 +104,30 @@ class ListingMediaCapturer {
         Loop maxRetries + 1 {
             try {
                 limit := imageCount > 0
-                    ? imageCount : this.config.AutoCaptureProbeMaxImages
-                allowHeuristic := imageCount > 0
-                    || this.config.AutoCaptureProbeImages
+                    ? Max(imageCount, this.config.AutoCaptureProbeMaxImages)
+                    : this.config.AutoCaptureProbeMaxImages
                 locations := ListingMediaCapturer.BuildLocationsFromRecord(
-                    record, limit)
-                if !locations.Length {
+                    record, imageCount > 0 ? imageCount : limit)
+                if !locations.Length && messageHash != "" {
                     currentGroup := this.ui.HasProp("currentGroup")
                         ? this.ui.currentGroup : ""
                     if currentGroup = ""
                         || !this.ui._GroupNamesMatch(currentGroup, groupName)
                         this.ui.OpenGroup(groupName, "read")
-                }
-                if !locations.Length && messageHash != "" {
                     locations := this.ui.FindImageBubblesNearMessage(
-                        anchor, limit, allowHeuristic, messageHash)
+                        anchor, limit, false, messageHash)
                 }
-                if !locations.Length
-                    locations := this.ui.FindImageBubblesNearMessage(
-                        anchor, limit, allowHeuristic, messageHash)
                 if !locations.Length {
                     if imageCount > 0
-                        throw Error("Không tìm thấy ảnh gần listing.")
+                        throw Error("Không tìm thấy ảnh lưới của listing.")
+                    this._CaptureVideos(groupName, record)
                     return true
                 }
                 captured := this._ArchiveLocations(
                     groupName, record, anchor, locations)
                 if captured > 0 && imageCount <= 0
                     record["image_count"] := captured
+                this._CaptureVideos(groupName, record)
                 this._Log("auto_capture_ok group=" groupName
                     " id=" record["id"]
                     " room=" (record.Has("room_code") ? record["room_code"] : "")
@@ -233,6 +229,48 @@ class ListingMediaCapturer {
         if !files.Length
             throw Error("Manifest hợp lệ nhưng không có archive media.")
         this.queue.AttachMedia(id, files, this.media.MetadataFor(id))
+        return captured
+    }
+
+    _CaptureVideos(groupName, record) {
+        urls := []
+        if record.Has("video_urls") && record["video_urls"] is Array {
+            for url in record["video_urls"] {
+                value := Trim(String(url))
+                if value = "" || RegExMatch(value, "i)^blob:")
+                    continue
+                urls.Push(value)
+            }
+        }
+        if !urls.Length
+            return 0
+        captured := 0
+        for url in urls {
+            try {
+                prepared := this.media.PrepareArchive(record["id"], true, "clip", "video")
+                try {
+                    if this.ui.CopyVideoAt(Map("url", url)) {
+                        this.ui.SaveClipboardArchive(prepared["temp_path"])
+                    } else
+                        throw Error("Không copy được video.")
+                    this.media.CommitGeneration(prepared)
+                    captured++
+                } catch as err {
+                    this.media.AbortGeneration(prepared)
+                    throw err
+                }
+            } catch as err {
+                this._Log("video_skip group=" groupName
+                    " id=" record["id"] " error=" err.Message)
+                break
+            }
+        }
+        if captured > 0 {
+            files := this.media.RelativePaths(record["id"])
+            if files.Length
+                this.queue.AttachMedia(
+                    record["id"], files, this.media.MetadataFor(record["id"]))
+        }
         return captured
     }
 

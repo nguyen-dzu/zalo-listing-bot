@@ -46,11 +46,6 @@ class MessageHarvester {
                 ; OpenGroup miss / wrong chat → skip this group, try the next.
                 summary["errors"].Push(
                     "skip " group["group_name"] ": " err.Message)
-                ; #region agent log
-                AgentDbg("H3", "Harvester.ahk:HarvestGroups", "group_error",
-                    '{"group":"' StrReplace(group["group_name"], '"', '\"')
-                    '","error":"' StrReplace(StrReplace(err.Message, "`n", " "), '"', '\"') '"}')
-                ; #endregion
             }
             if this.config.HarvestSaveStateEachGroup
                 this.state.Save()
@@ -155,21 +150,19 @@ class MessageHarvester {
         Sleep settle
         ; Badge "1" and the old first-cycle unread_count=1 must not shrink the
         ; DOM scan to a single bubble — that drops listings and nearby photos.
-        origUnread := unreadLimit
         if unreadLimit <= 1
             unreadLimit := 0
-        effectiveLimit := unreadLimit > 0
-            ? Min(this.config.MaxMessagesPerGroup, unreadLimit)
-            : this.config.MaxMessagesPerGroup
-        scanLimit := this.config.HasProp("MaxScanMessages")
-            ? this.config.MaxScanMessages
-            : effectiveLimit
-        if unreadLimit > scanLimit
-            scanLimit := Min(unreadLimit, this.config.MaxMessagesPerGroup)
+        ; Collect unread→newest bubbles (photos + text), then filter/pair.
+        ; Do not cap the DOM window at MaxScanMessages=10 — that drops listings.
+        effectiveLimit := this.config.MaxMessagesPerGroup
+        scanLimit := effectiveLimit
+        if this.config.HasProp("MaxScanMessages")
+            scanLimit := Max(scanLimit, this.config.MaxScanMessages)
+        if unreadLimit > 0
+            scanLimit := Max(scanLimit, Min(unreadLimit, this.config.MaxMessagesPerGroup))
         capture := this.ui.CaptureConversation("", scanLimit)
         text := capture.Has("text") ? capture["text"] : ""
         msgCount := capture.Has("messages") ? capture["messages"].Length : 0
-        imageTotal := capture.Has("image_total") ? capture["image_total"] : 0
         normalized := NormalizeNewlines(text)
 
         candidates := this._BuildCandidates(capture)
@@ -182,23 +175,17 @@ class MessageHarvester {
             if candidateByHash.Has(hash) {
                 candidateByHash[hash]["images"] := this._MergeUrls(
                     candidateByHash[hash]["images"], candidate["images"])
+                leftVideos := candidateByHash[hash].Has("videos")
+                    ? candidateByHash[hash]["videos"] : []
+                rightVideos := candidate.Has("videos") ? candidate["videos"] : []
+                candidateByHash[hash]["videos"] := this._MergeUrls(
+                    leftVideos, rightVideos)
             } else
                 candidateByHash[hash] := candidate
         }
         this._Log("harvest_scan group=" groupName
             " messages=" msgCount
             " candidates=" blocks.Length)
-        ; #region agent log
-        AgentDbg("H6", "Harvester.ahk:HarvestGroup", "scan",
-            '{"group":"' StrReplace(groupName, '"', '\"')
-            '","messages":' msgCount
-            ',"candidates":' blocks.Length
-            ',"scanLimit":' scanLimit
-            ',"origUnread":' origUnread
-            ',"unreadLimit":' unreadLimit
-            ',"imageTotal":' imageTotal
-            ',"emptyText":' (Trim(normalized) = "" ? 1 : 0) "}")
-        ; #endregion
         if Trim(normalized) = ""
             return result
 
@@ -206,11 +193,6 @@ class MessageHarvester {
         previousHash := this.state.GetCaptureHash(groupName)
         ; Conversation unchanged → already-read messages; skip re-copy/re-parse.
         if previousHash != "" && previousHash = captureHash {
-            ; #region agent log
-            AgentDbg("H6", "Harvester.ahk:HarvestGroup", "hash_skip",
-                '{"group":"' StrReplace(groupName, '"', '\"')
-                '","messages":' msgCount "}")
-            ; #endregion
             this.state.MarkNeedsRevisit(groupName, false)
             this.state.TouchHarvest(groupName)
             return result
@@ -225,9 +207,6 @@ class MessageHarvester {
             effectiveLimit)
         if pick["stopped_on_seen"]
             result["duplicate"]++
-        ; #region agent log
-        this._DebugClassify(groupName, capture, blocks, pick)
-        ; #endregion
 
         for item in pick["items"] {
             block := item["block"]
@@ -237,6 +216,7 @@ class MessageHarvester {
 
             listing := ListingParser.Parse(block, this.config.ImageMarkerPattern)
             listing["image_urls"] := candidate["images"]
+            listing["video_urls"] := candidate.Has("videos") ? candidate["videos"] : []
             listing["image_count"] := candidate["images"].Length
             listing["image_groups"] := []
             if candidate.Has("message_hash")
@@ -273,32 +253,12 @@ class MessageHarvester {
         }
 
         this.state.TouchHarvest(groupName)
-        ; #region agent log
-        AgentDbg("H7", "Harvester.ahk:HarvestGroup", "result_filter",
-            '{"group":"' StrReplace(groupName, '"', '\"')
-            '","saved":' result["saved"]
-            ',"blocked":' result["blocked"]
-            ',"invalid":' result["invalid"]
-            ',"duplicate":' result["duplicate"]
-            ',"picked":' pick["items"].Length
-            ',"stoppedOnSeen":' (pick["stopped_on_seen"] ? 1 : 0) "}")
-        ; #endregion
         this._Log("harvest_result group=" groupName
             " saved=" result["saved"]
             " blocked=" result["blocked"]
             " invalid=" result["invalid"]
             " media_ok=" result["media_captured"]
             " media_fail=" result["media_failed"])
-        ; #region agent log
-        AgentDbg("H6", "Harvester.ahk:HarvestGroup", "result",
-            '{"group":"' StrReplace(groupName, '"', '\"')
-            '","saved":' result["saved"]
-            ',"blocked":' result["blocked"]
-            ',"invalid":' result["invalid"]
-            ',"duplicate":' result["duplicate"]
-            ',"mediaOk":' result["media_captured"]
-            ',"mediaFail":' result["media_failed"] "}")
-        ; #endregion
         return result
     }
 
@@ -308,71 +268,8 @@ class MessageHarvester {
         if k != "@all" && k != "tìm phòng" && k != "cần thuê"
             return false
         return ListingParser.QualifiesAsRentalListing(listing)
+            || ListingParser._IsPhotoRoomCaption(listing)
     }
-
-    ; #region agent log
-    _DebugClassify(groupName, capture, blocks, pick) {
-        messages := capture.Has("messages") && capture["messages"] is Array
-            ? capture["messages"] : []
-        picked := Map()
-        for item in pick["items"]
-            picked[item["hash"]] := true
-        lookY := 0
-        lookN := 0
-        qualY := 0
-        blkN := 0
-        softY := 0
-        rows := ""
-        n := 0
-        for message in messages {
-            if !(message is Map)
-                continue
-            text := message.Has("text")
-                ? Trim(NormalizeNewlines(message["text"])) : ""
-            if text = ""
-                continue
-            looks := ListingParser.LooksLikeListing(text)
-            listing := ListingParser.Parse(text, this.config.ImageMarkerPattern)
-            core := ListingParser._CountRentalCoreSignals(listing)
-            qualifies := ListingParser.QualifiesAsRentalListing(listing)
-            keyword := this.blockList.Match(text)
-            if looks
-                lookY++
-            else
-                lookN++
-            if qualifies
-                qualY++
-            if keyword != "" {
-                blkN++
-                if this._SoftBlockOverride(keyword, listing)
-                    softY++
-            }
-            n++
-            if n > 8
-                continue
-            first := Trim(StrSplit(text, "`n")[1])
-            head := SubStr(RegExReplace(first, "\d", "#"), 1, 24)
-            head := StrReplace(StrReplace(head, "\", "/"), '"', "'")
-            kw := keyword != "" ? StrReplace(keyword, '"', "'") : "-"
-            piece := "look=" (looks ? 1 : 0) " qual=" (qualifies ? 1 : 0) " core=" core " blk=" kw " head=" head
-            if rows = ""
-                rows := piece
-            else
-                rows := rows " / " piece
-        }
-        AgentDbg("H7", "Harvester.ahk:_DebugClassify", "text_filter",
-            '{"group":"' StrReplace(groupName, '"', "'")
-            '","lookY":' lookY
-            ',"lookN":' lookN
-            ',"qualY":' qualY
-            ',"blkN":' blkN
-            ',"softY":' softY
-            ',"candN":' blocks.Length
-            ',"pickN":' pick["items"].Length
-            ',"stopped":' (pick["stopped_on_seen"] ? 1 : 0)
-            ',"rows":"' StrReplace(rows, "`n", " ") '"}')
-    }
-    ; #endregion
 
     _BuildCandidates(capture) {
         result := []
@@ -383,7 +280,7 @@ class MessageHarvester {
             for block in ListingParser.SplitBlocks(
                 text, this.config.ListingStartPattern,
                 this.config.ImageMarkerPattern)
-                result.Push(Map("text", block, "images", []))
+                result.Push(Map("text", block, "images", [], "videos", []))
             return result
         }
 
@@ -395,9 +292,12 @@ class MessageHarvester {
                 continue
             images := message.Has("images") && message["images"] is Array
                 ? message["images"] : []
+            videos := message.Has("videos") && message["videos"] is Array
+                ? message["videos"] : []
             parts := ListingParser.SplitBlocks(
                 text, this.config.ListingStartPattern,
                 this.config.ImageMarkerPattern)
+            parts := this._CoalesceMessageParts(text, parts)
             ; The web bridge already gives us one Zalo message at a time.
             ; Real listings often begin with a project name or an emoji not
             ; covered by the split-anchor regex. Keep that message boundary as
@@ -417,6 +317,7 @@ class MessageHarvester {
                 result.Push(Map(
                     "text", part,
                     "images", this._MergeUrls([], partImages),
+                    "videos", index = 1 ? videos : [],
                     "message_hash", message.Has("hash") ? message["hash"] : "",
                     "forward_eligible", shareForward
                         && partImages.Length > 0
@@ -424,6 +325,29 @@ class MessageHarvester {
             }
         }
         return result
+    }
+
+    ; One Zalo bubble is usually one listing. SplitBlocks is for pasted dumps
+    ; that contain several "Địa chỉ:/Giá:" rooms. Do not keep utility/CTA tails.
+    _CoalesceMessageParts(text, parts) {
+        if parts.Length <= 1 {
+            if !parts.Length && ListingParser.LooksLikeListing(text)
+                return [text]
+            return parts
+        }
+        strong := []
+        for part in parts {
+            listing := ListingParser.Parse(part)
+            price := listing.Has("price") ? Trim(listing["price"]) : ""
+            if ListingParser.QualifiesAsRentalListing(listing)
+                && RegExMatch(price, "i)tr|triệu|\d{1,2}\.\d{3}\.\d{3}")
+                strong.Push(part)
+        }
+        if strong.Length >= 2
+            return strong
+        if ListingParser.LooksLikeListing(text)
+            return [text]
+        return parts
     }
 
     _NormalizeImageGroups(message) {
@@ -622,7 +546,9 @@ class MessageHarvester {
                 text := message.Has("text") ? message["text"] : ""
                 images := message.Has("images") && message["images"] is Array
                     ? StrJoin(message["images"], "|") : ""
-                signatures.Push(text "|" images)
+                videos := message.Has("videos") && message["videos"] is Array
+                    ? StrJoin(message["videos"], "|") : ""
+                signatures.Push(text "|" images "|" videos)
             }
         }
         payload := signatures.Length
